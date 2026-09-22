@@ -19,7 +19,7 @@ jobs:
           - ubuntu-latest      # x86-64 Linux, native backend
           - ubuntu-24.04-arm   # arm64 Linux, native backend
           - macos-latest       # arm64 macOS, native backend
-          - macos-13           # x86-64 macOS, native backend
+          - macos-15-intel     # x86-64 macOS, native backend
           - windows-latest     # x86-64 Windows, interpreter only
     runs-on: ${{ matrix.os }}
     steps:
