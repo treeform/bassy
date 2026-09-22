@@ -55,6 +55,10 @@ proc assembled(lines: seq[string]): seq[seq[uint32]] =
   if start != words.len:
     quit("assembler produced more words than the encoder")
 
+if findExe("otool") == "" or findExe("clang") == "":
+  echo "skipping: needs clang and otool for the reference encoding"
+  quit(0)
+
 ## Moves and immediates
 
 encodes "mov w3, w7":

@@ -26,6 +26,10 @@ const
       defined(macosx) or defined(linux) or defined(windows)
     ):
       true
+    elif defined(amd64) and (defined(macosx) or defined(linux)):
+      # Windows x64 passes its first argument elsewhere and saves a
+      # different register set, so it stays on the interpreter for now.
+      true
     else:
       false
 

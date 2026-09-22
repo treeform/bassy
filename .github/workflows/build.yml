@@ -15,7 +15,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os:
+          - ubuntu-latest      # x86-64 Linux, native backend
+          - ubuntu-24.04-arm   # arm64 Linux, native backend
+          - macos-latest       # arm64 macOS, native backend
+          - macos-13           # x86-64 macOS, native backend
+          - windows-latest     # x86-64 Windows, interpreter only
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -46,6 +51,16 @@ jobs:
         run: nim r -d:fixedChecks tests/tests.nim
       - name: Test C++ determinism
         run: nim cpp -r -d:release tests/tests.nim
+      - name: Test the machine code encoders against the system assembler
+        run: |
+          nim r -d:release tests/test_arm64.nim
+          nim r -d:release tests/test_amd64.nim
+      - name: Test compiled loops against the interpreter
+        run: nim r -d:release tests/test_jit.nim
+      - name: Test the same scripts with the interpreter forced
+        run: nim r -d:release -d:bassyNoJit tests/test_jit.nim
+      - name: Report native compilation speedups
+        run: nim r -d:release tests/bench_jit.nim
       - name: Run examples
         run: |
           nim r examples/hello.nim

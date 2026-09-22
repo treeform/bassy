@@ -1,11 +1,14 @@
-## Compares interpreted and natively compiled execution of the same loops.
+## Reports how much faster compiled loops run than the interpreter.
+## Times its own runs so it can execute on any CI machine without pulling
+## in a benchmarking dependency.
 
 import
-  std/strformat,
-  benchy,
+  std/[monotimes, strformat, times],
   bassy
 
 const
+  Runs = 5
+
   ArithmeticSource = """
 i = 0
 total = 0
@@ -49,8 +52,19 @@ proc benchLimits(): Limits =
   result.maxInstructions = 100_000_000
   result.maxWorkUnits = 100_000_000
 
+proc fastest(runtime: var Runtime): float =
+  ## Returns the shortest of several runs, in milliseconds.
+  result = Inf
+  for run in 1 .. Runs:
+    runtime.restart()
+    let started = getMonoTime()
+    discard runtime.run()
+    let elapsed = (getMonoTime() - started).inNanoseconds.float / 1_000_000.0
+    if elapsed < result:
+      result = elapsed
+
 proc measure(name, source: string) =
-  ## Times one script on both paths and prints the result of each.
+  ## Times one script on both paths and reports the ratio.
   let limits = benchLimits()
   let program = compile(source, limits)
 
@@ -58,27 +72,27 @@ proc measure(name, source: string) =
   var fast = initRuntime(program, limits)
   let regions = fast.compileNative()
 
-  timeIt &"{name} interpreted", 5:
-    plain.restart()
-    discard plain.run()
+  let plainTime = plain.fastest()
+  let fastTime = fast.fastest()
 
-  timeIt &"{name} native ({regions} loops)", 5:
-    fast.restart()
-    discard fast.run()
-
-  plain.restart()
-  discard plain.run()
-  fast.restart()
-  discard fast.run()
   var agree = true
   for index in 0 ..< program.globals:
     if plain.globalValue(int32(index)).asInt !=
         fast.globalValue(int32(index)).asInt:
       agree = false
-  echo &"  results agree: {agree}, instructions charged: " &
-    &"{plain.instructionsUsed} vs {fast.instructionsUsed}"
+  let charged = plain.instructionsUsed == fast.instructionsUsed
 
-echo "native compilation available: ", jitSupported()
+  let ratio =
+    if fastTime > 0.0 and regions > 0: &"{plainTime / fastTime:6.1f}x"
+    else: "     --"
+  echo &"  {name:<12} interpreted {plainTime:8.3f} ms   " &
+    &"native {fastTime:8.3f} ms   {ratio}   " &
+    &"loops {regions}  results {agree}  budget {charged}"
+  if not agree or not charged:
+    quit("the two paths disagreed")
+
+echo &"native compilation available: {jitSupported()}"
+echo &"host: {hostCPU} {hostOS}"
 measure("arithmetic", ArithmeticSource)
 measure("branches", BranchSource)
 measure("nested", NestedSource)
