@@ -9,6 +9,11 @@ import
 const
   Runs = 5
 
+  # Pinned so every architecture must agree, not just the two paths.
+  ArithmeticResult = 1814293664'i32
+  BranchResult = 977000000'i32
+  NestedResult = 31962000'i32
+
   ArithmeticSource = """
 i = 0
 total = 0
@@ -63,8 +68,16 @@ proc fastest(runtime: var Runtime): float =
     if elapsed < result:
       result = elapsed
 
-proc measure(name, source: string) =
+proc checksum(runtime: Runtime, count: int): int32 =
+  ## Folds every global into one value, for comparing whole runs.
+  for index in 0 ..< count:
+    result = result *% 31'i32 +% runtime.globalValue(int32(index)).asInt
+
+proc measure(name, source: string, expected: int32) =
   ## Times one script on both paths and reports the ratio.
+  ## The expected value is pinned so CI proves that generated machine code
+  ## produces the same answers on every architecture, not merely the same
+  ## answers as the interpreter running beside it.
   let limits = benchLimits()
   let program = compile(source, limits)
 
@@ -75,11 +88,9 @@ proc measure(name, source: string) =
   let plainTime = plain.fastest()
   let fastTime = fast.fastest()
 
-  var agree = true
-  for index in 0 ..< program.globals:
-    if plain.globalValue(int32(index)).asInt !=
-        fast.globalValue(int32(index)).asInt:
-      agree = false
+  let plainSum = plain.checksum(program.globals)
+  let fastSum = fast.checksum(program.globals)
+  let agree = plainSum == fastSum
   let charged = plain.instructionsUsed == fast.instructionsUsed
 
   let ratio =
@@ -88,11 +99,16 @@ proc measure(name, source: string) =
   echo &"  {name:<12} interpreted {plainTime:8.3f} ms   " &
     &"native {fastTime:8.3f} ms   {ratio}   " &
     &"loops {regions}  results {agree}  budget {charged}"
-  if not agree or not charged:
-    quit("the two paths disagreed")
+  if not agree:
+    quit(&"{name}: interpreted {plainSum} but native {fastSum}")
+  if not charged:
+    quit(&"{name}: budgets differ")
+  if plainSum != expected:
+    quit(&"{name}: expected {expected} but both paths gave {plainSum}")
 
 echo &"native compilation available: {jitSupported()}"
 echo &"host: {hostCPU} {hostOS}"
-measure("arithmetic", ArithmeticSource)
-measure("branches", BranchSource)
-measure("nested", NestedSource)
+measure("arithmetic", ArithmeticSource, ArithmeticResult)
+measure("branches", BranchSource, BranchResult)
+measure("nested", NestedSource, NestedResult)
+echo "every result matched the value pinned for all architectures"
