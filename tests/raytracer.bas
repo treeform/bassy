@@ -31,7 +31,7 @@ planeKind = 0
 sphereKind = 1
 
 farAway = 200
-maxDepth = 3
+maxDepth = 5
 thingCount = 3
 lightCount = 4
 
@@ -65,6 +65,7 @@ end sub
 ' Writes a unit vector into normX, normY, normZ.
 sub normalize(vx, vy, vz)
   mag = sqr(vx * vx + vy * vy + vz * vz)
+  normMag = mag
   if mag = 0 then
     normX = 0
     normY = 0
@@ -92,35 +93,29 @@ end sub
 sub intersections(sx, sy, sz, dx, dy, dz)
   hitThing = -1
   hitDist = farAway
-  probe = 0
+  if dy < 0 then
+    floorDist = sy / (0 - dy)
+    if floorDist < hitDist then
+      hitThing = 0
+      hitDist = floorDist
+    end if
+  end if
+  probe = 1
   while probe < thingCount
-    candidate = -1
-    candidateDist = 0
-    if thingKind(probe) = sphereKind then
-      eox = thingAx(probe) - sx
-      eoy = thingAy(probe) - sy
-      eoz = thingAz(probe) - sz
-      v = eox * dx + eoy * dy + eoz * dz
-      if v >= 0 then
-        disc = thingExtra(probe) - (eox * eox + eoy * eoy + eoz * eoz - v * v)
-        if disc >= 0 then
-          candidateDist = v - sqr(disc)
-          if candidateDist <> 0 then
-            candidate = probe
+    eox = thingAx(probe) - sx
+    eoy = thingAy(probe) - sy
+    eoz = thingAz(probe) - sz
+    v = eox * dx + eoy * dy + eoz * dz
+    if v >= 0 then
+      disc = thingExtra(probe) - (eox * eox + eoy * eoy + eoz * eoz - v * v)
+      if disc >= 0 then
+        candidateDist = v - sqr(disc)
+        if candidateDist <> 0 then
+          if candidateDist < hitDist then
+            hitThing = probe
+            hitDist = candidateDist
           end if
         end if
-      end if
-    else
-      denom = thingAx(probe) * dx + thingAy(probe) * dy + thingAz(probe) * dz
-      if denom < 0 then
-        candidateDist = (thingAx(probe) * sx + thingAy(probe) * sy + thingAz(probe) * sz + thingExtra(probe)) / (0 - denom)
-        candidate = probe
-      end if
-    end if
-    if candidate >= 0 then
-      if candidateDist < hitDist then
-        hitThing = candidate
-        hitDist = candidateDist
       end if
     end if
     probe = probe + 1
@@ -138,7 +133,7 @@ sub surfaceAt(thing, px, py, pz)
     specularG = 0.5
     specularB = 0.5
     reflectance = 0.7
-    roughness = 6
+    roughness = 250
   else
     squares = floorOf(pz) + floorOf(px)
     if squares mod 2 <> 0 then
@@ -155,42 +150,40 @@ sub surfaceAt(thing, px, py, pz)
     specularR = 1
     specularG = 1
     specularB = 1
-    roughness = 5
+    roughness = 150
   end if
 end sub
 
 ' Adds one light's contribution to lightSumR/G/B.
-sub applyLight(slot, px, py, pz, nx, ny, nz, dx, dy, dz, shineR, shineG, shineB, gloss, power)
+sub applyLight(slot)
   ldx = lightX(slot) - px
   ldy = lightY(slot) - py
   ldz = lightZ(slot) - pz
   normalize(ldx, ldy, ldz)
-  livx = normX
-  livy = normY
-  livz = normZ
-  intersections(px, py, pz, livx, livy, livz)
-  if hitThing >= 0 then
-    if hitDist <= sqr(ldx * ldx + ldy * ldy + ldz * ldz) then
+  illum = normX * nx + normY * ny + normZ * nz
+  specular = normX * rdx + normY * rdy + normZ * rdz
+  if illum <= 0 then
+    if specular <= 0 then
       exit sub
     end if
   end if
-  illum = livx * nx + livy * ny + livz * nz
-  if illum > 0 then
-    lightSumR = lightSumR + illum * lightR(slot) * shineR
-    lightSumG = lightSumG + illum * lightG(slot) * shineG
-    lightSumB = lightSumB + illum * lightB(slot) * shineB
+  lightRange = normMag
+  intersections(px + normX * 0.002, py + normY * 0.002, pz + normZ * 0.002, normX, normY, normZ)
+  if hitThing >= 0 then
+    if hitDist <= lightRange then
+      exit sub
+    end if
   end if
-  specular = livx * dx + livy * dy + livz * dz
+  if illum > 0 then
+    lightSumR = lightSumR + illum * lightR(slot) * diffuseR
+    lightSumG = lightSumG + illum * lightG(slot) * diffuseG
+    lightSumB = lightSumB + illum * lightB(slot) * diffuseB
+  end if
   if specular > 0 then
-    falloff = specular
-    turn = 1
-    while turn < power
-      falloff = falloff * specular
-      turn = turn + 1
-    wend
-    lightSumR = lightSumR + falloff * lightR(slot) * gloss
-    lightSumG = lightSumG + falloff * lightG(slot) * gloss
-    lightSumB = lightSumB + falloff * lightB(slot) * gloss
+    falloff = powerOf(specular, roughness)
+    lightSumR = lightSumR + falloff * lightR(slot) * specularR
+    lightSumG = lightSumG + falloff * lightG(slot) * specularR
+    lightSumB = lightSumB + falloff * lightB(slot) * specularR
   end if
 end sub
 
@@ -228,19 +221,13 @@ sub shade(thing, dist, sx, sy, sz, dx, dy, dz, depth)
   rdy = dy - 2 * reflectDot * ny
   rdz = dz - 2 * reflectDot * nz
   surfaceAt(thing, px, py, pz)
-  keepDiffuseR = diffuseR
-  keepDiffuseG = diffuseG
-  keepDiffuseB = diffuseB
-  keepSpecular = specularR
-  keepReflect = reflectance
-  keepRoughness = roughness
 
   lightSumR = 0
   lightSumG = 0
   lightSumB = 0
   slot = 0
   while slot < lightCount
-    applyLight(slot, px, py, pz, nx, ny, nz, rdx, rdy, rdz, keepDiffuseR, keepDiffuseG, keepDiffuseB, keepSpecular, keepRoughness)
+    applyLight(slot)
     slot = slot + 1
   wend
 
@@ -250,7 +237,7 @@ sub shade(thing, dist, sx, sy, sz, dx, dy, dz, depth)
     colorB = lightSumB + 0.5
     exit sub
   end if
-  addReflection(lightSumR, lightSumG, lightSumB, keepReflect, px, py, pz, rdx, rdy, rdz, depth)
+  addReflection(lightSumR, lightSumG, lightSumB, reflectance, px, py, pz, rdx, rdy, rdz, depth)
 end sub
 
 ' Scene
@@ -288,8 +275,8 @@ py2 = 0
 while py2 < size
   px2 = 0
   while px2 < size
-    recenterX = (px2 - half) / half
-    recenterY = (half - py2) / half
+    recenterX = (px2 - half) / span
+    recenterY = (half - py2) / span
     rayX = forwardX + recenterX * rightX + recenterY * upX
     rayY = forwardY + recenterX * rightY + recenterY * upY
     rayZ = forwardZ + recenterX * rightZ + recenterY * upZ

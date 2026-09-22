@@ -19,16 +19,50 @@ var pixels: seq[byte]
 
 proc squareRoot(arguments: openArray[Value]): Value =
   ## Returns the fixed-point square root of a non-negative number.
+  ##
+  ## A Q16.16 number holds its value times 65536, so the root of those raw
+  ## bits shifted up by another 16 is exactly the root's own raw bits. The
+  ## digit-by-digit method below finds it with shifts and subtractions
+  ## alone, which is both faster and more predictable than iterating.
   let value = arguments[0].asFixed
   if value <= 0'fx:
     return toValue(0'fx)
-  # Newton's method, which settles well inside Q16.16 in a few rounds.
-  var estimate = value
-  if estimate < 1'fx:
-    estimate = 1'fx
-  for round in 1 .. 12:
-    estimate = (estimate + value / estimate) / 2'fx
-  toValue(estimate)
+  var
+    remainder = int64(int32(value)) shl 16
+    root = 0'i64
+    bit = 1'i64 shl 46
+  while bit > remainder:
+    bit = bit shr 2
+  while bit != 0:
+    if remainder >= root + bit:
+      remainder -= root + bit
+      root = (root shr 1) + bit
+    else:
+      root = root shr 1
+    bit = bit shr 2
+  toValue(Fixed(int32(root)))
+
+proc powerOf(arguments: openArray[Value]): Value =
+  ## Raises a fixed-point base to a whole exponent by repeated squaring.
+  ## The reference raytracer uses roughness values in the hundreds, which
+  ## a multiply loop in BASIC could not afford.
+  var
+    base = arguments[0].asFixed
+    exponent = arguments[1].asInt
+    total = 1'fx
+  if exponent <= 0:
+    return toValue(total)
+  while exponent > 0:
+    if (exponent and 1) != 0:
+      total = total * base
+    exponent = exponent shr 1
+    if exponent == 0:
+      break
+    base = base * base
+    if base == 0'fx:
+      # The base has fallen below what Q16.16 can hold, so has the result.
+      return toValue(0'fx)
+  toValue(total)
 
 proc floorOf(arguments: openArray[Value]): Value =
   ## Returns the largest whole number not greater than the argument.
@@ -54,12 +88,14 @@ proc plot(arguments: openArray[Value]): Value =
 proc buildHost(): Host =
   ## Supplies the numeric helpers BASIC does not provide itself.
   result = initHost()
-  discard result.addFunction("sqr", 1, squareRoot, workUnits = 20)
+  discard result.addFunction("sqr", 1, squareRoot, workUnits = 8)
+  discard result.addFunction("powerOf", 2, powerOf, workUnits = 8)
   discard result.addFunction("floorOf", 1, floorOf, workUnits = 2)
   discard result.addFunction("clampByte", 1, clampByte, workUnits = 2)
   discard result.addFunction("plot", 3, plot, workUnits = 2)
   discard result.addData("size", toValue(0'i32))
   discard result.addData("half", toValue(0'fx))
+  discard result.addData("span", toValue(0'fx))
 
 proc traceLimits(): Limits =
   ## Returns limits large enough to finish the image.
@@ -73,6 +109,7 @@ proc renderOnce(runtime: var Runtime): (float, int32) =
   runtime.restart()
   runtime.setData("size", toValue(Size))
   runtime.setData("half", toValue(fixed(Size) / 2'fx))
+  runtime.setData("span", toValue(fixed(Size) * 2'fx))
   pixels.setLen(0)
   let started = getMonoTime()
   discard runtime.run()
@@ -114,7 +151,7 @@ echo &"  instructions charged: {plain.instructionsUsed} vs " &
 # Fixed point is the reason this VM has no floats. The same scene must
 # therefore render to the same bytes on every architecture, so the
 # checksum is pinned rather than merely compared between the two paths.
-const ExpectedChecksum = 1488834'i32
+const ExpectedChecksum = 1356659'i32
 if plainSum != ExpectedChecksum:
   quit(&"expected checksum {ExpectedChecksum} but rendered {plainSum}")
 
