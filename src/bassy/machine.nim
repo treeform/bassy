@@ -12,9 +12,24 @@ type
     length: int
     sealed: bool
 
-const PageBytes* = 4096
+const
+  PageBytes* = 4096
 
-when defined(windows):
+  ## Whether this target can emit and run machine code at all. Everywhere
+  ## else, including WebAssembly, the interpreter is the only path and no
+  ## platform-specific declaration is emitted. Define bassyNoJit to force
+  ## the interpreter on a target that would otherwise qualify.
+  NativeCode* =
+    when defined(bassyNoJit):
+      false
+    elif defined(arm64) and (
+      defined(macosx) or defined(linux) or defined(windows)
+    ):
+      true
+    else:
+      false
+
+when NativeCode and defined(windows):
   const
     MemCommit = 0x1000'i32
     MemReserve = 0x2000'i32
@@ -38,7 +53,7 @@ when defined(windows):
 
   proc flushInstructionCache(process, address: pointer, size: int): int32
     {.importc: "FlushInstructionCache", dynlib: "kernel32", stdcall.}
-else:
+elif NativeCode:
   const
     ProtNone = 0x0.cint
     ProtRead = 0x1.cint
@@ -66,14 +81,14 @@ else:
   proc munmap(address: pointer, length: csize_t): cint
     {.importc: "munmap", header: "<sys/mman.h>".}
 
-when defined(macosx) and defined(arm64):
+when NativeCode and defined(macosx) and defined(arm64):
   proc jitWriteProtect(enabled: cint)
     {.importc: "pthread_jit_write_protect_np", header: "<pthread.h>".}
 
   proc invalidateInstructionCache(address: pointer, length: csize_t)
     {.importc: "sys_icache_invalidate",
       header: "<libkern/OSCacheControl.h>".}
-elif defined(arm64):
+elif NativeCode and defined(arm64):
   proc clearCache(start, stop: pointer)
     {.importc: "__builtin___clear_cache", nodecl.}
 
@@ -81,15 +96,9 @@ proc fail(message: string) {.noreturn, raises: [BasicError].} =
   ## Reports a controlled code buffer failure.
   raise newException(BasicError, "BASIC " & message)
 
-proc jitSupported*(): bool {.raises: [].} =
+proc jitSupported*(): bool {.inline, raises: [].} =
   ## Reports whether this build can emit and run native code.
-  when defined(arm64) or defined(amd64):
-    when defined(macosx) or defined(linux) or defined(windows):
-      true
-    else:
-      false
-  else:
-    false
+  NativeCode
 
 proc roundedToPage(size: int): int {.raises: [].} =
   ## Rounds a byte count up to whole pages.
@@ -100,12 +109,17 @@ proc initCodeBuffer*(capacity: int): CodeBuffer {.raises: [BasicError].} =
   if capacity <= 0:
     fail("code buffer capacity must be positive")
   let size = roundedToPage(capacity)
-  when defined(windows):
+  when not NativeCode:
+    fail("this build has no native code backend")
+  elif defined(windows):
     let memory = virtualAlloc(
       nil, size, MemCommit or MemReserve, PageReadWrite
     )
     if memory == nil:
       fail("code buffer reservation failed")
+    result = CodeBuffer(
+      memory: memory, capacity: size, length: 0, sealed: false
+    )
   else:
     let memory = mmap(
       nil,
@@ -117,9 +131,9 @@ proc initCodeBuffer*(capacity: int): CodeBuffer {.raises: [BasicError].} =
     )
     if cast[int](memory) == MapFailed:
       fail("code buffer reservation failed")
-  result = CodeBuffer(
-    memory: memory, capacity: size, length: 0, sealed: false
-  )
+    result = CodeBuffer(
+      memory: memory, capacity: size, length: 0, sealed: false
+    )
 
 proc len*(buffer: CodeBuffer): int {.inline, raises: [].} =
   ## Returns how many bytes have been emitted so far.
@@ -131,12 +145,12 @@ proc capacity*(buffer: CodeBuffer): int {.inline, raises: [].} =
 
 proc beginWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Makes the pages writable on platforms that enforce write-xor-execute.
-  when defined(macosx) and defined(arm64):
+  when NativeCode and defined(macosx) and defined(arm64):
     jitWriteProtect(0)
 
 proc endWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Restores execute permission after a batch of writes.
-  when defined(macosx) and defined(arm64):
+  when NativeCode and defined(macosx) and defined(arm64):
     jitWriteProtect(1)
 
 proc write*(buffer: var CodeBuffer, source: pointer, size: int)
@@ -175,7 +189,9 @@ proc seal*(buffer: var CodeBuffer) {.raises: [BasicError].} =
     return
   if buffer.length == 0:
     fail("code buffer holds no instructions")
-  when defined(windows):
+  when not NativeCode:
+    fail("this build has no native code backend")
+  elif defined(windows):
     var previous = 0'i32
     if virtualProtect(
       buffer.memory, buffer.capacity, PageExecuteRead, previous.addr
@@ -184,8 +200,12 @@ proc seal*(buffer: var CodeBuffer) {.raises: [BasicError].} =
     discard flushInstructionCache(
       currentProcess(), buffer.memory, buffer.length
     )
-  elif defined(macosx) and defined(arm64):
-    invalidateInstructionCache(buffer.memory, csize_t(buffer.length))
+    buffer.sealed = true
+  elif defined(macosx):
+    # MAP_JIT pages are already executable; only the cache needs a flush.
+    when defined(arm64):
+      invalidateInstructionCache(buffer.memory, csize_t(buffer.length))
+    buffer.sealed = true
   else:
     if mprotect(
       buffer.memory, csize_t(buffer.capacity), ProtRead or ProtExec
@@ -196,7 +216,7 @@ proc seal*(buffer: var CodeBuffer) {.raises: [BasicError].} =
         buffer.memory,
         cast[pointer](cast[int](buffer.memory) + buffer.length)
       )
-  buffer.sealed = true
+    buffer.sealed = true
 
 proc entry*(buffer: CodeBuffer): pointer {.raises: [BasicError].} =
   ## Returns the address of the first instruction once sealed.
@@ -208,9 +228,9 @@ proc release*(buffer: var CodeBuffer) {.raises: [].} =
   ## Returns the pages to the operating system.
   if buffer.memory == nil:
     return
-  when defined(windows):
+  when NativeCode and defined(windows):
     discard virtualFree(buffer.memory, 0, MemRelease)
-  else:
+  elif NativeCode:
     discard munmap(buffer.memory, csize_t(buffer.capacity))
   buffer.memory = nil
   buffer.capacity = 0

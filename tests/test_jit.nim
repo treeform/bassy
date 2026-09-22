@@ -42,7 +42,7 @@ proc check(name, source: string, expectRegions = true) =
   let plain = execute(source, false)
   let fast = execute(source, true)
   var problems: seq[string]
-  if expectRegions and fast.regions == 0:
+  if jitSupported() and expectRegions and fast.regions == 0:
     problems.add("no loop was compiled")
   if plain.globals.len != fast.globals.len:
     problems.add("global count differs")

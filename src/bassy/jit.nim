@@ -14,7 +14,9 @@ import
 
 export machine.jitSupported
 
-when defined(arm64):
+const NativeArm64 = NativeCode and defined(arm64)
+
+when NativeArm64:
   import arm64
 
 type
@@ -122,7 +124,7 @@ proc reachesOutside(code: seq[Instruction], start, stop: int): bool
         return true
   false
 
-when defined(arm64):
+when NativeArm64:
   ## AArch64 code generation
   ##
   ## x0   context pointer, live for the whole region
@@ -203,11 +205,10 @@ when defined(arm64):
 proc compileRegion*(code: seq[Instruction], start, stop: int): Region
     {.raises: [BasicError].} =
   ## Compiles one loop, or returns nil when it is outside the modelled set.
-  when not defined(arm64):
+  when not NativeArm64:
+    # No backend for this target: the interpreter is the only path.
     return nil
   else:
-    if not jitSupported():
-      return nil
     if start < 0 or stop > code.len or start >= stop:
       return nil
     if code.reachesOutside(start, stop):
