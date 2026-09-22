@@ -116,6 +116,13 @@ encodes "csetm w2, eq":
 encodes "csetm x3, ge":
   assembler.setOnCondition(Word64, x3, GreaterEqualCondition)
 
+encodes "tst w22, #1":
+  assembler.testLowBits(Word32, x22, 1)
+encodes "tst w3, #7":
+  assembler.testLowBits(Word32, x3, 3)
+encodes "tst x4, #0xffff":
+  assembler.testLowBits(Word64, x4, 16)
+
 ## Memory
 
 encodes "ldr w5, [x6, #12]":

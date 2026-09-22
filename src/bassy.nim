@@ -3122,6 +3122,12 @@ proc instructions*(program: Program): int {.inline.} =
   ## Returns the number of metered register-machine instructions.
   program.code.len
 
+proc nativeRegions*(runtime: Runtime): int =
+  ## Returns how many compiled loops are still active.
+  for region in runtime.regionAt:
+    if region != nil:
+      inc result
+
 proc compileNative*(runtime: var Runtime): int =
   ## Compiles the hot integer loops of this program to machine code and
   ## returns how many were accepted. Loops the compiler does not model are
@@ -3130,19 +3136,8 @@ proc compileNative*(runtime: var Runtime): int =
   runtime.regionAt = @[]
   if not jitSupported():
     return 0
-  let regions = compileLoops(runtime.program.code)
-  if regions.len == 0:
-    return 0
-  runtime.regionAt = newSeq[Region](runtime.program.code.len)
-  for start, region in regions:
-    runtime.regionAt[int(start)] = region
-  regions.len
-
-proc nativeRegions*(runtime: Runtime): int =
-  ## Returns how many compiled loops are still active.
-  for region in runtime.regionAt:
-    if region != nil:
-      inc result
+  runtime.regionAt = compileLoops(runtime.program.code)
+  runtime.nativeRegions
 
 proc bytecode*(program: Program): lent seq[Instruction] {.inline.} =
   ## Exposes the metered bytecode for tools and the native compiler.

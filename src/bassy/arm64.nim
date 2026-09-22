@@ -470,3 +470,16 @@ proc jumpRegister*(assembler: var Assembler, target: Register)
 proc returnToCaller*(assembler: var Assembler) {.raises: [].} =
   ## Returns through the link register.
   assembler.emit(0xD65F03C0'u32)
+
+proc testLowBits*(assembler: var Assembler, width: Width, source: Register,
+    count: int) {.raises: [BasicError].} =
+  ## Sets flags from the lowest bits of a register, leaving the result
+  ## nowhere. The logical immediate for a run of ones starting at bit zero
+  ## is simply its length minus one.
+  if count < 1 or count > (if width == Word64: 63 else: 31):
+    fail("assembler bit count is out of range")
+  assembler.emit(
+    0x72000000'u32 or width.sizeBit or
+      (if width == Word64: 1'u32 shl 22 else: 0'u32) or
+      (uint32(count - 1) shl 10) or (source.number shl 5) or 31'u32
+  )
