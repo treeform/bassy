@@ -21,3 +21,4 @@ nimcache
 nimble.paths
 nimble.develop
 nimbledeps/
+tests/raytracer.ppm
