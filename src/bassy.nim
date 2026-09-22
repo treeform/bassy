@@ -5,9 +5,9 @@
 
 import
   std/[strutils, tables],
-  bassy/[numbers, texts]
+  bassy/[bytecode, jit, numbers, texts]
 
-export numbers
+export bytecode, jit, numbers
 
 const
   DefaultMaxStrings* = 256
@@ -137,75 +137,6 @@ type
     line: int32
     column: int32
 
-  Op = enum
-    MeterOp,
-    LoadImmediateOp,
-    LoadFixedOp,
-    LoadStringOp,
-    TextCallOp,
-    MoveOp,
-    LoadGlobalOp,
-    LoadHostDataOp,
-    StoreGlobalOp,
-    StoreGlobalImmediateOp,
-    MoveGlobalOp,
-    AddGlobalImmediateOp,
-    AddGlobalOp,
-    AddGlobalHostDataOp,
-    AddGlobalRegisterOp,
-    ModuloGlobalImmediateOp,
-    AddGlobalArrayGlobalIndexOp,
-    AddOp,
-    SubtractOp,
-    MultiplyOp,
-    DivideOp,
-    IntegerDivideOp,
-    ModuloOp,
-    NegateOp,
-    EqualOp,
-    NotEqualOp,
-    LessOp,
-    LessEqualOp,
-    GreaterOp,
-    GreaterEqualOp,
-    AndOp,
-    OrOp,
-    XorOp,
-    EqvOp,
-    ImpOp,
-    NotOp,
-    JumpOp,
-    JumpIfZeroOp,
-    JumpUnlessGlobalEqualImmediateOp,
-    JumpUnlessGlobalNotEqualImmediateOp,
-    JumpUnlessGlobalLessImmediateOp,
-    JumpUnlessGlobalLessEqualImmediateOp,
-    JumpUnlessGlobalGreaterImmediateOp,
-    JumpUnlessGlobalGreaterEqualImmediateOp,
-    JumpUnlessGlobalModuloEqualZeroOp,
-    ArrayGetOp,
-    ArraySetOp,
-    ArrayAddGlobalsOp,
-    SetArgumentOp,
-    SetArgumentImmediateOp,
-    SetArgumentGlobalOp,
-    HostCallOp,
-    CallOp,
-    GosubOp,
-    ReturnOp,
-    ReturnLabelOp,
-    ExitSubOp,
-    HaltOp,
-    PrintTextOp,
-    PrintValueOp,
-    PrintNewlineOp
-
-  Instruction = object
-    op: Op
-    a: int32
-    b: int32
-    c: int32
-
   BasicArray = object
     name: string
     base: int32
@@ -283,6 +214,8 @@ type
     printedEvents: int64
     allocatedBytes: int64
     finished: bool
+    regionAt: seq[Region]
+    bypass: int32
 
   Expr = object
     text: bool
@@ -3189,6 +3122,48 @@ proc instructions*(program: Program): int {.inline.} =
   ## Returns the number of metered register-machine instructions.
   program.code.len
 
+proc compileNative*(runtime: var Runtime): int =
+  ## Compiles the hot integer loops of this program to machine code and
+  ## returns how many were accepted. Loops the compiler does not model are
+  ## left to the interpreter, so behavior never depends on the result.
+  runtime.bypass = -1
+  runtime.regionAt = @[]
+  if not jitSupported():
+    return 0
+  let regions = compileLoops(runtime.program.code)
+  if regions.len == 0:
+    return 0
+  runtime.regionAt = newSeq[Region](runtime.program.code.len)
+  for start, region in regions:
+    runtime.regionAt[int(start)] = region
+  regions.len
+
+proc nativeRegions*(runtime: Runtime): int =
+  ## Returns how many compiled loops are still active.
+  for region in runtime.regionAt:
+    if region != nil:
+      inc result
+
+proc bytecode*(program: Program): lent seq[Instruction] {.inline.} =
+  ## Exposes the metered bytecode for tools and the native compiler.
+  program.code
+
+proc globalsAddress*(runtime: var Runtime): pointer {.inline.} =
+  ## Returns the base of the scalar global storage.
+  if runtime.globals.len == 0: nil else: runtime.globals[0].addr
+
+proc globalValue*(runtime: Runtime, index: int32): Value {.inline.} =
+  ## Reads one scalar global by index.
+  runtime.globals[int(index)]
+
+proc offset*(runtime: Runtime): int32 {.inline.} =
+  ## Returns the bytecode offset the runtime will execute next.
+  runtime.pc
+
+proc remainingBudget*(runtime: Runtime): (int64, int64) {.inline.} =
+  ## Returns the unspent instruction and work budgets.
+  (runtime.remainingInstructions, runtime.remainingWork)
+
 proc globals*(program: Program): int {.inline.} =
   ## Returns the number of implicitly declared scalar globals.
   program.globalNames.len
@@ -3554,6 +3529,30 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
   while not runtime.finished:
     var item = fetch()
     if item.op == MeterOp:
+      if runtime.regionAt.len > 0 and runtime.pc != runtime.bypass:
+        let region = runtime.regionAt[int(runtime.pc)]
+        if region != nil:
+          var context = NativeContext(
+            globals: runtime.globals[0].addr,
+            remainingInstructions: runtime.remainingInstructions,
+            remainingWork: runtime.remainingWork,
+            pc: runtime.pc
+          )
+          let status = region.invoke(context)
+          runtime.remainingInstructions = context.remainingInstructions
+          runtime.remainingWork = context.remainingWork
+          runtime.pc = context.pc
+          case status
+          of NativeCompleted:
+            runtime.bypass = -1
+          of NativeExhausted:
+            # Let the interpreter re-run the meter and raise the real error.
+            runtime.bypass = context.pc
+          of NativeGuardFailed:
+            # A value stopped being an integer, so retire the compiled form.
+            runtime.regionAt[int(region.start)] = nil
+            runtime.bypass = -1
+          continue
       let
         cost = int64(item.a)
         instructionCount = int64(item.b)

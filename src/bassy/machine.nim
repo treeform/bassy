@@ -1,0 +1,218 @@
+## Allocates writable-then-executable pages for generated machine code.
+## Each platform enforces write-xor-execute differently, so the buffer
+## keeps the page writable while emitting and seals it before any call.
+
+import numbers
+
+type
+  CodeBuffer* = object
+    ## One page-aligned region holding finished machine code.
+    memory: pointer
+    capacity: int
+    length: int
+    sealed: bool
+
+const PageBytes* = 4096
+
+when defined(windows):
+  const
+    MemCommit = 0x1000'i32
+    MemReserve = 0x2000'i32
+    MemRelease = 0x8000'i32
+    PageReadWrite = 0x04'i32
+    PageExecuteRead = 0x20'i32
+
+  proc virtualAlloc(address: pointer, size: int, allocation,
+      protection: int32): pointer
+    {.importc: "VirtualAlloc", dynlib: "kernel32", stdcall.}
+
+  proc virtualProtect(address: pointer, size: int, protection: int32,
+      previous: ptr int32): int32
+    {.importc: "VirtualProtect", dynlib: "kernel32", stdcall.}
+
+  proc virtualFree(address: pointer, size: int, freeType: int32): int32
+    {.importc: "VirtualFree", dynlib: "kernel32", stdcall.}
+
+  proc currentProcess(): pointer
+    {.importc: "GetCurrentProcess", dynlib: "kernel32", stdcall.}
+
+  proc flushInstructionCache(process, address: pointer, size: int): int32
+    {.importc: "FlushInstructionCache", dynlib: "kernel32", stdcall.}
+else:
+  const
+    ProtNone = 0x0.cint
+    ProtRead = 0x1.cint
+    ProtWrite = 0x2.cint
+    ProtExec = 0x4.cint
+    MapPrivate = 0x0002.cint
+    MapFailed = -1
+
+  when defined(macosx):
+    const
+      MapAnonymous = 0x1000.cint
+      MapJit = 0x0800.cint
+  else:
+    const
+      MapAnonymous = 0x20.cint
+      MapJit = 0.cint
+
+  proc mmap(address: pointer, length: csize_t, protection, flags,
+      handle: cint, offset: int): pointer
+    {.importc: "mmap", header: "<sys/mman.h>".}
+
+  proc mprotect(address: pointer, length: csize_t, protection: cint): cint
+    {.importc: "mprotect", header: "<sys/mman.h>".}
+
+  proc munmap(address: pointer, length: csize_t): cint
+    {.importc: "munmap", header: "<sys/mman.h>".}
+
+when defined(macosx) and defined(arm64):
+  proc jitWriteProtect(enabled: cint)
+    {.importc: "pthread_jit_write_protect_np", header: "<pthread.h>".}
+
+  proc invalidateInstructionCache(address: pointer, length: csize_t)
+    {.importc: "sys_icache_invalidate",
+      header: "<libkern/OSCacheControl.h>".}
+elif defined(arm64):
+  proc clearCache(start, stop: pointer)
+    {.importc: "__builtin___clear_cache", nodecl.}
+
+proc fail(message: string) {.noreturn, raises: [BasicError].} =
+  ## Reports a controlled code buffer failure.
+  raise newException(BasicError, "BASIC " & message)
+
+proc jitSupported*(): bool {.raises: [].} =
+  ## Reports whether this build can emit and run native code.
+  when defined(arm64) or defined(amd64):
+    when defined(macosx) or defined(linux) or defined(windows):
+      true
+    else:
+      false
+  else:
+    false
+
+proc roundedToPage(size: int): int {.raises: [].} =
+  ## Rounds a byte count up to whole pages.
+  ((size + PageBytes - 1) div PageBytes) * PageBytes
+
+proc initCodeBuffer*(capacity: int): CodeBuffer {.raises: [BasicError].} =
+  ## Reserves writable pages sized to hold the requested byte count.
+  if capacity <= 0:
+    fail("code buffer capacity must be positive")
+  let size = roundedToPage(capacity)
+  when defined(windows):
+    let memory = virtualAlloc(
+      nil, size, MemCommit or MemReserve, PageReadWrite
+    )
+    if memory == nil:
+      fail("code buffer reservation failed")
+  else:
+    let memory = mmap(
+      nil,
+      csize_t(size),
+      ProtRead or ProtWrite or ProtExec,
+      MapPrivate or MapAnonymous or MapJit,
+      -1,
+      0
+    )
+    if cast[int](memory) == MapFailed:
+      fail("code buffer reservation failed")
+  result = CodeBuffer(
+    memory: memory, capacity: size, length: 0, sealed: false
+  )
+
+proc len*(buffer: CodeBuffer): int {.inline, raises: [].} =
+  ## Returns how many bytes have been emitted so far.
+  buffer.length
+
+proc capacity*(buffer: CodeBuffer): int {.inline, raises: [].} =
+  ## Returns the reserved byte count, rounded up to whole pages.
+  buffer.capacity
+
+proc beginWrite(buffer: var CodeBuffer) {.raises: [].} =
+  ## Makes the pages writable on platforms that enforce write-xor-execute.
+  when defined(macosx) and defined(arm64):
+    jitWriteProtect(0)
+
+proc endWrite(buffer: var CodeBuffer) {.raises: [].} =
+  ## Restores execute permission after a batch of writes.
+  when defined(macosx) and defined(arm64):
+    jitWriteProtect(1)
+
+proc write*(buffer: var CodeBuffer, source: pointer, size: int)
+    {.raises: [BasicError].} =
+  ## Appends raw bytes, refusing to run past the reserved pages.
+  if buffer.sealed:
+    fail("code buffer is already sealed")
+  if size < 0 or buffer.length + size > buffer.capacity:
+    fail("code buffer capacity exceeded")
+  if size == 0:
+    return
+  buffer.beginWrite()
+  copyMem(
+    cast[pointer](cast[int](buffer.memory) + buffer.length), source, size
+  )
+  buffer.endWrite()
+  buffer.length += size
+
+proc write*(buffer: var CodeBuffer, words: openArray[uint32])
+    {.raises: [BasicError].} =
+  ## Appends fixed-width instruction words, as used by AArch64.
+  if words.len == 0:
+    return
+  buffer.write(words[0].addr, words.len * sizeof(uint32))
+
+proc write*(buffer: var CodeBuffer, bytes: openArray[byte])
+    {.raises: [BasicError].} =
+  ## Appends a variable-length instruction stream, as used by x86-64.
+  if bytes.len == 0:
+    return
+  buffer.write(bytes[0].addr, bytes.len)
+
+proc seal*(buffer: var CodeBuffer) {.raises: [BasicError].} =
+  ## Publishes the emitted bytes so the processor may execute them.
+  if buffer.sealed:
+    return
+  if buffer.length == 0:
+    fail("code buffer holds no instructions")
+  when defined(windows):
+    var previous = 0'i32
+    if virtualProtect(
+      buffer.memory, buffer.capacity, PageExecuteRead, previous.addr
+    ) == 0:
+      fail("code buffer could not be made executable")
+    discard flushInstructionCache(
+      currentProcess(), buffer.memory, buffer.length
+    )
+  elif defined(macosx) and defined(arm64):
+    invalidateInstructionCache(buffer.memory, csize_t(buffer.length))
+  else:
+    if mprotect(
+      buffer.memory, csize_t(buffer.capacity), ProtRead or ProtExec
+    ) != 0:
+      fail("code buffer could not be made executable")
+    when defined(arm64):
+      clearCache(
+        buffer.memory,
+        cast[pointer](cast[int](buffer.memory) + buffer.length)
+      )
+  buffer.sealed = true
+
+proc entry*(buffer: CodeBuffer): pointer {.raises: [BasicError].} =
+  ## Returns the address of the first instruction once sealed.
+  if not buffer.sealed:
+    fail("code buffer must be sealed before it is called")
+  buffer.memory
+
+proc release*(buffer: var CodeBuffer) {.raises: [].} =
+  ## Returns the pages to the operating system.
+  if buffer.memory == nil:
+    return
+  when defined(windows):
+    discard virtualFree(buffer.memory, 0, MemRelease)
+  else:
+    discard munmap(buffer.memory, csize_t(buffer.capacity))
+  buffer.memory = nil
+  buffer.capacity = 0
+  buffer.length = 0
+  buffer.sealed = false
