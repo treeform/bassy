@@ -26,37 +26,40 @@ const
       defined(macosx) or defined(linux) or defined(windows)
     ):
       true
-    elif defined(amd64) and (defined(macosx) or defined(linux)):
-      # Windows x64 passes its first argument elsewhere and saves a
-      # different register set, so it stays on the interpreter for now.
+    elif defined(amd64) and (
+      defined(macosx) or defined(linux) or defined(windows)
+    ):
       true
     else:
       false
 
 when NativeCode and defined(windows):
+  # These follow the Windows header types exactly: DWORD is an unsigned
+  # long there, which is a different type from an unsigned int even where
+  # the two are the same width.
   const
-    MemCommit = 0x1000'i32
-    MemReserve = 0x2000'i32
-    MemRelease = 0x8000'i32
-    PageReadWrite = 0x04'i32
-    PageExecuteRead = 0x20'i32
+    MemCommit = 0x1000.culong
+    MemReserve = 0x2000.culong
+    MemRelease = 0x8000.culong
+    PageReadWrite = 0x04.culong
+    PageExecuteRead = 0x20.culong
 
-  proc virtualAlloc(address: pointer, size: int, allocation,
-      protection: int32): pointer
-    {.importc: "VirtualAlloc", dynlib: "kernel32", stdcall.}
+  proc virtualAlloc(address: pointer, size: csize_t,
+      allocation, protection: culong): pointer
+    {.importc: "VirtualAlloc", header: "<windows.h>", stdcall.}
 
-  proc virtualProtect(address: pointer, size: int, protection: int32,
-      previous: ptr int32): int32
-    {.importc: "VirtualProtect", dynlib: "kernel32", stdcall.}
+  proc virtualProtect(address: pointer, size: csize_t, protection: culong,
+      previous: ptr culong): cint
+    {.importc: "VirtualProtect", header: "<windows.h>", stdcall.}
 
-  proc virtualFree(address: pointer, size: int, freeType: int32): int32
-    {.importc: "VirtualFree", dynlib: "kernel32", stdcall.}
+  proc virtualFree(address: pointer, size: csize_t, freeType: culong): cint
+    {.importc: "VirtualFree", header: "<windows.h>", stdcall.}
 
   proc currentProcess(): pointer
-    {.importc: "GetCurrentProcess", dynlib: "kernel32", stdcall.}
+    {.importc: "GetCurrentProcess", header: "<windows.h>", stdcall.}
 
-  proc flushInstructionCache(process, address: pointer, size: int): int32
-    {.importc: "FlushInstructionCache", dynlib: "kernel32", stdcall.}
+  proc flushInstructionCache(process, address: pointer, size: csize_t): cint
+    {.importc: "FlushInstructionCache", header: "<windows.h>", stdcall.}
 elif NativeCode:
   const
     ProtNone = 0x0.cint
@@ -117,7 +120,7 @@ proc initCodeBuffer*(capacity: int): CodeBuffer {.raises: [BasicError].} =
     fail("this build has no native code backend")
   elif defined(windows):
     let memory = virtualAlloc(
-      nil, size, MemCommit or MemReserve, PageReadWrite
+      nil, csize_t(size), MemCommit or MemReserve, PageReadWrite
     )
     if memory == nil:
       fail("code buffer reservation failed")
@@ -196,13 +199,14 @@ proc seal*(buffer: var CodeBuffer) {.raises: [BasicError].} =
   when not NativeCode:
     fail("this build has no native code backend")
   elif defined(windows):
-    var previous = 0'i32
+    var previous = 0.culong
     if virtualProtect(
-      buffer.memory, buffer.capacity, PageExecuteRead, previous.addr
+      buffer.memory, csize_t(buffer.capacity), PageExecuteRead,
+      previous.addr
     ) == 0:
       fail("code buffer could not be made executable")
     discard flushInstructionCache(
-      currentProcess(), buffer.memory, buffer.length
+      currentProcess(), buffer.memory, csize_t(buffer.length)
     )
     buffer.sealed = true
   elif defined(macosx):
@@ -233,7 +237,7 @@ proc release*(buffer: var CodeBuffer) {.raises: [].} =
   if buffer.memory == nil:
     return
   when NativeCode and defined(windows):
-    discard virtualFree(buffer.memory, 0, MemRelease)
+    discard virtualFree(buffer.memory, 0.csize_t, MemRelease)
   elif NativeCode:
     discard munmap(buffer.memory, csize_t(buffer.capacity))
   buffer.memory = nil

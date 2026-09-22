@@ -533,23 +533,34 @@ when NativeArm64:
     emitter.endRegion()
 
 elif NativeAmd64:
-  ## x86-64 code generation, System V calling convention
+  ## x86-64 code generation
   ##
-  ## rdi  context pointer, live for the whole region
   ## rbx  base of the globals array
   ## r12  remaining instruction budget
   ## r13  remaining work budget
-  ## r14, r15, rsi, rcx, r8, r9, r10  hoisted globals
   ## rax and rdx are reserved for the divide;  r11 is scratch
+  ##
+  ## The two conventions differ only in which register carries the argument
+  ## and which ones a callee must preserve. System V takes its argument in
+  ## rdi and may use rsi and rdi freely; Windows takes its argument in rcx
+  ## and must preserve both rsi and rdi.
 
   const
-    Context = rdi
     GlobalsBase = rbx
     Instructions = r12
     Work = r13
     Scratch = r11
-    Hoisted = [r14, r15, rsi, rcx, r8, r9, r10]
-    Saved = [rbx, r12, r13, r14, r15]
+
+  when defined(windows):
+    const
+      Context = rcx
+      Hoisted = [r14, r15, rsi, rdi, r8, r9, r10]
+      Saved = [rbx, r12, r13, r14, r15, rsi, rdi]
+  else:
+    const
+      Context = rdi
+      Hoisted = [r14, r15, rsi, rcx, r8, r9, r10]
+      Saved = [rbx, r12, r13, r14, r15]
 
   proc slotRegister(slot: int): Register {.raises: [].} =
     ## Returns the register holding one hoisted global.
