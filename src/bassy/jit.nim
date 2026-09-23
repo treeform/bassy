@@ -882,6 +882,99 @@ when NativeArm64:
       true)
     e.code.returnToCaller()
 
+  ## Globals held in registers
+  ##
+  ## Inside a specialised loop its globals live in the registers below,
+  ## proved whole numbers on the way in. Nothing in such a loop calls out,
+  ## so registers the convention lets a callee clobber are safe to use.
+
+  const Hoisting* = [x0, x1, x2, x3, x4, x5, x6, x7]
+
+  proc hoisted(slot: int): Register {.inline, raises: [].} =
+    ## Returns the register holding one hoisted global.
+    Hoisting[slot]
+
+  proc globalAt(e: var Emitter, index: int32): (Register, int)
+      {.raises: [BasicError].} =
+    ## Returns a base register and byte offset for one global.
+    e.reach(global(index))
+
+  proc guardHoisted(e: var Emitter, index: int32, failed: Label)
+      {.raises: [BasicError].} =
+    ## Leaves for the general code unless a global holds a whole number.
+    let (base, offset) = e.globalAt(index)
+    e.code.loadByte(temp(0), base, offset)
+    e.jumpIfNotZero(temp(0), failed)
+
+  proc loadHoisted(e: var Emitter, slot: int, index: int32)
+      {.raises: [BasicError].} =
+    ## Reads one global's payload into its register.
+    let (base, offset) = e.globalAt(index)
+    e.code.loadWord(hoisted(slot), base, offset + ValuePayload)
+
+  proc storeHoisted(e: var Emitter, slot: int, index: int32)
+      {.raises: [BasicError].} =
+    ## Publishes one register back as a whole number.
+    let (base, offset) = e.globalAt(index)
+    e.code.storeByte(zeroRegister, base, offset)
+    e.code.storeWord(hoisted(slot), base, offset + ValuePayload)
+
+  proc beginHoisting(e: var Emitter) {.raises: [].} =
+    ## The globals stay addressable throughout, so nothing to prepare.
+    discard
+
+  proc endHoisting(e: var Emitter) {.raises: [].} =
+    ## Nothing borrowed, so nothing to give back.
+    discard
+
+  proc setHoisted(e: var Emitter, slot: int, bits: int32) {.raises: [].} =
+    ## Loads a constant into a hoisted global.
+    e.code.loadImmediate(Word32, hoisted(slot), int64(bits))
+
+  proc copyHoisted(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Copies one hoisted global into another.
+    e.code.moveRegister(Word32, hoisted(destination), hoisted(source))
+
+  proc addHoisted(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Adds one hoisted global into another, wrapping.
+    e.code.addRegister(Word32, hoisted(destination), hoisted(destination),
+      hoisted(source))
+
+  proc addHoistedConstant(e: var Emitter, slot: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Adds a constant to a hoisted global, wrapping.
+    let target = hoisted(slot)
+    if bits >= 0 and bits <= 4095:
+      e.code.addImmediate(Word32, target, target, int(bits))
+    elif bits < 0 and bits >= -4095:
+      e.code.subtractImmediate(Word32, target, target, int(-bits))
+    else:
+      e.code.loadImmediate(Word32, temp(6), int64(bits))
+      e.code.addRegister(Word32, target, target, temp(6))
+
+  proc hoistedToTemp(e: var Emitter, value, slot: int) {.raises: [].} =
+    ## Copies a hoisted global into a working register.
+    e.code.moveRegister(Word32, temp(value), hoisted(slot))
+
+  proc tempToHoisted(e: var Emitter, slot, value: int) {.raises: [].} =
+    ## Copies a working register into a hoisted global.
+    e.code.moveRegister(Word32, hoisted(slot), temp(value))
+
+  proc addTempToHoisted(e: var Emitter, slot, value: int) {.raises: [].} =
+    ## Adds a working register into a hoisted global, wrapping.
+    e.code.addRegister(Word32, hoisted(slot), hoisted(slot), temp(value))
+
+  proc compareHoisted(e: var Emitter, slot: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Sets flags from a hoisted global against a constant.
+    if bits >= 0 and bits <= 4095:
+      e.code.compareImmediate(Word32, hoisted(slot), int(bits))
+    else:
+      e.code.loadImmediate(Word32, temp(6), int64(bits))
+      e.code.compareRegister(Word32, hoisted(slot), temp(6))
+
   proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
     ## Publishes the budgets and where the program stopped, then returns.
     e.code.storeDouble(Instructions, Context, ContextInstructions)
@@ -905,7 +998,7 @@ elif NativeAmd64:
   ## x86-64 code generation
   ##
   ## r15  context            r12  instruction budget   r13  work budget
-  ## rbx  globals            rbp  current frame        r14  array cells
+  ## rbx  globals            rbp  current frame
   ## rax rcx rsi rdi r8 r9 r10  working registers;  r11  one cell;
   ## rdx  the divide's high half and a spare
   ##
@@ -920,7 +1013,6 @@ elif NativeAmd64:
     Work = r13
     GlobalsBase = rbx
     RegistersBase = rbp
-    MemoryBase = r14
     Temps = [rax, rcx, rsi, rdi, r8, r9, r10]
     Cell = r11
     Spare = rdx
@@ -1288,12 +1380,15 @@ elif NativeAmd64:
       slow: Label) {.raises: [BasicError].} =
     ## Bounds checks an index and leaves the cell's address in Cell. One
     ## unsigned comparison covers both ends, as the interpreter's does.
+    ## The cells' base is read from the context rather than kept in a
+    ## register, which leaves one more register for a loop's globals. The
+    ## index register is left scaled.
     e.code.compareImmediate(Word32, temp(index), extent.length)
     e.jumpWhen(AboveEqualCondition, slow)
-    e.code.moveRegister(Word32, Cell, temp(index))
-    e.code.addImmediate(Word32, Cell, extent.base)
-    e.code.shiftLeftImmediate(Word64, Cell, 4)
-    e.code.addRegister(Word64, Cell, MemoryBase)
+    e.code.addImmediate(Word32, temp(index), extent.base)
+    e.code.shiftLeftImmediate(Word64, temp(index), 4)
+    e.contextField(Cell, ContextMemory)
+    e.code.addRegister(Word64, Cell, temp(index))
 
   proc meter(e: var Emitter, instructions, work: int32, slow: Label)
       {.raises: [].} =
@@ -1503,7 +1598,6 @@ elif NativeAmd64:
     e.code.loadDouble(GlobalsBase, Context, 0)
     e.code.loadDouble(Instructions, Context, ContextInstructions)
     e.code.loadDouble(Work, Context, ContextWork)
-    e.contextField(MemoryBase, ContextMemory)
     e.code.loadWord(rcx, Context, ContextBase)
     e.slotAddress(RegistersBase, rcx)
 
@@ -1515,6 +1609,84 @@ elif NativeAmd64:
     for index in countdown(Saved.len - 1, 0):
       e.code.pop(Saved[index])
     e.code.returnToCaller()
+
+  ## Globals held in registers
+  ##
+  ## Inside a specialised loop its globals live in the registers below,
+  ## proved whole numbers on the way in. The globals' own base register is
+  ## one of them, so the globals are reached through Cell while a loop
+  ## runs, and the base is read back from the context on the way out.
+
+  const Hoisting* = [r8, r14, rbx]
+
+  proc hoisted(slot: int): Register {.inline, raises: [].} =
+    ## Returns the register holding one hoisted global.
+    Hoisting[slot]
+
+  proc beginHoisting(e: var Emitter) {.raises: [BasicError].} =
+    ## Reaches the globals through Cell, which no hoisted value occupies.
+    e.contextField(Cell, 0)
+
+  proc endHoisting(e: var Emitter) {.raises: [BasicError].} =
+    ## Puts the globals' base back where the general code expects it.
+    e.contextField(GlobalsBase, 0)
+
+  proc guardHoisted(e: var Emitter, index: int32, failed: Label)
+      {.raises: [BasicError].} =
+    ## Leaves for the general code unless a global holds a whole number.
+    let offset = int(index) * ValueStride
+    e.code.loadByteZeroed(temp(0), Cell, offset)
+    e.code.testRegister(Word32, temp(0), temp(0))
+    e.jumpWhen(NotEqualCondition, failed)
+
+  proc loadHoisted(e: var Emitter, slot: int, index: int32)
+      {.raises: [BasicError].} =
+    ## Reads one global's payload into its register.
+    e.code.loadWord(hoisted(slot), Cell,
+      int(index) * ValueStride + ValuePayload)
+
+  proc storeHoisted(e: var Emitter, slot: int, index: int32)
+      {.raises: [BasicError].} =
+    ## Publishes one register back as a whole number.
+    let offset = int(index) * ValueStride
+    e.code.storeByteImmediate(Cell, offset, 0)
+    e.code.storeWord(hoisted(slot), Cell, offset + ValuePayload)
+
+  proc setHoisted(e: var Emitter, slot: int, bits: int32) {.raises: [].} =
+    ## Loads a constant into a hoisted global.
+    e.code.loadImmediate(Word32, hoisted(slot), int64(bits))
+
+  proc copyHoisted(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Copies one hoisted global into another.
+    e.code.moveRegister(Word32, hoisted(destination), hoisted(source))
+
+  proc addHoisted(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Adds one hoisted global into another, wrapping.
+    e.code.addRegister(Word32, hoisted(destination), hoisted(source))
+
+  proc addHoistedConstant(e: var Emitter, slot: int, bits: int32)
+      {.raises: [].} =
+    ## Adds a constant to a hoisted global, wrapping.
+    e.code.addImmediate(Word32, hoisted(slot), bits)
+
+  proc hoistedToTemp(e: var Emitter, value, slot: int) {.raises: [].} =
+    ## Copies a hoisted global into a working register.
+    e.code.moveRegister(Word32, temp(value), hoisted(slot))
+
+  proc tempToHoisted(e: var Emitter, slot, value: int) {.raises: [].} =
+    ## Copies a working register into a hoisted global.
+    e.code.moveRegister(Word32, hoisted(slot), temp(value))
+
+  proc addTempToHoisted(e: var Emitter, slot, value: int) {.raises: [].} =
+    ## Adds a working register into a hoisted global, wrapping.
+    e.code.addRegister(Word32, hoisted(slot), temp(value))
+
+  proc compareHoisted(e: var Emitter, slot: int, bits: int32)
+      {.raises: [].} =
+    ## Sets flags from a hoisted global against a constant.
+    e.code.compareImmediate(Word32, hoisted(slot), bits)
 
   proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
     ## Publishes the budgets and where the program stopped, then returns.
@@ -1537,43 +1709,192 @@ proc invoke*(machine: Machine, context: var NativeContext): NativeStatus
   ## Runs the compiled program from the offset the context names.
   NativeStatus(machine.call(context.addr))
 
+type
+  Loop = object
+    ## A loop whose globals can live in registers while it runs.
+    start: int
+    stop: int
+    globals: seq[int32]
+
+proc loopGlobals(item: Instruction, globals: var seq[int32])
+    {.raises: [].} =
+  ## Records every global one operation reads or writes.
+  template note(index: int32) =
+    if index notin globals:
+      globals.add(index)
+  case item.op
+  of StoreGlobalImmediateOp, AddGlobalImmediateOp,
+      JumpUnlessGlobalEqualImmediateOp,
+      JumpUnlessGlobalNotEqualImmediateOp,
+      JumpUnlessGlobalLessImmediateOp,
+      JumpUnlessGlobalLessEqualImmediateOp,
+      JumpUnlessGlobalGreaterImmediateOp,
+      JumpUnlessGlobalGreaterEqualImmediateOp,
+      JumpUnlessGlobalModuloEqualZeroOp,
+      AddGlobalHostDataOp, AddGlobalRegisterOp, StoreGlobalOp:
+    note(item.a)
+  of MoveGlobalOp, AddGlobalOp, ModuloGlobalImmediateOp:
+    note(item.a)
+    note(item.b)
+  of LoadGlobalOp:
+    note(item.b)
+  of AddGlobalArrayGlobalIndexOp:
+    note(item.a)
+    note(item.c)
+  of ArrayAddGlobalsOp:
+    note(item.b)
+    note(item.c)
+  else:
+    discard
+
+proc fitsLoop(item: Instruction): bool {.raises: [].} =
+  ## Reports whether an operation can run with its globals in registers.
+  ## Nothing that calls out may, since the interpreter's code would find
+  ## the globals' memory stale, and nothing that leaves the loop's code by
+  ## any way but a branch may either.
+  case item.op
+  of MeterOp, LoadImmediateOp, LoadFixedOp, MoveOp, LoadGlobalOp,
+      LoadHostDataOp, StoreGlobalOp, StoreGlobalImmediateOp, MoveGlobalOp,
+      AddGlobalImmediateOp, AddGlobalOp, AddGlobalHostDataOp,
+      AddGlobalRegisterOp, AddGlobalArrayGlobalIndexOp, ArrayAddGlobalsOp,
+      AddOp, SubtractOp, MultiplyOp, IntegerDivideOp, ModuloOp, NegateOp,
+      EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp,
+      AndOp, OrOp, XorOp, EqvOp, ImpOp, NotOp, JumpOp, JumpIfZeroOp,
+      JumpUnlessGlobalEqualImmediateOp,
+      JumpUnlessGlobalNotEqualImmediateOp,
+      JumpUnlessGlobalLessImmediateOp,
+      JumpUnlessGlobalLessEqualImmediateOp,
+      JumpUnlessGlobalGreaterImmediateOp,
+      JumpUnlessGlobalGreaterEqualImmediateOp,
+      ArrayGetOp, ArraySetOp:
+    true
+  of DivideOp:
+    ModelsFixed
+  of ModuloGlobalImmediateOp:
+    item.c != 0
+  of JumpUnlessGlobalModuloEqualZeroOp:
+    item.b != 0
+  else:
+    false
+
+proc findLoops(code: seq[Instruction], capacity: int): seq[Loop]
+    {.raises: [].} =
+  ## Picks the loops worth specialising: each closed by a jump back to its
+  ## head, made only of operations that fit, and touching no more globals
+  ## than there are registers. Outer loops are tried first, and a loop
+  ## inside one already taken runs inside that one's registers.
+  var candidates: seq[(int, int)]
+  for index, item in code:
+    if item.op == JumpOp and int(item.a) <= index and item.a >= 0:
+      candidates.add((int(item.a), index + 1))
+  var covered = newSeq[bool](code.len)
+  while candidates.len > 0:
+    var widest = 0
+    for position in 1 ..< candidates.len:
+      let (start, stop) = candidates[position]
+      if stop - start > candidates[widest][1] - candidates[widest][0]:
+        widest = position
+    let (start, stop) = candidates[widest]
+    candidates.delete(widest)
+    var fits = true
+    var globals: seq[int32]
+    for index in start ..< stop:
+      if covered[index] or not code[index].fitsLoop:
+        fits = false
+        break
+      code[index].loopGlobals(globals)
+    if not fits or globals.len == 0 or globals.len > capacity:
+      continue
+    for index in start ..< stop:
+      covered[index] = true
+    result.add(Loop(start: start, stop: stop, globals: globals))
+
 proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     ownerOf: seq[int32], extents: seq[ArrayExtent], constants: seq[int32],
     limits: CallLimits, far: bool): (seq[byte], seq[int])
     {.raises: [BasicError].} =
   ## Emits the whole program and returns its bytes along with where each
   ## offset's block starts.
+  ##
+  ## Every offset has general code, which keeps every value in memory and
+  ## so can hand any instruction to the interpreter's code. A loop that
+  ## fits also gets a second, specialised copy that keeps its globals in
+  ## registers. Entering the loop's head checks they hold whole numbers
+  ## and moves into the copy; anything the copy does not expect writes the
+  ## registers back and carries on in the general code of that very
+  ## instruction, which does it the ordinary way.
   when not (NativeArm64 or NativeAmd64):
     raise newException(BasicError, "BASIC has no whole-program backend here")
   else:
     var e = Emitter(far: far)
     var blocks = newSeq[Label](code.len + 1)
+    var general = newSeq[Label](code.len + 1)
     for index in 0 .. code.len:
       blocks[index] = e.label()
+      general[index] = blocks[index]
     let dispatchLabel = e.label()
     let slowLabel = e.label()
     let failedLabel = e.label()
+
+    let loops = findLoops(code, Hoisting.len)
+    var loopAt = newSeq[int](code.len)
+    for index in 0 ..< code.len:
+      loopAt[index] = -1
+    for number, loop in loops:
+      loopAt[loop.start] = number
+      general[loop.start] = e.label()
 
     e.prologue()
     e.jump(dispatchLabel)
 
     var stubs: seq[Stub]
-    for index in 0 ..< code.len:
-      let item = code[index]
-      let offset = int32(index)
-      e.place(blocks[index])
+
+    template emitInstruction(at: int, specialised: static bool,
+        loop: Loop, inside: seq[Label], exits: var seq[(Label, int, bool)]) =
+      ## Emits one instruction, in general code or inside a loop's copy.
+      let item = code[at]
+      let offset = int32(at)
 
       template slowFor(after: Branching): Label =
-        ## Names a slow path for this instruction, emitted after the block.
-        let stub = Stub(label: e.label(), offset: offset, carry: after)
-        stubs.add(stub)
-        stub.label
+        ## Names where this instruction goes when it cannot run inline.
+        when specialised:
+          leaveFor(at, true)
+        else:
+          let stub = Stub(label: e.label(), offset: offset, carry: after)
+          stubs.add(stub)
+          stub.label
+
+      template leaveFor(target: int, again: bool): Label =
+        ## Names a stub that writes the loop's registers back and goes on
+        ## in general code: the same instruction again, or a branch target.
+        var found = -1
+        for position, exit in exits:
+          if exit[1] == target and exit[2] == again:
+            found = position
+        if found < 0:
+          exits.add((e.label(), target, again))
+          found = exits.len - 1
+        exits[found][0]
+
+      template toBlock(target: int32): Label =
+        ## Names where a branch to an offset lands.
+        when specialised:
+          if int(target) >= loop.start and int(target) < loop.stop:
+            inside[int(target) - loop.start]
+          else:
+            leaveFor(int(target), false)
+        else:
+          blocks[int(target)]
+
+      template held(which: int32): int {.used.} =
+        ## Returns which register holds a global inside this loop.
+        loop.globals.find(which)
 
       template runSlow() =
         ## Runs this instruction through the interpreter's code in line.
         e.callSlow(offset, slowLabel)
 
-      var fallsThrough = true
+      var fallsThrough {.used.} = true
       case item.op
       of MeterOp:
         e.meter(item.b, item.a, slowFor(ToNext))
@@ -1584,15 +1905,31 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       of MoveOp:
         e.copyValue(slot(item.a), slot(item.b))
       of LoadGlobalOp:
-        e.copyValue(slot(item.a), global(item.b))
+        when specialised:
+          e.hoistedToTemp(0, held(item.b))
+          e.writeWhole(slot(item.a), 0)
+        else:
+          e.copyValue(slot(item.a), global(item.b))
       of LoadHostDataOp:
         e.copyValue(slot(item.a), host(item.b))
       of StoreGlobalOp:
-        e.copyValue(global(item.a), slot(item.b))
+        when specialised:
+          let slow = slowFor(ToNext)
+          e.readValue(0, 2, slot(item.b))
+          e.unlessWhole(2, slow)
+          e.tempToHoisted(held(item.a), 0)
+        else:
+          e.copyValue(global(item.a), slot(item.b))
       of StoreGlobalImmediateOp:
-        e.writeConstant(global(item.a), 0, item.b)
+        when specialised:
+          e.setHoisted(held(item.a), item.b)
+        else:
+          e.writeConstant(global(item.a), 0, item.b)
       of MoveGlobalOp:
-        e.copyValue(global(item.a), global(item.b))
+        when specialised:
+          e.copyHoisted(held(item.a), held(item.b))
+        else:
+          e.copyValue(global(item.a), global(item.b))
       of SetArgumentOp:
         e.copyValue(argument(item.a), slot(item.b))
       of SetArgumentImmediateOp:
@@ -1600,55 +1937,90 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       of SetArgumentGlobalOp:
         e.copyValue(argument(item.a), global(item.b))
       of AddGlobalImmediateOp:
-        let slow = slowFor(ToNext)
-        e.readValue(0, 2, global(item.a))
-        e.unlessWhole(2, slow)
-        e.loadConstant(1, item.b)
-        e.add(0, 1)
-        e.writeWhole(global(item.a), 0)
+        when specialised:
+          e.addHoistedConstant(held(item.a), item.b)
+        else:
+          let slow = slowFor(ToNext)
+          e.readValue(0, 2, global(item.a))
+          e.unlessWhole(2, slow)
+          e.loadConstant(1, item.b)
+          e.add(0, 1)
+          e.writeWhole(global(item.a), 0)
       of AddGlobalOp, AddGlobalHostDataOp, AddGlobalRegisterOp:
-        let slow = slowFor(ToNext)
-        let source =
-          case item.op
-          of AddGlobalOp: global(item.b)
-          of AddGlobalHostDataOp: host(item.b)
-          else: slot(item.b)
-        e.readValue(0, 2, global(item.a))
-        e.unlessWhole(2, slow)
-        e.readValue(1, 3, source)
-        e.unlessWhole(3, slow)
-        e.add(0, 1)
-        e.writeWhole(global(item.a), 0)
+        when specialised:
+          if item.op == AddGlobalOp:
+            e.addHoisted(held(item.a), held(item.b))
+          else:
+            let slow = slowFor(ToNext)
+            let source =
+              if item.op == AddGlobalHostDataOp: host(item.b)
+              else: slot(item.b)
+            e.readValue(1, 3, source)
+            e.unlessWhole(3, slow)
+            e.addTempToHoisted(held(item.a), 1)
+        else:
+          let slow = slowFor(ToNext)
+          let source =
+            case item.op
+            of AddGlobalOp: global(item.b)
+            of AddGlobalHostDataOp: host(item.b)
+            else: slot(item.b)
+          e.readValue(0, 2, global(item.a))
+          e.unlessWhole(2, slow)
+          e.readValue(1, 3, source)
+          e.unlessWhole(3, slow)
+          e.add(0, 1)
+          e.writeWhole(global(item.a), 0)
       of ModuloGlobalImmediateOp:
         if item.c == 0:
           runSlow()
         else:
-          let slow = slowFor(ToNext)
-          e.readValue(0, 2, global(item.b))
-          e.unlessWhole(2, slow)
-          e.loadConstant(1, item.c)
-          e.remainder(0, 1)
-          e.writeWhole(global(item.a), 0)
+          when specialised:
+            e.hoistedToTemp(0, held(item.b))
+            e.loadConstant(1, item.c)
+            e.remainder(0, 1)
+            e.tempToHoisted(held(item.a), 0)
+          else:
+            let slow = slowFor(ToNext)
+            e.readValue(0, 2, global(item.b))
+            e.unlessWhole(2, slow)
+            e.loadConstant(1, item.c)
+            e.remainder(0, 1)
+            e.writeWhole(global(item.a), 0)
       of AddGlobalArrayGlobalIndexOp:
         let slow = slowFor(ToNext)
-        e.readValue(0, 2, global(item.c))
-        e.unlessWhole(2, slow)
-        e.cellAddress(0, extents[int(item.b)], slow)
-        e.readValue(1, 3, cell())
-        e.unlessWhole(3, slow)
-        e.readValue(0, 2, global(item.a))
-        e.unlessWhole(2, slow)
-        e.add(0, 1)
-        e.writeWhole(global(item.a), 0)
+        when specialised:
+          e.hoistedToTemp(0, held(item.c))
+          e.cellAddress(0, extents[int(item.b)], slow)
+          e.readValue(1, 3, cell())
+          e.unlessWhole(3, slow)
+          e.addTempToHoisted(held(item.a), 1)
+        else:
+          e.readValue(0, 2, global(item.c))
+          e.unlessWhole(2, slow)
+          e.cellAddress(0, extents[int(item.b)], slow)
+          e.readValue(1, 3, cell())
+          e.unlessWhole(3, slow)
+          e.readValue(0, 2, global(item.a))
+          e.unlessWhole(2, slow)
+          e.add(0, 1)
+          e.writeWhole(global(item.a), 0)
       of ArrayAddGlobalsOp:
         let slow = slowFor(ToNext)
-        e.readValue(0, 2, global(item.b))
-        e.unlessWhole(2, slow)
-        e.cellAddress(0, extents[int(item.a)], slow)
-        e.readValue(1, 3, cell())
-        e.unlessWhole(3, slow)
-        e.readValue(0, 2, global(item.c))
-        e.unlessWhole(2, slow)
+        when specialised:
+          e.hoistedToTemp(0, held(item.b))
+          e.cellAddress(0, extents[int(item.a)], slow)
+          e.readValue(1, 3, cell())
+          e.unlessWhole(3, slow)
+          e.hoistedToTemp(0, held(item.c))
+        else:
+          e.readValue(0, 2, global(item.b))
+          e.unlessWhole(2, slow)
+          e.cellAddress(0, extents[int(item.a)], slow)
+          e.readValue(1, 3, cell())
+          e.unlessWhole(3, slow)
+          e.readValue(0, 2, global(item.c))
+          e.unlessWhole(2, slow)
         e.add(1, 0)
         e.writeWhole(cell(), 1)
       of AddOp, SubtractOp, MultiplyOp:
@@ -1776,7 +2148,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         e.bitNot(0)
         e.writeWhole(slot(item.a), 0)
       of JumpOp:
-        e.jump(blocks[int(item.a)])
+        e.jump(toBlock(item.a))
         fallsThrough = false
       of JumpIfZeroOp:
         # A fixed-point zero is all zero bits too, so either kind tests
@@ -1784,40 +2156,46 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         let slow = slowFor(ToOffset)
         e.readValue(0, 2, slot(item.a))
         e.unlessNumeric(2, slow)
-        e.jumpIfZeroValue(0, blocks[int(item.b)])
+        e.jumpIfZeroValue(0, toBlock(item.b))
       of JumpUnlessGlobalEqualImmediateOp,
           JumpUnlessGlobalNotEqualImmediateOp,
           JumpUnlessGlobalLessImmediateOp,
           JumpUnlessGlobalLessEqualImmediateOp,
           JumpUnlessGlobalGreaterImmediateOp,
           JumpUnlessGlobalGreaterEqualImmediateOp:
-        let slow = slowFor(ToOffset)
-        let whole = e.label()
-        let decided = e.label()
-        e.readValue(0, 2, global(item.a))
-        e.whenWhole(2, whole)
-        # A fixed-point global meets the constant on the widened scale.
-        e.unlessFixed(2, slow)
-        e.scaleWide(0, 2)
-        e.loadWide(1, int64(item.b) * 65536)
-        e.compareWide(0, 1)
-        e.jump(decided)
-        e.place(whole)
-        e.compareConstant(0, item.b)
-        e.place(decided)
-        e.jumpOn(takenOn(item.op), blocks[int(item.c)])
+        when specialised:
+          e.compareHoisted(held(item.a), item.b)
+        else:
+          let slow = slowFor(ToOffset)
+          let whole = e.label()
+          let decided = e.label()
+          e.readValue(0, 2, global(item.a))
+          e.whenWhole(2, whole)
+          # A fixed-point global meets the constant on the widened scale.
+          e.unlessFixed(2, slow)
+          e.scaleWide(0, 2)
+          e.loadWide(1, int64(item.b) * 65536)
+          e.compareWide(0, 1)
+          e.jump(decided)
+          e.place(whole)
+          e.compareConstant(0, item.b)
+          e.place(decided)
+        e.jumpOn(takenOn(item.op), toBlock(item.c))
       of JumpUnlessGlobalModuloEqualZeroOp:
         if item.b == 0:
           runSlow()
           e.jump(dispatchLabel)
           fallsThrough = false
         else:
-          let slow = slowFor(ToOffset)
-          e.readValue(0, 2, global(item.a))
-          e.unlessWhole(2, slow)
+          when specialised:
+            e.hoistedToTemp(0, held(item.a))
+          else:
+            let slow = slowFor(ToOffset)
+            e.readValue(0, 2, global(item.a))
+            e.unlessWhole(2, slow)
           e.loadConstant(1, item.b)
           e.remainder(0, 1)
-          e.jumpIfNotZeroValue(0, blocks[int(item.c)])
+          e.jumpIfNotZeroValue(0, toBlock(item.c))
       of ArrayGetOp:
         let slow = slowFor(ToNext)
         e.readValue(0, 2, slot(item.c))
@@ -1831,7 +2209,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         e.cellAddress(0, extents[int(item.a)], slow)
         e.copyValue(cell(), slot(item.c))
       of CallOp, GosubOp:
-        let owner = routines[int(ownerOf[index])]
+        let owner = routines[int(ownerOf[at])]
         let slow = slowFor(ToOffset)
         if item.op == CallOp:
           let callee = routines[int(item.a)]
@@ -1839,12 +2217,12 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
             owner.registers, offset + 1, limits, slow)
           e.jump(blocks[int(callee.entry)])
         else:
-          e.enterRoutine(true, ownerOf[index], owner.registers, 0,
+          e.enterRoutine(true, ownerOf[at], owner.registers, 0,
             owner.registers, offset + 1, limits, slow)
           e.jump(blocks[int(item.a)])
         fallsThrough = false
       of ReturnOp:
-        let owner = routines[int(ownerOf[index])]
+        let owner = routines[int(ownerOf[at])]
         e.leaveRoutine(owner.parameters, false, slowFor(ToOffset))
         fallsThrough = false
       of ExitSubOp:
@@ -1864,20 +2242,69 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
           PrintNewlineOp:
         runSlow()
 
-      # Slow paths go after the block, out of the way of the fast ones.
-      let blockEnds = index + 1 == code.len or code[index + 1].op == MeterOp
-      if blockEnds and stubs.len > 0:
-        if fallsThrough:
-          e.jump(blocks[index + 1])
-        for stub in stubs:
-          e.place(stub.label)
-          e.callSlow(stub.offset, slowLabel)
-          case stub.carry
-          of ToNext:
-            e.jump(blocks[int(stub.offset) + 1])
-          of ToOffset:
-            e.jump(dispatchLabel)
-        stubs.setLen(0)
+      when not specialised:
+        # Slow paths go after the block, out of the way of the fast ones.
+        let blockEnds = at + 1 == code.len or
+          code[at + 1].op == MeterOp
+        if blockEnds and stubs.len > 0:
+          if fallsThrough:
+            e.jump(blocks[at + 1])
+          for stub in stubs:
+            e.place(stub.label)
+            e.callSlow(stub.offset, slowLabel)
+            case stub.carry
+            of ToNext:
+              e.jump(blocks[int(stub.offset) + 1])
+            of ToOffset:
+              e.jump(dispatchLabel)
+          stubs.setLen(0)
+
+    var noExits: seq[(Label, int, bool)]
+    var loopCopies: seq[seq[Label]]
+    for loop in loops:
+      var inside: seq[Label]
+      for index in loop.start ..< loop.stop:
+        inside.add(e.label())
+      loopCopies.add(inside)
+
+    for index in 0 ..< code.len:
+      e.place(blocks[index])
+      let number = loopAt[index]
+      if number >= 0:
+        # Entering a loop's head: prove its globals whole numbers and move
+        # them into registers, or run it in general code if any is not.
+        # Every tag is looked at before any register is filled, because
+        # one of those registers may be what general code reads through.
+        let loop = loops[number]
+        e.beginHoisting()
+        for which in loop.globals:
+          e.guardHoisted(which, general[loop.start])
+        for position, which in loop.globals:
+          e.loadHoisted(position, which)
+        e.jump(loopCopies[number][0])
+        e.place(general[index])
+      emitInstruction(index, false, Loop(), @[], noExits)
+
+    # Each loop's own copy, after all the general code.
+    for number, loop in loops:
+      var exits: seq[(Label, int, bool)]
+      let inside = loopCopies[number]
+      for index in loop.start ..< loop.stop:
+        e.place(inside[index - loop.start])
+        emitInstruction(index, true, loop, inside, exits)
+      # Leaving writes every register back, then carries on in general
+      # code: at a branch target, or at the instruction that could not be
+      # done here, which general code then does the ordinary way.
+      for (stub, target, again) in exits:
+        e.place(stub)
+        e.beginHoisting()
+        for position, which in loop.globals:
+          e.storeHoisted(position, which)
+        e.endHoisting()
+        if again:
+          e.jump(general[target])
+        else:
+          e.jump(blocks[target])
 
     # One past the end holds nothing to run. The interpreter's code is
     # left to refuse it the way it would.
