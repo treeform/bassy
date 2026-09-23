@@ -248,6 +248,15 @@ proc comparisonCheck(op: Op): Check {.raises: [].} =
   of GreaterOp: GreaterCheck
   else: GreaterEqualCheck
 
+proc swapped(check: Check): Check {.raises: [].} =
+  ## Returns the outcome that asks the same with the operands turned round.
+  case check
+  of LessCheck: GreaterCheck
+  of LessEqualCheck: GreaterEqualCheck
+  of GreaterCheck: LessCheck
+  of GreaterEqualCheck: LessEqualCheck
+  else: check
+
 proc takenOn(op: Op): Check {.raises: [].} =
   ## Returns the outcome on which a fused test takes its branch.
   case op
@@ -2077,6 +2086,8 @@ type
     tag: int
     kind: Kind
     dirty: bool
+    constant: bool
+    value: int32
 
   Loop = object
     ## A loop whose globals can live in registers while it runs.
@@ -2844,13 +2855,15 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       held[position]
 
     template bindValue(target: Place, valueRegister, kindRegister: int,
-        known: Kind) =
-      ## Holds a new value for a place, pending until written back.
+        known: Kind, isConstant = false, bits = 0'i32) =
+      ## Holds a new value for a place, pending until written back, along
+      ## with what it is when that is known here.
       let position = findHeld(target)
       if position >= 0:
         forget(position)
       held.add(Held(place: target, payload: valueRegister,
-        tag: kindRegister, kind: known, dirty: true))
+        tag: kindRegister, kind: known, dirty: true, constant: isConstant,
+        value: bits))
       inc uses[valueRegister]
       if kindRegister >= 0:
         inc uses[kindRegister]
@@ -2904,7 +2917,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         let target =
           if item.op == StoreGlobalImmediateOp: global(item.a)
           else: slot(item.a)
-        bindValue(target, register, -1, kind)
+        bindValue(target, register, -1, kind, true, bits)
       of MoveOp, LoadGlobalOp, StoreGlobalOp, MoveGlobalOp, LoadHostDataOp:
         let (target, source) =
           case item.op
@@ -2915,7 +2928,8 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
           else: (slot(item.a), host(item.b))
         makeRoom([source], 0)
         let value = fetch(source, offset)
-        bindValue(target, value.payload, value.tag, value.kind)
+        bindValue(target, value.payload, value.tag, value.kind,
+          value.constant, value.value)
       of SetArgumentOp, SetArgumentGlobalOp:
         let source =
           if item.op == SetArgumentOp: slot(item.b)
@@ -2974,6 +2988,18 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
                 e.fastMultiplyFixed(target, source)
               else:
                 e.fastMultiply(target, source)
+          template promote(widened: int, side: Held, exit: Label) =
+            ## Turns a whole number into fixed point in a fresh register.
+            ## A constant is turned here, and one out of range can only
+            ## ever leave, as the interpreter would refuse it.
+            if side.constant:
+              if side.value >= -32768 and side.value <= 32767:
+                e.fastConstant(widened, side.value shl FixedShift)
+              else:
+                e.jump(exit)
+            else:
+              e.fastMove(widened, side.payload)
+              e.fastToFixed(widened, exit)
           if b.kind != UnknownKind and c.kind != UnknownKind:
             let result = acquire()
             if b.kind == c.kind:
@@ -2984,19 +3010,62 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
               let exit = leaveHere(offset)
               let widened = acquire()
               if b.kind == WholeKind:
-                e.fastMove(widened, b.payload)
-                e.fastToFixed(widened, exit)
+                promote(widened, b, exit)
                 e.fastMove(result, widened)
                 operate(result, c.payload, true)
               else:
-                e.fastMove(widened, c.payload)
-                e.fastToFixed(widened, exit)
+                promote(widened, c, exit)
                 e.fastMove(result, b.payload)
                 operate(result, widened, true)
             let kind =
               if b.kind == WholeKind and c.kind == WholeKind: WholeKind
               else: FixedKind
             bindValue(slot(item.a), result, -1, kind)
+          elif b.kind != UnknownKind or c.kind != UnknownKind:
+            # One kind is known, so one test of the other decides: the
+            # same kind goes straight through, the other promotes.
+            let knownLeft = b.kind != UnknownKind
+            let known = if knownLeft: b else: c
+            let unknown = if knownLeft: c else: b
+            let exit = leaveHere(offset)
+            let result = acquire()
+            let widened = acquire()
+            let otherWay = e.label()
+            let finished = e.label()
+            if known.kind == WholeKind:
+              let resultTag = acquire()
+              e.fastJumpIfNotZero(unknown.tag, otherWay)
+              e.fastMove(result, b.payload)
+              operate(result, c.payload, false)
+              e.fastConstant(resultTag, 0)
+              e.jump(finished)
+              e.place(otherWay)
+              promote(widened, known, exit)
+              if knownLeft:
+                e.fastMove(result, widened)
+                operate(result, c.payload, true)
+              else:
+                e.fastMove(result, b.payload)
+                operate(result, widened, true)
+              e.fastConstant(resultTag, FixedTag)
+              e.place(finished)
+              bindValue(slot(item.a), result, resultTag, UnknownKind)
+            else:
+              e.fastJumpIfZero(unknown.tag, otherWay)
+              e.fastMove(result, b.payload)
+              operate(result, c.payload, true)
+              e.jump(finished)
+              e.place(otherWay)
+              e.fastMove(widened, unknown.payload)
+              e.fastToFixed(widened, exit)
+              if knownLeft:
+                e.fastMove(result, b.payload)
+                operate(result, widened, true)
+              else:
+                e.fastMove(result, widened)
+                operate(result, c.payload, true)
+              e.place(finished)
+              bindValue(slot(item.a), result, -1, FixedKind)
           else:
             let exit = leaveHere(offset)
             let leftTag = tagOf(b)
@@ -3061,7 +3130,40 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         makeRoom([left, right], 3 + known)
         let b = fetch(left, offset)
         let c = fetch(right, offset)
-        if b.kind != UnknownKind and b.kind == c.kind:
+        var check = comparisonCheck(item.op)
+        if (c.constant or b.constant) and not (b.constant and c.constant):
+          # One side is a constant: compare the other against it directly,
+          # turning the question round when the constant came first.
+          let constantRight = c.constant
+          let fixed = if constantRight: c else: b
+          let other = if constantRight: b else: c
+          if not constantRight:
+            check = swapped(check)
+          let bits = fixed.value
+          let wideBits =
+            if fixed.kind == FixedKind: int64(bits)
+            else: int64(bits) * 65536
+          let sameKind = e.label()
+          let decided = e.label()
+          if other.kind == fixed.kind:
+            e.fastCompareConstant(other.payload, bits)
+          else:
+            let otherTag = tagOf(other)
+            let wide = acquire()
+            let bound = acquire()
+            if fixed.kind == WholeKind:
+              e.fastJumpIfZero(otherTag, sameKind)
+            else:
+              e.fastJumpIfNotZero(otherTag, sameKind)
+            e.fastMove(wide, other.payload)
+            e.fastScaleWide(wide, otherTag)
+            e.fastLoadWide(bound, wideBits)
+            e.fastCompareWide(wide, bound)
+            e.jump(decided)
+            e.place(sameKind)
+            e.fastCompareConstant(other.payload, bits)
+            e.place(decided)
+        elif b.kind != UnknownKind and b.kind == c.kind:
           e.fastCompare(b.payload, c.payload)
         else:
           # Kinds that differ compare on the widened fixed-point scale.
@@ -3082,7 +3184,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
           e.fastCompareWide(wideLeft, wideRight)
           e.place(decided)
         let result = acquire()
-        e.fastAnswer(result, comparisonCheck(item.op))
+        e.fastAnswer(result, check)
         bindValue(slot(item.a), result, -1, WholeKind)
       of JumpOp:
         flushAll()
