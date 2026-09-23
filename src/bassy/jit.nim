@@ -28,6 +28,9 @@ const
   ## Dividing to a fixed-point answer is written for AArch64 so far.
   ModelsDivide* = NativeArm64
 
+  ## Reaching globals where they sit is written for AArch64 so far.
+  ModelsMemoryGlobals* = NativeArm64
+
 when NativeArm64:
   import arm64
 elif NativeAmd64:
@@ -252,6 +255,26 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
     item.b != 0
   else:
     false
+
+proc suitsMemoryGlobals(item: Instruction): bool {.raises: [].} =
+  ## Reports whether an operation has a form that reaches globals where
+  ## they sit. Anything touching a global without one keeps the loop out.
+  case item.op
+  of LoadGlobalOp, StoreGlobalOp, MoveGlobalOp, SetArgumentGlobalOp,
+      StoreGlobalImmediateOp, AddGlobalImmediateOp,
+      JumpUnlessGlobalEqualImmediateOp,
+      JumpUnlessGlobalNotEqualImmediateOp,
+      JumpUnlessGlobalLessImmediateOp,
+      JumpUnlessGlobalLessEqualImmediateOp,
+      JumpUnlessGlobalGreaterImmediateOp,
+      JumpUnlessGlobalGreaterEqualImmediateOp:
+    true
+  of AddGlobalOp, AddGlobalHostDataOp, AddGlobalRegisterOp,
+      ModuloGlobalImmediateOp, ArrayAddGlobalsOp,
+      AddGlobalArrayGlobalIndexOp, JumpUnlessGlobalModuloEqualZeroOp:
+    false
+  else:
+    true
 
 proc touchedGlobals(item: Instruction, globals: var seq[int32])
     {.raises: [].} =
@@ -1187,6 +1210,8 @@ when NativeArm64:
 
   proc resumeAtStoredOffset(emitter: var Assembler,
       hoistedFor: seq[int32]) {.raises: [BasicError].} =
+    ## The list is empty when globals were left in memory, so nothing is
+    ## written back; the registers it would name were never filled.
     ## Hands control back at the offset already written to the context,
     ## which is where a return lands when this region did not compile it.
     for slot, index in hoistedFor:
@@ -1198,6 +1223,100 @@ when NativeArm64:
     emitter.storeDouble(Work, Context, ContextWork)
     emitter.loadImmediate(Word32, Context, int64(ord(NativeCompleted)))
     emitter.endRegion()
+
+  ## Globals left where they are
+  ##
+  ## A loop touching more globals than there are registers to hold them
+  ## keeps them all in memory instead. Every access then costs a load or
+  ## a store, but the loop compiles at all, which the alternative did not.
+
+  proc copyValue(emitter: var Assembler, fromBase: Register, fromOffset: int,
+      toBase: Register, toOffset: int) {.raises: [BasicError].} =
+    ## Moves one value entire, whatever kind it holds.
+    emitter.loadDouble(ValueScratch[0], fromBase, fromOffset)
+    emitter.loadDouble(ValueScratch[1], fromBase, fromOffset + ValuePayload)
+    emitter.storeDouble(ValueScratch[0], toBase, toOffset)
+    emitter.storeDouble(ValueScratch[1], toBase, toOffset + ValuePayload)
+
+  proc copyGlobalToSlot(emitter: var Assembler, index, slot: int32)
+      {.raises: [BasicError].} =
+    ## Reads a global into a frame slot.
+    emitter.copyValue(GlobalsBase, int(index) * ValueStride,
+      RegistersBase, int(slot) * ValueStride)
+
+  proc copySlotToGlobal(emitter: var Assembler, slot, index: int32)
+      {.raises: [BasicError].} =
+    ## Writes a frame slot into a global.
+    emitter.copyValue(RegistersBase, int(slot) * ValueStride,
+      GlobalsBase, int(index) * ValueStride)
+
+  proc copyGlobalToGlobal(emitter: var Assembler, destination, source: int32)
+      {.raises: [BasicError].} =
+    ## Copies one global into another.
+    emitter.copyValue(GlobalsBase, int(source) * ValueStride,
+      GlobalsBase, int(destination) * ValueStride)
+
+  proc copyGlobalToArgument(emitter: var Assembler, argument, index: int32)
+      {.raises: [BasicError].} =
+    ## Stages a global as an argument.
+    emitter.loadDouble(Scratch, Context, ContextArguments)
+    emitter.copyValue(GlobalsBase, int(index) * ValueStride,
+      Scratch, int(argument) * ValueStride)
+
+  proc setGlobalWhole(emitter: var Assembler, index: int32, value: int32)
+      {.raises: [BasicError].} =
+    ## Writes a whole number into a global.
+    let base = int(index) * ValueStride
+    emitter.storeByte(zeroRegister, GlobalsBase, base)
+    emitter.loadImmediate(Word32, ValueScratch[0], int64(value))
+    emitter.storeWord(ValueScratch[0], GlobalsBase, base + ValuePayload)
+
+  proc readGlobalWhole(emitter: var Assembler, scratch: int, index: int32,
+      leave: Label) {.raises: [BasicError].} =
+    ## Reads a global as a whole number, leaving the region if it is not.
+    let base = int(index) * ValueStride
+    emitter.loadByte(Scratch, GlobalsBase, base)
+    emitter.branchIfNotZero(Word32, Scratch, leave)
+    emitter.loadWord(ValueScratch[scratch], GlobalsBase, base + ValuePayload)
+
+  proc addToGlobal(emitter: var Assembler, index: int32, value: int32,
+      leave: Label) {.raises: [BasicError].} =
+    ## Adds a constant to a global of either kind. A whole number added to
+    ## a fixed-point one has to become fixed point first, which only works
+    ## inside its range, so outside that only whole numbers are taken.
+    let base = int(index) * ValueStride
+    let widens = value >= -32768 and value <= 32767
+    emitter.loadByte(Scratch, GlobalsBase, base)
+    if widens:
+      emitter.compareImmediate(Word32, Scratch, FixedTag)
+      emitter.branchIf(UnsignedGreaterCondition, leave)
+    else:
+      emitter.branchIfNotZero(Word32, Scratch, leave)
+    emitter.loadWord(ValueScratch[0], GlobalsBase, base + ValuePayload)
+    if widens:
+      let fixedWay = emitter.label()
+      let done = emitter.label()
+      emitter.compareImmediate(Word32, Scratch, FixedTag)
+      emitter.branchIf(EqualCondition, fixedWay)
+      emitter.loadImmediate(Word32, ValueScratch[1], int64(value))
+      emitter.branch(done)
+      emitter.place(fixedWay)
+      emitter.loadImmediate(Word32, ValueScratch[1],
+        int64(value) * 65536)
+      emitter.place(done)
+    else:
+      emitter.loadImmediate(Word32, ValueScratch[1], int64(value))
+    emitter.addRegister(Word32, ValueScratch[0], ValueScratch[0],
+      ValueScratch[1])
+    emitter.storeWord(ValueScratch[0], GlobalsBase, base + ValuePayload)
+
+  proc compareGlobalWhole(emitter: var Assembler, index: int32,
+      value: int32, leave: Label) {.raises: [BasicError].} =
+    ## Sets flags from a global against a whole number, leaving the region
+    ## unless the global is a whole number too.
+    emitter.readGlobalWhole(0, index, leave)
+    emitter.loadImmediate(Word32, ValueScratch[1], int64(value))
+    emitter.compareRegister(Word32, ValueScratch[0], ValueScratch[1])
 
   proc setSlotKind(emitter: var Assembler, slot: int32, tag: int)
       {.raises: [BasicError].} =
@@ -1879,9 +1998,24 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
           return nil
         if callee.registers > MaxClearedSlots:
           return nil
-    if hoisted.len == 0 or hoisted.len > MaxHoistedGlobals:
-      return nil
-    for index in hoisted:
+    ## Too many globals to hold in registers means holding none of them
+    ## there. Only the operations written for memory are taken then, and
+    ## only where the generator has them.
+    let hoisting = hoisted.len > 0 and hoisted.len <= MaxHoistedGlobals
+    if not hoisting:
+      when not ModelsMemoryGlobals:
+        return nil
+      else:
+        for member in members:
+          if not code[int(member)].suitsMemoryGlobals:
+            return nil
+    var reached: seq[int32]
+    if hoisting:
+      reached = hoisted
+    else:
+      for member in members:
+        code[int(member)].touchedGlobals(reached)
+    for index in reached:
       if index < 0 or int(index) >= globals:
         return nil
       if int(index) > (MaxDisplacementBytes - ValuePayload) div ValueStride:
@@ -1889,7 +2023,7 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     when NativeArm64:
       # The tag is read through a scaled byte offset, which is narrower
       # than the range the bounds check above already allows.
-      for index in hoisted:
+      for index in reached:
         if int(index) * ValueStride + ValuePayload > 4095:
           return nil
 
@@ -1958,10 +2092,11 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     emitter.startRegion()
     if usesSlots:
       emitter.loadRegistersBase()
-    for slot, index in hoisted:
-      let base = int(index) * ValueStride
-      emitter.guardInteger(base, guardFailed)
-      emitter.loadHoisted(slot, base)
+    if hoisting:
+      for slot, index in hoisted:
+        let base = int(index) * ValueStride
+        emitter.guardInteger(base, guardFailed)
+        emitter.loadHoisted(slot, base)
     when CountedLoops:
       for slot, value in pool:
         emitter.loadPooled(slot, value)
@@ -2026,11 +2161,23 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
             exitLabel(int32(index), NativeExhausted, index)
           )
       of StoreGlobalImmediateOp:
-        emitter.setSlot(slotOf(item.a), item.b)
+        if hoisting:
+          emitter.setSlot(slotOf(item.a), item.b)
+        else:
+          when ModelsMemoryGlobals:
+            emitter.setGlobalWhole(item.a, item.b)
       of MoveGlobalOp:
-        emitter.copySlot(slotOf(item.a), slotOf(item.b))
+        if hoisting:
+          emitter.copySlot(slotOf(item.a), slotOf(item.b))
+        else:
+          when ModelsMemoryGlobals:
+            emitter.copyGlobalToGlobal(item.a, item.b)
       of AddGlobalImmediateOp:
-        emitter.addToSlot(slotOf(item.a), item.b)
+        if hoisting:
+          emitter.addToSlot(slotOf(item.a), item.b)
+        else:
+          when ModelsMemoryGlobals:
+            emitter.addToGlobal(item.a, item.b, leaveHere)
       of AddGlobalOp:
         emitter.addSlots(slotOf(item.a), slotOf(item.b))
       of LoadImmediateOp:
@@ -2040,11 +2187,19 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         emitter.readSlot(0, item.b, leaveHere)
         emitter.writeSlot(0, item.a)
       of LoadGlobalOp:
-        emitter.scratchFromHoisted(0, slotOf(item.b))
-        emitter.writeSlot(0, item.a)
+        if hoisting:
+          emitter.scratchFromHoisted(0, slotOf(item.b))
+          emitter.writeSlot(0, item.a)
+        else:
+          when ModelsMemoryGlobals:
+            emitter.copyGlobalToSlot(item.b, item.a)
       of StoreGlobalOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.hoistedFromScratch(slotOf(item.a), 0)
+        if hoisting:
+          emitter.readSlot(0, item.b, leaveHere)
+          emitter.hoistedFromScratch(slotOf(item.a), 0)
+        else:
+          when ModelsMemoryGlobals:
+            emitter.copySlotToGlobal(item.b, item.a)
       of AddOp, SubtractOp:
         # Whole and fixed-point numbers add and subtract through the same
         # instructions, so one path serves both and the answer keeps the
@@ -2141,7 +2296,11 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
           of SetArgumentImmediateOp:
             emitter.stageArgumentWhole(item.a, item.b)
           of SetArgumentGlobalOp:
-            emitter.stageArgumentFromHoisted(item.a, slotOf(item.b))
+            if hoisting:
+              emitter.stageArgumentFromHoisted(item.a, slotOf(item.b))
+            else:
+              when ModelsMemoryGlobals:
+                emitter.copyGlobalToArgument(item.a, item.b)
           of CallOp:
             let callee = routines[int(item.a)]
             emitter.enterRoutine(
@@ -2202,7 +2361,11 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
           JumpUnlessGlobalLessEqualImmediateOp,
           JumpUnlessGlobalGreaterImmediateOp,
           JumpUnlessGlobalGreaterEqualImmediateOp:
-        emitter.compareSlot(slotOf(item.a), item.b, poolSlot(item.b))
+        if hoisting:
+          emitter.compareSlot(slotOf(item.a), item.b, poolSlot(item.b))
+        else:
+          when ModelsMemoryGlobals:
+            emitter.compareGlobalWhole(item.a, item.b, leaveHere)
         branchOut(item.c, takenOn(item.op))
       of JumpUnlessGlobalModuloEqualZeroOp:
         # Dividing by one or minus one always leaves no remainder, and
@@ -2232,8 +2395,9 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
 
     ## Shared exit: publish the hoisted globals and budgets, then return.
     emitter.place(writeback)
-    for slot, index in hoisted:
-      emitter.storeHoisted(slot, int(index) * ValueStride)
+    if hoisting:
+      for slot, index in hoisted:
+        emitter.storeHoisted(slot, int(index) * ValueStride)
     emitter.publishState()
     emitter.endRegion()
 
@@ -2243,7 +2407,7 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     when ModelsCalls:
       if usesCalls:
         emitter.place(resumeElsewhere)
-        emitter.resumeAtStoredOffset(hoisted)
+        emitter.resumeAtStoredOffset(if hoisting: hoisted else: @[])
 
     emitter.place(guardFailed)
     emitter.guardExit(int32(start))
