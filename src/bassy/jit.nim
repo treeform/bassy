@@ -1503,16 +1503,30 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
           return slot
       -1
 
+    ## The offsets this region covers, and where each one's block sits.
+    var members: seq[int32]
+    for index in start ..< stop:
+      members.add(int32(index))
+    var placeOf = newSeq[int32](code.len + 1)
+    for index in 0 ..< placeOf.len:
+      placeOf[index] = -1
+    for place, offset in members:
+      placeOf[int(offset)] = int32(place)
+
+    proc covers(offset: int32): bool {.closure, raises: [].} =
+      ## Reports whether an offset is compiled into this region.
+      offset >= 0 and int(offset) < placeOf.len and placeOf[int(offset)] >= 0
+
     var emitter = Assembler()
     var blocks: seq[Label]
-    for index in start ..< stop:
+    for index in members:
       blocks.add(emitter.label())
     let guardFailed = emitter.label()
     let writeback = emitter.label()
     var exits: seq[(Label, int32, NativeStatus, int)]
 
     template blockAt(offset: int32): Label =
-      blocks[int(offset) - start]
+      blocks[placeOf[int(offset)]]
 
     proc exitLabel(target: int32, status: NativeStatus,
         leaving: int): Label =
@@ -1554,9 +1568,10 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         )
 
     ## Body: one native block per bytecode offset, so branches keep working.
-    for index in start ..< stop:
+    for member in members:
+      let index = int(member)
       let item = code[index]
-      emitter.place(blockAt(int32(index)))
+      emitter.place(blockAt(member))
 
       # A slot holding anything but an integer hands this offset back to
       # the interpreter, which can work in whatever the slot does hold.
@@ -1566,7 +1581,7 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
 
       template branchOut(target: int32, test: Test) =
         ## Takes an in-region branch directly, or leaves through a stub.
-        if int(target) >= start and int(target) < stop:
+        if covers(target):
           emitter.branchWhen(test, blockAt(target))
         else:
           emitter.branchWhen(
@@ -1717,14 +1732,14 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         emitter.hoistedFromScratch(slotOf(item.a), 1)
       of JumpIfZeroOp:
         emitter.readSlot(0, item.a, leaveHere)
-        if int(item.b) >= start and int(item.b) < stop:
+        if covers(item.b):
           emitter.branchIfScratchZero(0, blockAt(item.b))
         else:
           emitter.branchIfScratchZero(
             0, exitLabel(item.b, NativeCompleted, index)
           )
       of JumpOp:
-        if int(item.a) >= start and int(item.a) < stop:
+        if covers(item.a):
           when CountedLoops:
             if counted and index == stop - 1:
               emitter.advanceCounter()
