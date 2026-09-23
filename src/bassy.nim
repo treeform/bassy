@@ -3615,6 +3615,344 @@ proc runHostCall(context: ptr NativeContext, functionId,
     runtime.hostFailure = error.msg
     1'i32
 
+template chargeMeter(runtime: Runtime, item: Instruction) =
+  ## Charges one block's budgets, refusing before charging either.
+  let
+    cost = int64(item.a)
+    instructionCount = int64(item.b)
+  if runtime.remainingInstructions < instructionCount or
+      runtime.remainingWork < cost:
+    if runtime.remainingInstructions < instructionCount:
+      fail("BASIC instruction limit exceeded")
+    fail("BASIC work limit exceeded")
+  runtime.remainingInstructions -= instructionCount
+  runtime.remainingWork -= cost
+
+template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
+  ## Executes one instruction after its block was charged. The interpreter
+  ## loop and compiled code's slow path both expand this, so the two run
+  ## the very same code and cannot come to disagree.
+  template register(index: int32): untyped =
+    runtime.registers[int(runtime.base + index)]
+  case item.op
+  of MeterOp:
+    fail("BASIC bytecode contains consecutive meter instructions")
+  of LoadStringOp:
+    var handle = runtime.stringLiterals[int(item.b)]
+    if handle < 0:
+      let text = runtime.program.literals[int(item.b)]
+      runtime.chargeWork(int64(text.len))
+      handle = runtime.strings.put(text).stringHandle
+      runtime.stringLiterals[int(item.b)] = handle
+    register(item.a) = stringValue(runtime.strings.empty.stringOwner, handle)
+    inc runtime.pc
+  of TextCallOp:
+    register(item.a) = runtime.textCall(TextFunction(item.b), int(item.c))
+    inc runtime.pc
+  of LoadFixedOp:
+    register(item.a) = toValue(runtime.program.fixedValues[int(item.b)])
+    inc runtime.pc
+  of LoadImmediateOp:
+    register(item.a) = item.b
+    inc runtime.pc
+  of MoveOp:
+    register(item.a) = register(item.b)
+    inc runtime.pc
+  of LoadGlobalOp:
+    register(item.a) = runtime.globals[int(item.b)]
+    inc runtime.pc
+  of LoadHostDataOp:
+    register(item.a) = runtime.hostData[int(item.b)]
+    inc runtime.pc
+  of StoreGlobalOp:
+    runtime.globals[int(item.a)] = register(item.b)
+    inc runtime.pc
+  of StoreGlobalImmediateOp:
+    runtime.globals[int(item.a)] = item.b
+    inc runtime.pc
+  of MoveGlobalOp:
+    runtime.globals[int(item.a)] = runtime.globals[int(item.b)]
+    inc runtime.pc
+  of AddGlobalImmediateOp:
+    runtime.globals[int(item.a)] =
+      runtime.addValue(runtime.globals[int(item.a)], item.b)
+    inc runtime.pc
+  of AddGlobalOp:
+    runtime.globals[int(item.a)] =
+      runtime.addValue(
+        runtime.globals[int(item.a)],
+        runtime.globals[int(item.b)]
+      )
+    inc runtime.pc
+  of AddGlobalHostDataOp:
+    runtime.globals[int(item.a)] =
+      runtime.addValue(
+        runtime.globals[int(item.a)],
+        runtime.hostData[int(item.b)]
+      )
+    inc runtime.pc
+  of AddGlobalRegisterOp:
+    runtime.globals[int(item.a)] =
+      runtime.addValue(runtime.globals[int(item.a)], register(item.b))
+    inc runtime.pc
+  of ModuloGlobalImmediateOp:
+    runtime.globals[int(item.a)] = `mod`(
+      runtime.globals[int(item.b)],
+      item.c
+    )
+    inc runtime.pc
+  of AddGlobalArrayGlobalIndexOp:
+    let index = runtime.checkedArrayIndex(
+      item.b,
+      runtime.globals[int(item.c)]
+    )
+    runtime.globals[int(item.a)] =
+      runtime.addValue(runtime.globals[int(item.a)], runtime.memory[index])
+    inc runtime.pc
+  of AddOp:
+    register(item.a) = runtime.addValue(register(item.b), register(item.c))
+    inc runtime.pc
+  of SubtractOp:
+    register(item.a) = register(item.b) - register(item.c)
+    inc runtime.pc
+  of MultiplyOp:
+    register(item.a) = register(item.b) * register(item.c)
+    inc runtime.pc
+  of DivideOp:
+    register(item.a) = register(item.b) / register(item.c)
+    inc runtime.pc
+  of IntegerDivideOp:
+    register(item.a) = register(item.b) div register(item.c)
+    inc runtime.pc
+  of ModuloOp:
+    register(item.a) = `mod`(register(item.b), register(item.c))
+    inc runtime.pc
+  of NegateOp:
+    register(item.a) = -register(item.b)
+    inc runtime.pc
+  of EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp:
+    register(item.a) = runtime.compareValue(
+      item.op,
+      register(item.b),
+      register(item.c)
+    )
+    inc runtime.pc
+  of AndOp:
+    register(item.a) = register(item.b) and register(item.c)
+    inc runtime.pc
+  of OrOp:
+    register(item.a) = register(item.b) or register(item.c)
+    inc runtime.pc
+  of XorOp:
+    register(item.a) = register(item.b) xor register(item.c)
+    inc runtime.pc
+  of EqvOp:
+    register(item.a) = eqv(register(item.b), register(item.c))
+    inc runtime.pc
+  of ImpOp:
+    register(item.a) = imp(register(item.b), register(item.c))
+    inc runtime.pc
+  of NotOp:
+    register(item.a) = not register(item.b)
+    inc runtime.pc
+  of JumpOp:
+    runtime.pc = item.a
+  of JumpIfZeroOp:
+    if register(item.a) == 0:
+      runtime.pc = item.b
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalEqualImmediateOp:
+    if runtime.globals[int(item.a)] != item.b:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalNotEqualImmediateOp:
+    if runtime.globals[int(item.a)] == item.b:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalLessImmediateOp:
+    if runtime.globals[int(item.a)] >= item.b:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalLessEqualImmediateOp:
+    if runtime.globals[int(item.a)] > item.b:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalGreaterImmediateOp:
+    if runtime.globals[int(item.a)] <= item.b:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalGreaterEqualImmediateOp:
+    if runtime.globals[int(item.a)] < item.b:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of JumpUnlessGlobalModuloEqualZeroOp:
+    if `mod`(runtime.globals[int(item.a)], item.b) != 0:
+      runtime.pc = item.c
+    else:
+      inc runtime.pc
+  of ArrayGetOp:
+    let index = runtime.checkedArrayIndex(item.b, register(item.c))
+    register(item.a) = runtime.memory[index]
+    inc runtime.pc
+  of ArraySetOp:
+    let index = runtime.checkedArrayIndex(item.a, register(item.b))
+    runtime.memory[index] = register(item.c)
+    inc runtime.pc
+  of ArrayAddGlobalsOp:
+    let index = runtime.checkedArrayIndex(
+      item.a,
+      runtime.globals[int(item.b)]
+    )
+    runtime.memory[index] =
+      runtime.addValue(runtime.memory[index], runtime.globals[int(item.c)])
+    inc runtime.pc
+  of SetArgumentOp:
+    runtime.arguments[int(item.a)] = register(item.b)
+    inc runtime.pc
+  of SetArgumentImmediateOp:
+    runtime.arguments[int(item.a)] = item.b
+    inc runtime.pc
+  of SetArgumentGlobalOp:
+    runtime.arguments[int(item.a)] = runtime.globals[int(item.b)]
+    inc runtime.pc
+  of HostCallOp:
+    let
+      functionId = int(item.b)
+      count = int(
+        runtime.program.hostFunctions[functionId].parameters
+      )
+      callback = runtime.hostCallbacks[functionId]
+    var value: Value
+    if callback.numeric != nil:
+      if count == 0:
+        value = callback.numeric([])
+      else:
+        value = callback.numeric(runtime.arguments.toOpenArray(0, count - 1))
+    else:
+      for i in 0 ..< count:
+        runtime.integerArguments[i] = runtime.arguments[i].asInt
+      if count == 0:
+        value = callback.integer(EmptyArguments)
+      else:
+        value = callback.integer(
+          runtime.integerArguments.toOpenArray(0, count - 1)
+        )
+    runtime.requireValue(value)
+    requireType(runtime.program.hostFunctions[functionId].name, value)
+    if item.a >= 0:
+      register(item.a) = value
+    inc runtime.pc
+  of CallOp, GosubOp:
+    if runtime.depth + 1 >= int32(runtime.frames.len):
+      fail("BASIC call depth limit exceeded")
+    let
+      callee =
+        if item.op == GosubOp:
+          runtime.routine
+        else:
+          item.a
+      calleeRegisters =
+        runtime.program.routines[int(callee)].registerCount
+      calleeParameters =
+        int(runtime.program.routines[int(callee)].parameterCount)
+      calleeEntry =
+        if item.op == GosubOp:
+          item.a
+        else:
+          runtime.program.routines[int(callee)].entry
+      callerRegisters =
+        runtime.program.routines[int(runtime.routine)].registerCount
+      nextBase = runtime.base + callerRegisters
+      nextEnd = nextBase + calleeRegisters
+    if nextEnd > int32(runtime.registers.len):
+      fail("BASIC register stack exceeds its memory limit")
+    runtime.frames[int(runtime.depth)] = Frame(
+      base: runtime.base,
+      routine: runtime.routine,
+      returnPc: runtime.pc + 1,
+      kind:
+        if item.op == GosubOp:
+          GosubFrame
+        else:
+          SubFrame
+    )
+    if calleeRegisters > 0:
+      if item.op == GosubOp:
+        copyMem(
+          addr runtime.registers[int(nextBase)],
+          addr runtime.registers[int(runtime.base)],
+          int(calleeRegisters) * sizeof(Value)
+        )
+      else:
+        zeroMem(
+          addr runtime.registers[int(nextBase)],
+          int(calleeRegisters) * sizeof(Value)
+        )
+    if item.op == CallOp:
+      for i in 0 ..< calleeParameters:
+        runtime.registers[int(nextBase) + i] = runtime.arguments[i]
+    inc runtime.depth
+    runtime.base = nextBase
+    runtime.routine = callee
+    runtime.pc = calleeEntry
+  of ReturnOp:
+    runtime.leaveFrame
+  of ReturnLabelOp:
+    if runtime.depth == 0 or
+      runtime.frames[int(runtime.depth) - 1].kind != GosubFrame:
+        fail("BASIC RETURN label without GOSUB")
+    runtime.leaveFrame
+    runtime.pc = item.a
+  of ExitSubOp:
+    while runtime.depth > 0 and
+      runtime.frames[int(runtime.depth) - 1].kind == GosubFrame:
+        runtime.leaveFrame
+    runtime.leaveFrame
+  of HaltOp:
+    runtime.finished = true
+  of PrintTextOp:
+    runtime.chargePrint(
+      int64(runtime.program.literals[int(item.a)].len)
+    )
+    if print != nil:
+      print(PrintEvent(
+        kind: TextPrint,
+        text: runtime.program.literals[int(item.a)]
+      ))
+    inc runtime.pc
+  of PrintValueOp:
+    let value = register(item.a)
+    if value.kind == StringValue:
+      let length = int64(runtime.strings.length(value))
+      runtime.chargeWork(length)
+      runtime.chargePrint(length)
+      if print != nil:
+        print(PrintEvent(kind: TextPrint, text: runtime.strings.get(value)))
+    elif value.kind == FixedValue:
+      let text = $value
+      runtime.chargePrint(int64(text.len))
+      if print != nil:
+        print(PrintEvent(
+          kind: FixedPrint, fixedValue: value.asFixed, text: text
+        ))
+    else:
+      runtime.chargePrint(printedIntegerBytes(value.asInt))
+      if print != nil:
+        print(PrintEvent(kind: ValuePrint, value: value.asInt))
+    inc runtime.pc
+  of PrintNewlineOp:
+    runtime.chargePrint(1)
+    if print != nil:
+      print(PrintEvent(kind: NewlinePrint))
+    inc runtime.pc
+
 proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
   ## Executes verified bytecode with bounded work, memory, calls, and output.
   if runtime.finished:
@@ -3624,8 +3962,6 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
     startWork = runtime.remainingWork
     startBytes = runtime.printedBytes
     startEvents = runtime.printedEvents
-  template register(index: int32): untyped =
-    runtime.registers[int(runtime.base + index)]
   template fetch(): Instruction =
     runtime.program.code[int(runtime.pc)]
   while not runtime.finished:
@@ -3686,336 +4022,10 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
             runtime.regionAt[int(region.start)] = nil
             runtime.bypass = -1
           continue
-      let
-        cost = int64(item.a)
-        instructionCount = int64(item.b)
-      if runtime.remainingInstructions < instructionCount or
-          runtime.remainingWork < cost:
-        if runtime.remainingInstructions < instructionCount:
-          fail("BASIC instruction limit exceeded")
-        fail("BASIC work limit exceeded")
-      runtime.remainingInstructions -= instructionCount
-      runtime.remainingWork -= cost
+      runtime.chargeMeter(item)
       inc runtime.pc
       item = fetch()
-    case item.op
-    of MeterOp:
-      fail("BASIC bytecode contains consecutive meter instructions")
-    of LoadStringOp:
-      var handle = runtime.stringLiterals[int(item.b)]
-      if handle < 0:
-        let text = runtime.program.literals[int(item.b)]
-        runtime.chargeWork(int64(text.len))
-        handle = runtime.strings.put(text).stringHandle
-        runtime.stringLiterals[int(item.b)] = handle
-      register(item.a) = stringValue(runtime.strings.empty.stringOwner, handle)
-      inc runtime.pc
-    of TextCallOp:
-      register(item.a) = runtime.textCall(TextFunction(item.b), int(item.c))
-      inc runtime.pc
-    of LoadFixedOp:
-      register(item.a) = toValue(runtime.program.fixedValues[int(item.b)])
-      inc runtime.pc
-    of LoadImmediateOp:
-      register(item.a) = item.b
-      inc runtime.pc
-    of MoveOp:
-      register(item.a) = register(item.b)
-      inc runtime.pc
-    of LoadGlobalOp:
-      register(item.a) = runtime.globals[int(item.b)]
-      inc runtime.pc
-    of LoadHostDataOp:
-      register(item.a) = runtime.hostData[int(item.b)]
-      inc runtime.pc
-    of StoreGlobalOp:
-      runtime.globals[int(item.a)] = register(item.b)
-      inc runtime.pc
-    of StoreGlobalImmediateOp:
-      runtime.globals[int(item.a)] = item.b
-      inc runtime.pc
-    of MoveGlobalOp:
-      runtime.globals[int(item.a)] = runtime.globals[int(item.b)]
-      inc runtime.pc
-    of AddGlobalImmediateOp:
-      runtime.globals[int(item.a)] =
-        runtime.addValue(runtime.globals[int(item.a)], item.b)
-      inc runtime.pc
-    of AddGlobalOp:
-      runtime.globals[int(item.a)] =
-        runtime.addValue(
-          runtime.globals[int(item.a)],
-          runtime.globals[int(item.b)]
-        )
-      inc runtime.pc
-    of AddGlobalHostDataOp:
-      runtime.globals[int(item.a)] =
-        runtime.addValue(
-          runtime.globals[int(item.a)],
-          runtime.hostData[int(item.b)]
-        )
-      inc runtime.pc
-    of AddGlobalRegisterOp:
-      runtime.globals[int(item.a)] =
-        runtime.addValue(runtime.globals[int(item.a)], register(item.b))
-      inc runtime.pc
-    of ModuloGlobalImmediateOp:
-      runtime.globals[int(item.a)] = `mod`(
-        runtime.globals[int(item.b)],
-        item.c
-      )
-      inc runtime.pc
-    of AddGlobalArrayGlobalIndexOp:
-      let index = runtime.checkedArrayIndex(
-        item.b,
-        runtime.globals[int(item.c)]
-      )
-      runtime.globals[int(item.a)] =
-        runtime.addValue(runtime.globals[int(item.a)], runtime.memory[index])
-      inc runtime.pc
-    of AddOp:
-      register(item.a) = runtime.addValue(register(item.b), register(item.c))
-      inc runtime.pc
-    of SubtractOp:
-      register(item.a) = register(item.b) - register(item.c)
-      inc runtime.pc
-    of MultiplyOp:
-      register(item.a) = register(item.b) * register(item.c)
-      inc runtime.pc
-    of DivideOp:
-      register(item.a) = register(item.b) / register(item.c)
-      inc runtime.pc
-    of IntegerDivideOp:
-      register(item.a) = register(item.b) div register(item.c)
-      inc runtime.pc
-    of ModuloOp:
-      register(item.a) = `mod`(register(item.b), register(item.c))
-      inc runtime.pc
-    of NegateOp:
-      register(item.a) = -register(item.b)
-      inc runtime.pc
-    of EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp:
-      register(item.a) = runtime.compareValue(
-        item.op,
-        register(item.b),
-        register(item.c)
-      )
-      inc runtime.pc
-    of AndOp:
-      register(item.a) = register(item.b) and register(item.c)
-      inc runtime.pc
-    of OrOp:
-      register(item.a) = register(item.b) or register(item.c)
-      inc runtime.pc
-    of XorOp:
-      register(item.a) = register(item.b) xor register(item.c)
-      inc runtime.pc
-    of EqvOp:
-      register(item.a) = eqv(register(item.b), register(item.c))
-      inc runtime.pc
-    of ImpOp:
-      register(item.a) = imp(register(item.b), register(item.c))
-      inc runtime.pc
-    of NotOp:
-      register(item.a) = not register(item.b)
-      inc runtime.pc
-    of JumpOp:
-      runtime.pc = item.a
-    of JumpIfZeroOp:
-      if register(item.a) == 0:
-        runtime.pc = item.b
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalEqualImmediateOp:
-      if runtime.globals[int(item.a)] != item.b:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalNotEqualImmediateOp:
-      if runtime.globals[int(item.a)] == item.b:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalLessImmediateOp:
-      if runtime.globals[int(item.a)] >= item.b:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalLessEqualImmediateOp:
-      if runtime.globals[int(item.a)] > item.b:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalGreaterImmediateOp:
-      if runtime.globals[int(item.a)] <= item.b:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalGreaterEqualImmediateOp:
-      if runtime.globals[int(item.a)] < item.b:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of JumpUnlessGlobalModuloEqualZeroOp:
-      if `mod`(runtime.globals[int(item.a)], item.b) != 0:
-        runtime.pc = item.c
-      else:
-        inc runtime.pc
-    of ArrayGetOp:
-      let index = runtime.checkedArrayIndex(item.b, register(item.c))
-      register(item.a) = runtime.memory[index]
-      inc runtime.pc
-    of ArraySetOp:
-      let index = runtime.checkedArrayIndex(item.a, register(item.b))
-      runtime.memory[index] = register(item.c)
-      inc runtime.pc
-    of ArrayAddGlobalsOp:
-      let index = runtime.checkedArrayIndex(
-        item.a,
-        runtime.globals[int(item.b)]
-      )
-      runtime.memory[index] =
-        runtime.addValue(runtime.memory[index], runtime.globals[int(item.c)])
-      inc runtime.pc
-    of SetArgumentOp:
-      runtime.arguments[int(item.a)] = register(item.b)
-      inc runtime.pc
-    of SetArgumentImmediateOp:
-      runtime.arguments[int(item.a)] = item.b
-      inc runtime.pc
-    of SetArgumentGlobalOp:
-      runtime.arguments[int(item.a)] = runtime.globals[int(item.b)]
-      inc runtime.pc
-    of HostCallOp:
-      let
-        functionId = int(item.b)
-        count = int(
-          runtime.program.hostFunctions[functionId].parameters
-        )
-        callback = runtime.hostCallbacks[functionId]
-      var value: Value
-      if callback.numeric != nil:
-        if count == 0:
-          value = callback.numeric([])
-        else:
-          value = callback.numeric(runtime.arguments.toOpenArray(0, count - 1))
-      else:
-        for i in 0 ..< count:
-          runtime.integerArguments[i] = runtime.arguments[i].asInt
-        if count == 0:
-          value = callback.integer(EmptyArguments)
-        else:
-          value = callback.integer(
-            runtime.integerArguments.toOpenArray(0, count - 1)
-          )
-      runtime.requireValue(value)
-      requireType(runtime.program.hostFunctions[functionId].name, value)
-      if item.a >= 0:
-        register(item.a) = value
-      inc runtime.pc
-    of CallOp, GosubOp:
-      if runtime.depth + 1 >= int32(runtime.frames.len):
-        fail("BASIC call depth limit exceeded")
-      let
-        callee =
-          if item.op == GosubOp:
-            runtime.routine
-          else:
-            item.a
-        calleeRegisters =
-          runtime.program.routines[int(callee)].registerCount
-        calleeParameters =
-          int(runtime.program.routines[int(callee)].parameterCount)
-        calleeEntry =
-          if item.op == GosubOp:
-            item.a
-          else:
-            runtime.program.routines[int(callee)].entry
-        callerRegisters =
-          runtime.program.routines[int(runtime.routine)].registerCount
-        nextBase = runtime.base + callerRegisters
-        nextEnd = nextBase + calleeRegisters
-      if nextEnd > int32(runtime.registers.len):
-        fail("BASIC register stack exceeds its memory limit")
-      runtime.frames[int(runtime.depth)] = Frame(
-        base: runtime.base,
-        routine: runtime.routine,
-        returnPc: runtime.pc + 1,
-        kind:
-          if item.op == GosubOp:
-            GosubFrame
-          else:
-            SubFrame
-      )
-      if calleeRegisters > 0:
-        if item.op == GosubOp:
-          copyMem(
-            addr runtime.registers[int(nextBase)],
-            addr runtime.registers[int(runtime.base)],
-            int(calleeRegisters) * sizeof(Value)
-          )
-        else:
-          zeroMem(
-            addr runtime.registers[int(nextBase)],
-            int(calleeRegisters) * sizeof(Value)
-          )
-      if item.op == CallOp:
-        for i in 0 ..< calleeParameters:
-          runtime.registers[int(nextBase) + i] = runtime.arguments[i]
-      inc runtime.depth
-      runtime.base = nextBase
-      runtime.routine = callee
-      runtime.pc = calleeEntry
-    of ReturnOp:
-      runtime.leaveFrame
-    of ReturnLabelOp:
-      if runtime.depth == 0 or
-        runtime.frames[int(runtime.depth) - 1].kind != GosubFrame:
-          fail("BASIC RETURN label without GOSUB")
-      runtime.leaveFrame
-      runtime.pc = item.a
-    of ExitSubOp:
-      while runtime.depth > 0 and
-        runtime.frames[int(runtime.depth) - 1].kind == GosubFrame:
-          runtime.leaveFrame
-      runtime.leaveFrame
-    of HaltOp:
-      runtime.finished = true
-    of PrintTextOp:
-      runtime.chargePrint(
-        int64(runtime.program.literals[int(item.a)].len)
-      )
-      if print != nil:
-        print(PrintEvent(
-          kind: TextPrint,
-          text: runtime.program.literals[int(item.a)]
-        ))
-      inc runtime.pc
-    of PrintValueOp:
-      let value = register(item.a)
-      if value.kind == StringValue:
-        let length = int64(runtime.strings.length(value))
-        runtime.chargeWork(length)
-        runtime.chargePrint(length)
-        if print != nil:
-          print(PrintEvent(kind: TextPrint, text: runtime.strings.get(value)))
-      elif value.kind == FixedValue:
-        let text = $value
-        runtime.chargePrint(int64(text.len))
-        if print != nil:
-          print(PrintEvent(
-            kind: FixedPrint, fixedValue: value.asFixed, text: text
-          ))
-      else:
-        runtime.chargePrint(printedIntegerBytes(value.asInt))
-        if print != nil:
-          print(PrintEvent(kind: ValuePrint, value: value.asInt))
-      inc runtime.pc
-    of PrintNewlineOp:
-      runtime.chargePrint(1)
-      if print != nil:
-        print(PrintEvent(kind: NewlinePrint))
-      inc runtime.pc
+    runtime.performOp(item, print)
   result = RunStats(
     instructions: startInstructions - runtime.remainingInstructions,
     workUnits: startWork - runtime.remainingWork,
