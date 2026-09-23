@@ -83,6 +83,10 @@ proc layoutMatches*(): bool {.raises: [].} =
   ## write at the wrong address, so they are checked rather than trusted.
   if sizeof(Value) != ValueStride:
     return false
+  # The values are built in a sequence and read through copyMem rather
+  # than cast from locals. Nim 2.2.6 and 2.2.10 both fail to compile a
+  # procedure that takes the address of a converter-initialised variant
+  # local and also returns early, with an index error and no location.
   var probe = newSeq[Value](2)
   probe[0] = toValue(0x5A6B7C0D'i32)
   probe[1] = toValue(fixed(1'i32))

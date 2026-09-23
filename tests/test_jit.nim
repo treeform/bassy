@@ -4,7 +4,7 @@
 ## exactly, because a script must not be able to tell which path ran.
 
 import
-  std/[strformat, strutils],
+  std/strformat,
   bassy
 
 type Outcome = object
