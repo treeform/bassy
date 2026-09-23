@@ -182,6 +182,10 @@ block:
   assembler.returnToCaller()
   assembler.resolve()
   cases.add(("call 1f\n1:\tret", assembler.code))
+encodes "test eax, 7":
+  assembler.testImmediate(Word32, rax, 7)
+encodes "test r14d, 1023":
+  assembler.testImmediate(Word32, r14, 1023)
 encodes "ret":
   assembler.returnToCaller()
 

@@ -458,3 +458,11 @@ proc jumpRegister*(assembler: var Assembler, target: Register)
   assembler.prefix(Word32, Register(4), target)
   assembler.emit(0xFF)
   assembler.directOperand(Register(4), target)
+
+proc testImmediate*(assembler: var Assembler, width: Width,
+    target: Register, value: int32) {.raises: [].} =
+  ## Sets flags from a register masked by a constant, keeping neither.
+  assembler.prefix(width, Register(0), target)
+  assembler.emit(0xF7)
+  assembler.directOperand(Register(0), target)
+  assembler.emitDouble(value)

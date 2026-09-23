@@ -255,6 +255,18 @@ proc takenOn(op: Op): Check {.raises: [].} =
   of JumpUnlessGlobalGreaterImmediateOp: LessEqualCheck
   else: LessCheck
 
+proc lowBitCount(divisor: int32): int {.raises: [].} =
+  ## Returns how many low bits decide divisibility when the divisor is a
+  ## power of two, or of its negation, and zero otherwise. Truncating
+  ## division leaves nothing over exactly when those bits are clear, for
+  ## negative dividends as well, so a bit test can stand in for a divide.
+  var magnitude = abs(int64(divisor))
+  if magnitude < 2 or (magnitude and (magnitude - 1)) != 0:
+    return 0
+  while magnitude > 1:
+    magnitude = magnitude shr 1
+    inc result
+
 when NativeArm64:
   ## AArch64 code generation
   ##
@@ -642,6 +654,12 @@ when NativeArm64:
     ## Jumps when a working register holds anything but zero.
     e.jumpIfNotZero(temp(value), target)
 
+  proc jumpIfLowBits(e: var Emitter, value, bits: int, target: Label)
+      {.raises: [BasicError].} =
+    ## Jumps when any of a working register's lowest bits is set.
+    e.code.testLowBits(Word32, temp(value), bits)
+    e.jumpWhen(NotEqualCondition, target)
+
   proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
       slow: Label) {.raises: [].} =
     ## Bounds checks an index and leaves the cell's address in Cell. One
@@ -654,30 +672,36 @@ when NativeArm64:
     e.code.addRegister(Word32, temp(6), temp(6), position)
     e.code.addRegister(Word64, Cell, MemoryBase, temp(6), 4)
 
-  proc meter(e: var Emitter, instructions, work: int32, slow: Label)
+  proc charge(e: var Emitter, instructions, work: int32)
       {.raises: [BasicError].} =
-    ## Checks both budgets before charging either, as the interpreter does.
-    if instructions <= 4095:
-      e.code.compareImmediate(Word64, Instructions, int(instructions))
-    else:
-      e.code.loadImmediate(Word64, temp(5), int64(instructions))
-      e.code.compareRegister(Word64, Instructions, temp(5))
-    e.jumpWhen(LessCondition, slow)
-    if work <= 4095:
-      e.code.compareImmediate(Word64, Work, int(work))
-    else:
-      e.code.loadImmediate(Word64, temp(6), int64(work))
-      e.code.compareRegister(Word64, Work, temp(6))
-    e.jumpWhen(LessCondition, slow)
+    ## Charges both budgets, already known to cover it, without looking.
     if instructions <= 4095:
       e.code.subtractImmediate(Word64, Instructions, Instructions,
         int(instructions))
     else:
+      e.code.loadImmediate(Word64, temp(5), int64(instructions))
       e.code.subtractRegister(Word64, Instructions, Instructions, temp(5))
     if work <= 4095:
       e.code.subtractImmediate(Word64, Work, Work, int(work))
     else:
+      e.code.loadImmediate(Word64, temp(6), int64(work))
       e.code.subtractRegister(Word64, Work, Work, temp(6))
+
+  proc meter(e: var Emitter, instructions, work: int32, slow: Label,
+      needInstructions = int64(instructions), needWork = int64(work))
+      {.raises: [BasicError].} =
+    ## Checks both budgets hold what is needed before charging either, as
+    ## the interpreter does. What is needed can be more than this block
+    ## costs, when one look is to cover every block until the next.
+    for (budget, need) in [(Instructions, needInstructions),
+        (Work, needWork)]:
+      if need <= 4095:
+        e.code.compareImmediate(Word64, budget, int(need))
+      else:
+        e.code.loadImmediate(Word64, temp(5), need)
+        e.code.compareRegister(Word64, budget, temp(5))
+      e.jumpWhen(LessCondition, slow)
+    e.charge(instructions, work)
 
   proc frameOf(e: var Emitter, base: Register, index: Register)
       {.raises: [].} =
@@ -1376,6 +1400,12 @@ elif NativeAmd64:
     e.code.testRegister(Word32, temp(value), temp(value))
     e.jumpWhen(NotEqualCondition, target)
 
+  proc jumpIfLowBits(e: var Emitter, value, bits: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when any of a working register's lowest bits is set.
+    e.code.testImmediate(Word32, temp(value), int32((1'i64 shl bits) - 1))
+    e.jumpWhen(NotEqualCondition, target)
+
   proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
       slow: Label) {.raises: [BasicError].} =
     ## Bounds checks an index and leaves the cell's address in Cell. One
@@ -1390,15 +1420,26 @@ elif NativeAmd64:
     e.contextField(Cell, ContextMemory)
     e.code.addRegister(Word64, Cell, temp(index))
 
-  proc meter(e: var Emitter, instructions, work: int32, slow: Label)
-      {.raises: [].} =
-    ## Checks both budgets before charging either, as the interpreter does.
-    e.code.compareImmediate(Word64, Instructions, instructions)
-    e.jumpWhen(LessCondition, slow)
-    e.code.compareImmediate(Word64, Work, work)
-    e.jumpWhen(LessCondition, slow)
+  proc charge(e: var Emitter, instructions, work: int32) {.raises: [].} =
+    ## Charges both budgets, already known to cover it, without looking.
     e.code.subtractImmediate(Word64, Instructions, instructions)
     e.code.subtractImmediate(Word64, Work, work)
+
+  proc meter(e: var Emitter, instructions, work: int32, slow: Label,
+      needInstructions = int64(instructions), needWork = int64(work))
+      {.raises: [].} =
+    ## Checks both budgets hold what is needed before charging either, as
+    ## the interpreter does. What is needed can be more than this block
+    ## costs, when one look is to cover every block until the next.
+    for (budget, need) in [(Instructions, needInstructions),
+        (Work, needWork)]:
+      if need <= int64(high(int32)):
+        e.code.compareImmediate(Word64, budget, int32(need))
+      else:
+        e.code.loadImmediate(Word64, Spare, need)
+        e.code.compareRegister(Word64, budget, Spare)
+      e.jumpWhen(LessCondition, slow)
+    e.charge(instructions, work)
 
   proc slotAddress(e: var Emitter, destination, index: Register)
       {.raises: [BasicError].} =
@@ -1712,9 +1753,19 @@ proc invoke*(machine: Machine, context: var NativeContext): NativeStatus
 type
   Loop = object
     ## A loop whose globals can live in registers while it runs.
+    ##
+    ## Its budget is looked at only at checkpoints: its head and every
+    ## other backward-branch target in it. Between two checkpoints a path
+    ## has no backward branch, so it meets each meter at most once, and so
+    ## charges at most what every meter in the loop adds up to. Each look
+    ## asks for that much, and a loop short of it goes on in general code,
+    ## which looks at every block and so refuses at the very same one.
     start: int
     stop: int
     globals: seq[int32]
+    checkpoints: seq[bool]
+    passInstructions: int64
+    passWork: int64
 
 proc loopGlobals(item: Instruction, globals: var seq[int32])
     {.raises: [].} =
@@ -1805,9 +1856,36 @@ proc findLoops(code: seq[Instruction], capacity: int): seq[Loop]
       code[index].loopGlobals(globals)
     if not fits or globals.len == 0 or globals.len > capacity:
       continue
+    var loop = Loop(start: start, stop: stop, globals: globals,
+      checkpoints: newSeq[bool](stop - start))
+    loop.checkpoints[0] = true
+    for index in start ..< stop:
+      let item = code[index]
+      var target = -1
+      case item.op
+      of JumpOp: target = int(item.a)
+      of JumpIfZeroOp: target = int(item.b)
+      of JumpUnlessGlobalEqualImmediateOp,
+          JumpUnlessGlobalNotEqualImmediateOp,
+          JumpUnlessGlobalLessImmediateOp,
+          JumpUnlessGlobalLessEqualImmediateOp,
+          JumpUnlessGlobalGreaterImmediateOp,
+          JumpUnlessGlobalGreaterEqualImmediateOp,
+          JumpUnlessGlobalModuloEqualZeroOp: target = int(item.c)
+      else: discard
+      if target >= start and target <= index:
+        loop.checkpoints[target - start] = true
+      if item.op == MeterOp:
+        loop.passInstructions += int64(item.b)
+        loop.passWork += int64(item.a)
+    for offset, wanted in loop.checkpoints:
+      if wanted and code[start + offset].op != MeterOp:
+        fits = false
+    if not fits:
+      continue
     for index in start ..< stop:
       covered[index] = true
-    result.add(Loop(start: start, stop: stop, globals: globals))
+    result.add(loop)
 
 proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     ownerOf: seq[int32], extents: seq[ArrayExtent], constants: seq[int32],
@@ -1897,7 +1975,14 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       var fallsThrough {.used.} = true
       case item.op
       of MeterOp:
-        e.meter(item.b, item.a, slowFor(ToNext))
+        when specialised:
+          if loop.checkpoints[at - loop.start]:
+            e.meter(item.b, item.a, slowFor(ToNext),
+              loop.passInstructions, loop.passWork)
+          else:
+            e.charge(item.b, item.a)
+        else:
+          e.meter(item.b, item.a, slowFor(ToNext))
       of LoadImmediateOp:
         e.writeConstant(slot(item.a), 0, item.b)
       of LoadFixedOp:
@@ -2193,9 +2278,14 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
             let slow = slowFor(ToOffset)
             e.readValue(0, 2, global(item.a))
             e.unlessWhole(2, slow)
-          e.loadConstant(1, item.b)
-          e.remainder(0, 1)
-          e.jumpIfNotZeroValue(0, toBlock(item.c))
+          let bits = lowBitCount(item.b)
+          if bits > 0:
+            e.jumpIfLowBits(0, bits, toBlock(item.c))
+          elif item.b != 1 and item.b != -1:
+            # Dividing by one or minus one leaves nothing over, ever.
+            e.loadConstant(1, item.b)
+            e.remainder(0, 1)
+            e.jumpIfNotZeroValue(0, toBlock(item.c))
       of ArrayGetOp:
         let slow = slowFor(ToNext)
         e.readValue(0, 2, slot(item.c))
