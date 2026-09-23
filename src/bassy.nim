@@ -3136,7 +3136,9 @@ proc compileNative*(runtime: var Runtime): int =
   runtime.regionAt = @[]
   if not jitSupported():
     return 0
-  runtime.regionAt = compileLoops(runtime.program.code)
+  runtime.regionAt = compileLoops(
+    runtime.program.code, runtime.globals.len
+  )
   runtime.nativeRegions
 
 proc bytecode*(program: Program): lent seq[Instruction] {.inline.} =

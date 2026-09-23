@@ -70,6 +70,45 @@ const
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
 
+proc fail(message: string) {.noreturn, raises: [BasicError].} =
+  ## Reports a controlled native compilation failure.
+  raise newException(BasicError, "BASIC " & message)
+
+proc layoutMatches*(): bool {.raises: [].} =
+  ## Confirms the memory layout the code generator writes by hand.
+  ##
+  ## Generated code reaches into values and into the context by fixed
+  ## offsets worked out from this Nim version. Nothing guarantees those
+  ## stay put, and a silent change would turn every compiled store into a
+  ## write at the wrong address, so they are checked rather than trusted.
+  if sizeof(Value) != ValueStride:
+    return false
+  var probe = newSeq[Value](2)
+  probe[0] = toValue(0x5A6B7C0D'i32)
+  probe[1] = toValue(fixed(1'i32))
+  var image: array[ValueStride * 2, byte]
+  copyMem(image[0].addr, probe[0].addr, ValueStride * 2)
+  # An integer must be tagged zero, because the guard tests for zero, and
+  # a fixed-point number must not be, or the guard would let one through.
+  if image[0] != byte(ord(IntegerValue)):
+    return false
+  if image[ValueStride] == byte(ord(IntegerValue)):
+    return false
+  var payload = 0'i32
+  copyMem(payload.addr, image[ValuePayload].addr, sizeof(int32))
+  if payload != 0x5A6B7C0D'i32:
+    return false
+  var context: NativeContext
+  let origin = cast[int](context.addr)
+  if cast[int](context.remainingInstructions.addr) - origin !=
+      ContextInstructions:
+    return false
+  if cast[int](context.remainingWork.addr) - origin != ContextWork:
+    return false
+  if cast[int](context.pc.addr) - origin != ContextOffset:
+    return false
+  true
+
 ## Region discovery
 
 proc isCompilable(item: Instruction): bool {.raises: [].} =
@@ -158,12 +197,14 @@ type
     passWork: int64
     partialInstructions: seq[int64]
     partialWork: seq[int64]
+    checkpoints: seq[bool]
 
 proc planLoop(code: seq[Instruction], start, stop: int): LoopPlan
     {.raises: [].} =
   ## Measures one pass through a loop and reports whether it is countable.
   result.partialInstructions = newSeq[int64](stop - start)
   result.partialWork = newSeq[int64](stop - start)
+  result.checkpoints = newSeq[bool](stop - start)
   if stop - start < 2:
     return
   let last = code[stop - 1]
@@ -177,7 +218,28 @@ proc planLoop(code: seq[Instruction], start, stop: int): LoopPlan
     if code[index].op == MeterOp:
       result.passInstructions += int64(code[index].b)
       result.passWork += int64(code[index].a)
-  result.spending = result.passInstructions > 0 and result.passWork > 0
+
+  # Every backward branch is a place the spending must be looked at. An
+  # inner loop turning under an outer one would otherwise run as long as
+  # it liked between two looks, because the outer header is only reached
+  # once for however many times the inner one goes round. What runs
+  # between two checks then contains no backward branch, so it can charge
+  # no more than one pass, which is what the limit is set against.
+  result.checkpoints[0] = true
+  for index in start ..< stop:
+    var target = 0'i32
+    if code[index].branchTarget(target):
+      if int(target) >= start and int(target) <= index:
+        result.checkpoints[int(target) - start] = true
+  for offset, wanted in result.checkpoints:
+    if wanted and code[start + offset].op != MeterOp:
+      # Nowhere to put the look, so this loop keeps the per-block check.
+      return
+  # Every pass runs the meter at the loop head, so charging at least one
+  # instruction there is what stops a pass from spending nothing and
+  # looping for ever against an unmoving total.
+  result.spending = result.passInstructions > 0 and result.passWork > 0 and
+    code[start].b > 0
   var
     instructions = 0'i64
     work = 0'i64
@@ -683,9 +745,14 @@ elif NativeAmd64:
     emitter.loadImmediate(Word32, rax, int64(ord(NativeGuardFailed)))
     emitter.endRegion()
 
-proc compileRegion*(code: seq[Instruction], start, stop: int): Region
-    {.raises: [BasicError].} =
+proc compileRegion*(code: seq[Instruction], start, stop, globals: int):
+    Region {.raises: [BasicError].} =
   ## Compiles one loop, or returns nil when it is outside the modelled set.
+  ##
+  ## Generated code indexes global storage without checking, so every
+  ## index it will use is proved to be in range here, before any of it is
+  ## emitted. The interpreter checks each access as it runs; compiled code
+  ## cannot, which is exactly why this pass has to be exhaustive.
   when not (NativeArm64 or NativeAmd64):
     # No backend for this target: the interpreter is the only path.
     return nil
@@ -693,6 +760,9 @@ proc compileRegion*(code: seq[Instruction], start, stop: int): Region
     if start < 0 or stop > code.len or start >= stop:
       return nil
     if code.reachesOutside(start, stop):
+      return nil
+
+    if globals < 0:
       return nil
 
     var hoisted: seq[int32]
@@ -703,22 +773,36 @@ proc compileRegion*(code: seq[Instruction], start, stop: int): Region
       item.touchedGlobals(hoisted)
       var target = 0'i32
       if item.branchTarget(target):
+        # A branch may land one past the last offset, where the
+        # interpreter stops, but never beyond it.
         if int(target) < 0 or int(target) > code.len:
           return nil
     if hoisted.len == 0 or hoisted.len > MaxHoistedGlobals:
       return nil
+    for index in hoisted:
+      if index < 0 or int(index) >= globals:
+        return nil
     when NativeArm64:
-      # The guard reads the tag through a scaled byte offset.
+      # The tag is read through a scaled byte offset, which is narrower
+      # than the range the bounds check above already allows.
       for index in hoisted:
         if int(index) * ValueStride + ValuePayload > 4095:
           return nil
 
-    proc slotOf(index: int32): int {.closure, raises: [].} =
-      ## Returns which hoisted register holds one global.
+    proc slotOf(index: int32): int {.closure, raises: [BasicError].} =
+      ## Returns which hoisted register holds one global. Reaching the end
+      ## would mean an operation reads a global that was never gathered,
+      ## and so never bounds checked, so it refuses rather than picking a
+      ## register that happens to be next.
+      result = -1
       for slot, candidate in hoisted:
         if candidate == index:
-          return slot
-      -1
+          result = slot
+          break
+      if result < 0:
+        raise newException(
+          BasicError, "BASIC native compiler met an ungathered global"
+        )
 
     const CountedLoops = NativeArm64
     let plan = planLoop(code, start, stop)
@@ -808,9 +892,9 @@ proc compileRegion*(code: seq[Instruction], start, stop: int): Region
                 exitLabel(int32(start), NativeCompleted, start)
               )
           elif spending:
-            if index == start:
+            if plan.checkpoints[index - start]:
               emitter.checkSpending(
-                exitLabel(int32(start), NativeCompleted, start)
+                exitLabel(int32(index), NativeCompleted, index)
               )
             emitter.recordSpending(int64(item.b), int64(item.a))
           else:
@@ -906,11 +990,13 @@ proc invoke*(region: Region, context: var NativeContext): NativeStatus
   ## Runs one compiled loop and reports why it returned.
   NativeStatus(region.call(context.addr))
 
-proc compileLoops*(code: seq[Instruction]): seq[Region]
+proc compileLoops*(code: seq[Instruction], globals: int): seq[Region]
     {.raises: [BasicError].} =
   ## Compiles every backward-branching loop the code generator models.
   ## The result is indexed by bytecode offset, so the interpreter reaches
   ## a compiled loop with one load rather than a lookup.
+  if not layoutMatches():
+    return
   for index in 0 ..< code.len:
     var target = 0'i32
     if not code[index].branchTarget(target):
@@ -919,7 +1005,7 @@ proc compileLoops*(code: seq[Instruction]): seq[Region]
       continue
     if result.len > 0 and result[int(target)] != nil:
       continue
-    let region = compileRegion(code, int(target), index + 1)
+    let region = compileRegion(code, int(target), index + 1, globals)
     if region != nil:
       if result.len == 0:
         result = newSeq[Region](code.len)

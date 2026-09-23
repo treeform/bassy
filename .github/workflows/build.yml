@@ -57,6 +57,10 @@ jobs:
           nim r -d:release tests/test_amd64.nim
       - name: Test compiled loops against the interpreter
         run: nim r -d:release tests/test_jit.nim
+      - name: Test that compiled loops cannot outrun the sandbox
+        run: |
+          nim r -d:release tests/test_jit_safety.nim
+          nim r -d:danger tests/test_jit_safety.nim
       - name: Test the same scripts with the interpreter forced
         run: nim r -d:release -d:bassyNoJit tests/test_jit.nim
       - name: Render the BASIC raytracer and check cross-platform determinism
