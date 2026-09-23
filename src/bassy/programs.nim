@@ -703,6 +703,584 @@ when NativeArm64:
     ## Returns where a label ended up, in bytes.
     e.code.offsetOf(target) * 4
 
+elif NativeAmd64:
+  ## x86-64 code generation
+  ##
+  ## r15  context            r12  instruction budget   r13  work budget
+  ## rbx  globals            rbp  current frame        r14  array cells
+  ## rax rcx rsi rdi r8 r9 r10  working registers;  r11  one cell;
+  ## rdx  the divide's high half and a spare
+  ##
+  ## The six long-lived registers are the ones both platform conventions
+  ## keep across a call. Windows also keeps rsi and rdi, so those are
+  ## saved on the way in there. Everything else the program touches
+  ## rarely is read from the context when it is needed.
+
+  const
+    Context = r15
+    Instructions = r12
+    Work = r13
+    GlobalsBase = rbx
+    RegistersBase = rbp
+    MemoryBase = r14
+    Temps = [rax, rcx, rsi, rdi, r8, r9, r10]
+    Cell = r11
+    Spare = rdx
+
+  when defined(windows):
+    const
+      FirstArgument = rcx
+      SecondArgument = rdx
+      Saved = [rbx, rbp, r12, r13, r14, r15, rsi, rdi]
+      ## Four shadow slots for the callee, plus eight to realign.
+      Padding = 40
+  else:
+    const
+      FirstArgument = rdi
+      SecondArgument = rsi
+      Saved = [rbx, rbp, r12, r13, r14, r15]
+      Padding = 8
+
+  proc temp(index: int): Register {.inline, raises: [].} =
+    ## Returns one working register.
+    Temps[index]
+
+  proc nativeCondition(check: Check): Condition {.raises: [].} =
+    ## Maps a neutral outcome onto the architecture's encoding.
+    case check
+    of EqualCheck: EqualCondition
+    of NotEqualCheck: NotEqualCondition
+    of LessCheck: LessCondition
+    of LessEqualCheck: LessEqualCondition
+    of GreaterCheck: GreaterCondition
+    of GreaterEqualCheck: GreaterEqualCondition
+
+  type
+    Emitter = object
+      ## The assembler. Every branch here reaches anywhere already, so
+      ## there is nothing to widen.
+      code: Assembler
+      far: bool
+
+  proc label(e: var Emitter): Label {.inline, raises: [].} =
+    ## Reserves a label.
+    e.code.label()
+
+  proc place(e: var Emitter, target: Label) {.inline, raises: [].} =
+    ## Places a label here.
+    e.code.place(target)
+
+  proc jump(e: var Emitter, target: Label) {.raises: [].} =
+    ## Jumps unconditionally.
+    e.code.branch(target)
+
+  proc jumpWhen(e: var Emitter, condition: Condition, target: Label)
+      {.raises: [].} =
+    ## Jumps when a condition holds.
+    e.code.branchIf(condition, target)
+
+  proc contextField(e: var Emitter, destination: Register, offset: int)
+      {.raises: [BasicError].} =
+    ## Loads one pointer from the context.
+    e.code.loadDouble(destination, Context, offset)
+
+  proc reach(e: var Emitter, place: Place): (Register, int)
+      {.raises: [BasicError].} =
+    ## Returns a base register and byte offset for a value. Displacements
+    ## are thirty-two bits wide here, so every index is reached directly.
+    let offset = int(place.index) * ValueStride
+    case place.home
+    of SlotHome: (RegistersBase, offset)
+    of GlobalHome: (GlobalsBase, offset)
+    of ArgumentHome:
+      e.contextField(Cell, ContextArguments)
+      (Cell, offset)
+    of HostHome:
+      e.contextField(Cell, ContextHostData)
+      (Cell, offset)
+    of CellHome: (Cell, 0)
+
+  proc readValue(e: var Emitter, value, tag: int, place: Place)
+      {.raises: [BasicError].} =
+    ## Reads a value's kind and its 32-bit payload.
+    let (base, offset) = e.reach(place)
+    e.code.loadByteZeroed(temp(tag), base, offset)
+    e.code.loadWord(temp(value), base, offset + ValuePayload)
+
+  proc writeWhole(e: var Emitter, place: Place, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a whole number.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteImmediate(base, offset, 0)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeKind(e: var Emitter, place: Place, tag, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a payload under the kind held in a working register.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteLow(base, offset, temp(tag))
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeFixed(e: var Emitter, place: Place, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a fixed-point payload.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteImmediate(base, offset, byte(FixedTag))
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeConstant(e: var Emitter, place: Place, tag: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Writes a constant of a known kind.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteImmediate(base, offset, byte(tag))
+    e.code.storeWordImmediate(base, offset + ValuePayload, bits)
+
+  proc copyValue(e: var Emitter, destination, source: Place)
+      {.raises: [BasicError].} =
+    ## Copies a value entire, whatever kind it holds, as the interpreter
+    ## does.
+    let (fromBase, fromOffset) = e.reach(source)
+    e.code.loadDouble(temp(5), fromBase, fromOffset)
+    e.code.loadDouble(temp(6), fromBase, fromOffset + ValuePayload)
+    let (toBase, toOffset) = e.reach(destination)
+    e.code.storeDouble(temp(5), toBase, toOffset)
+    e.code.storeDouble(temp(6), toBase, toOffset + ValuePayload)
+
+  proc unlessWhole(e: var Emitter, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless a kind says whole number.
+    e.code.testRegister(Word32, temp(tag), temp(tag))
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc unlessNumeric(e: var Emitter, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless a kind says number of either sort.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(AboveCondition, slow)
+
+  proc unlessSame(e: var Emitter, tag, other: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless two kinds agree.
+    e.code.compareRegister(Word32, temp(tag), temp(other))
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc whenFixed(e: var Emitter, tag: int, target: Label)
+      {.raises: [BasicError].} =
+    ## Jumps when a kind says fixed point.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(EqualCondition, target)
+
+  proc loadConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [].} =
+    ## Loads a constant into a working register.
+    e.code.loadImmediate(Word32, temp(value), int64(bits))
+
+  proc add(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Adds, wrapping.
+    e.code.addRegister(Word32, temp(left), temp(right))
+
+  proc subtract(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Subtracts, wrapping.
+    e.code.subtractRegister(Word32, temp(left), temp(right))
+
+  proc multiply(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Multiplies, wrapping.
+    e.code.multiplyRegister(Word32, temp(left), temp(right))
+
+  proc negate(e: var Emitter, value: int) {.raises: [].} =
+    ## Negates, wrapping.
+    e.code.negateRegister(Word32, temp(value))
+
+  proc bitAnd(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits both hold.
+    e.code.andRegister(Word32, temp(left), temp(right))
+
+  proc bitOr(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits either holds.
+    e.code.orRegister(Word32, temp(left), temp(right))
+
+  proc bitXor(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits exactly one holds.
+    e.code.xorRegister(Word32, temp(left), temp(right))
+
+  proc bitNot(e: var Emitter, value: int) {.raises: [].} =
+    ## Flips every bit.
+    e.code.notRegister(Word32, temp(value))
+
+  proc divide(e: var Emitter, left, right: int, keepRemainder: bool)
+      {.raises: [BasicError].} =
+    ## Divides toward zero; the divisor is known not to be zero. The
+    ## hardware traps on the most negative number over minus one, which
+    ## the interpreter defines, so minus one is answered without dividing:
+    ## the quotient is the negation, wrapping, and nothing is left over.
+    let normal = e.label()
+    let done = e.label()
+    e.code.compareImmediate(Word32, temp(right), -1)
+    e.jumpWhen(NotEqualCondition, normal)
+    if keepRemainder:
+      e.code.loadImmediate(Word32, temp(left), 0)
+    else:
+      e.code.negateRegister(Word32, temp(left))
+    e.jump(done)
+    e.place(normal)
+    e.code.moveRegister(Word32, rax, temp(left))
+    e.code.signExtendToPair(Word32)
+    e.code.signedDivide(Word32, temp(right))
+    if keepRemainder:
+      e.code.moveRegister(Word32, temp(left), Spare)
+    else:
+      e.code.moveRegister(Word32, temp(left), rax)
+    e.place(done)
+
+  proc quotient(e: var Emitter, left, right: int) {.raises: [BasicError].} =
+    ## Divides toward zero.
+    e.divide(left, right, false)
+
+  proc remainder(e: var Emitter, left, right: int)
+      {.raises: [BasicError].} =
+    ## Leaves what dividing left over, with the sign of the dividend.
+    e.divide(left, right, true)
+
+  proc multiplyFixed(e: var Emitter, left, right: int)
+      {.raises: [BasicError].} =
+    ## Multiplies two Q16.16 numbers through a widened intermediate,
+    ## rounding to nearest exactly as the fixed-point library does.
+    e.code.signExtendDouble(temp(left), temp(left))
+    e.code.signExtendDouble(temp(6), temp(right))
+    e.code.multiplyRegister(Word64, temp(left), temp(6))
+    e.code.addImmediate(Word64, temp(left), int32(jit.FixedRounding))
+    e.code.shiftRightImmediate(Word64, temp(left), jit.FixedShift)
+    e.code.moveRegister(Word32, temp(left), temp(left))
+
+  proc widenToFixed(e: var Emitter, value, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Turns a number of either kind into its Q16.16 bits, widened to
+    ## sixty-four. A whole number outside the fixed-point range cannot
+    ## become one, which the interpreter refuses, so that goes slow.
+    let register = temp(value)
+    let already = e.label()
+    let ready = e.label()
+    e.whenFixed(tag, already)
+    e.code.compareImmediate(Word32, register, 32767)
+    e.jumpWhen(GreaterCondition, slow)
+    e.code.compareImmediate(Word32, register, -32768)
+    e.jumpWhen(LessCondition, slow)
+    e.code.signExtendDouble(register, register)
+    e.code.shiftLeftImmediate(Word64, register, jit.FixedShift)
+    e.jump(ready)
+    e.place(already)
+    e.code.signExtendDouble(register, register)
+    e.place(ready)
+
+  proc divideFixed(e: var Emitter, left, right: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Divides two widened Q16.16 numbers, rounding to nearest with halves
+    ## going up, for either sign, exactly as the fixed-point library
+    ## does: the signs are put right first, half the divisor is added,
+    ## and the truncating divide is corrected back to a floor. The divide
+    ## works in rax and rdx, so the numerator is moved there.
+    let denominator = temp(right)
+    let half = temp(5)
+    let numerator = temp(6)
+    e.code.moveRegister(Word64, rax, temp(left))
+    e.code.compareImmediate(Word64, denominator, 0)
+    e.jumpWhen(EqualCondition, slow)
+    let signsSettled = e.label()
+    e.jumpWhen(GreaterCondition, signsSettled)
+    e.code.negateRegister(Word64, rax)
+    e.code.negateRegister(Word64, denominator)
+    e.place(signsSettled)
+    e.code.shiftLeftImmediate(Word64, rax, jit.FixedShift)
+    e.code.moveRegister(Word64, half, denominator)
+    e.code.shiftRightImmediate(Word64, half, 1)
+    e.code.addRegister(Word64, rax, half)
+    e.code.moveRegister(Word64, numerator, rax)
+    e.code.signExtendToPair(Word64)
+    e.code.signedDivide(Word64, denominator)
+    let done = e.label()
+    e.code.testRegister(Word64, Spare, Spare)
+    e.jumpWhen(EqualCondition, done)
+    e.code.testRegister(Word64, numerator, numerator)
+    e.jumpWhen(GreaterEqualCondition, done)
+    e.code.subtractImmediate(Word64, rax, 1)
+    e.place(done)
+    e.code.moveRegister(Word32, temp(left), rax)
+
+  proc compare(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two working registers.
+    e.code.compareRegister(Word32, temp(left), temp(right))
+
+  proc compareConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Sets flags from a working register against a constant.
+    e.code.compareImmediate(Word32, temp(value), bits)
+
+  proc answer(e: var Emitter, value: int, check: Check) {.raises: [].} =
+    ## Writes BASIC's -1 for true and zero for false. The byte form only
+    ## names the low byte of rax, rcx, rdx and rbx without a prefix, so
+    ## this is only ever asked of the first working register.
+    e.code.setIfCondition(temp(value), nativeCondition(check))
+    e.code.negateRegister(Word32, temp(value))
+
+  proc jumpOn(e: var Emitter, check: Check, target: Label)
+      {.raises: [].} =
+    ## Jumps on a comparison outcome.
+    e.jumpWhen(nativeCondition(check), target)
+
+  proc jumpIfZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds zero.
+    e.code.testRegister(Word32, temp(value), temp(value))
+    e.jumpWhen(EqualCondition, target)
+
+  proc jumpIfNotZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds anything but zero.
+    e.code.testRegister(Word32, temp(value), temp(value))
+    e.jumpWhen(NotEqualCondition, target)
+
+  proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
+      slow: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index and leaves the cell's address in Cell. One
+    ## unsigned comparison covers both ends, as the interpreter's does.
+    e.code.compareImmediate(Word32, temp(index), extent.length)
+    e.jumpWhen(AboveEqualCondition, slow)
+    e.code.moveRegister(Word32, Cell, temp(index))
+    e.code.addImmediate(Word32, Cell, extent.base)
+    e.code.shiftLeftImmediate(Word64, Cell, 4)
+    e.code.addRegister(Word64, Cell, MemoryBase)
+
+  proc meter(e: var Emitter, instructions, work: int32, slow: Label)
+      {.raises: [BasicError].} =
+    ## Checks both budgets before charging either, as the interpreter does.
+    e.code.compareImmediate(Word64, Instructions, instructions)
+    e.jumpWhen(LessCondition, slow)
+    e.code.compareImmediate(Word64, Work, work)
+    e.jumpWhen(LessCondition, slow)
+    e.code.subtractImmediate(Word64, Instructions, instructions)
+    e.code.subtractImmediate(Word64, Work, work)
+
+  proc slotAddress(e: var Emitter, destination, index: Register)
+      {.raises: [BasicError].} =
+    ## Points a register at one register-file slot by its absolute index.
+    ## The index register is left scaled.
+    e.contextField(destination, ContextRegisterFile)
+    e.code.shiftLeftImmediate(Word64, index, 4)
+    e.code.addRegister(Word64, destination, index)
+
+  proc copyValues(e: var Emitter, destination, source: Register,
+      count: int) {.raises: [BasicError].} =
+    ## Copies a run of whole values, in a loop once there are many. Works
+    ## in rax, rdx, r8, r9 and r10, so neither end may be one of those.
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.loadDouble(rax, source, index * ValueStride)
+        e.code.loadDouble(Spare, source, index * ValueStride + ValuePayload)
+        e.code.storeDouble(rax, destination, index * ValueStride)
+        e.code.storeDouble(Spare, destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, r10, source)
+    e.code.moveRegister(Word64, r9, destination)
+    e.code.loadImmediate(Word32, r8, int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.loadDouble(rax, r10, 0)
+    e.code.loadDouble(Spare, r10, ValuePayload)
+    e.code.storeDouble(rax, r9, 0)
+    e.code.storeDouble(Spare, r9, ValuePayload)
+    e.code.addImmediate(Word64, r10, ValueStride)
+    e.code.addImmediate(Word64, r9, ValueStride)
+    e.code.subtractImmediate(Word32, r8, 1)
+    e.jumpWhen(NotEqualCondition, again)
+
+  proc clearValues(e: var Emitter, destination: Register, count: int)
+      {.raises: [BasicError].} =
+    ## Zeroes a run of values, in a loop once there are many.
+    e.code.loadImmediate(Word32, rax, 0)
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.storeDouble(rax, destination, index * ValueStride)
+        e.code.storeDouble(rax, destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, r9, destination)
+    e.code.loadImmediate(Word32, r8, int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.storeDouble(rax, r9, 0)
+    e.code.storeDouble(rax, r9, ValuePayload)
+    e.code.addImmediate(Word64, r9, ValueStride)
+    e.code.subtractImmediate(Word32, r8, 1)
+    e.jumpWhen(NotEqualCondition, again)
+
+  proc enterRoutine(e: var Emitter, gosub: bool, calleeId: int32,
+      calleeRegisters, calleeParameters, callerRegisters: int32,
+      resumeAt: int32, limits: CallLimits, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pushes a frame into the interpreter's own array and moves the
+    ## current frame on, refusing the same two ceilings it refuses.
+    let depth = rax
+    let oldBase = rcx
+    let newBase = rsi
+    let frame = rdi
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.code.compareImmediate(Word32, depth, limits.frames - 1)
+    e.jumpWhen(GreaterEqualCondition, slow)
+    e.code.loadWord(oldBase, Context, ContextBase)
+    e.code.moveRegister(Word32, newBase, oldBase)
+    e.code.addImmediate(Word32, newBase, callerRegisters)
+    e.code.compareImmediate(Word32, newBase,
+      limits.slots - calleeRegisters)
+    e.jumpWhen(GreaterCondition, slow)
+
+    e.contextField(frame, ContextFrames)
+    e.code.moveRegister(Word32, r8, depth)
+    e.code.shiftLeftImmediate(Word64, r8, 4)
+    e.code.addRegister(Word64, frame, r8)
+    e.code.storeWord(oldBase, frame, FrameBase)
+    e.code.loadWord(r8, Context, ContextRoutine)
+    e.code.storeWord(r8, frame, FrameRoutine)
+    e.code.storeWordImmediate(frame, FrameReturn, resumeAt)
+    e.code.storeWordImmediate(frame, FrameTag, if gosub: 1 else: 0)
+
+    e.code.addImmediate(Word32, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.code.storeWord(newBase, Context, ContextBase)
+    e.code.storeWordImmediate(Context, ContextRoutine, calleeId)
+
+    # A GOSUB hands the callee a copy of the caller's slots; a call clears
+    # them and lays the arguments over the first few, in that order.
+    e.code.moveRegister(Word64, frame, RegistersBase)
+    e.code.moveRegister(Word32, rcx, newBase)
+    e.slotAddress(RegistersBase, rcx)
+    if gosub:
+      e.copyValues(RegistersBase, frame, int(calleeRegisters))
+    else:
+      e.clearValues(RegistersBase, int(calleeRegisters))
+      if calleeParameters > 0:
+        e.contextField(Cell, ContextArguments)
+        e.copyValues(RegistersBase, Cell, int(calleeParameters))
+
+  proc leaveRoutine(e: var Emitter, parameters: int32, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
+    ## frame first hands the shared parameters back to the caller.
+    let depth = rax
+    let frame = rcx
+    let base = rsi
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.code.testRegister(Word32, depth, depth)
+    e.jumpWhen(EqualCondition, slow)
+    e.code.subtractImmediate(Word32, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.contextField(frame, ContextFrames)
+    e.code.moveRegister(Word32, r8, depth)
+    e.code.shiftLeftImmediate(Word64, r8, 4)
+    e.code.addRegister(Word64, frame, r8)
+    e.code.loadWord(base, frame, FrameBase)
+    if parameters > 0:
+      let plain = e.label()
+      e.code.loadByteZeroed(Spare, frame, FrameTag)
+      e.code.compareImmediate(Word32, Spare, 1)
+      e.jumpWhen(NotEqualCondition, plain)
+      e.code.moveRegister(Word32, r8, base)
+      e.slotAddress(rdi, r8)
+      e.copyValues(rdi, RegistersBase, int(parameters))
+      e.place(plain)
+    e.code.storeWord(base, Context, ContextBase)
+    e.code.loadWord(Spare, frame, FrameRoutine)
+    e.code.storeWord(Spare, Context, ContextRoutine)
+    e.code.loadWord(Spare, frame, FrameReturn)
+    e.code.storeWord(Spare, Context, ContextOffset)
+    e.code.moveRegister(Word32, r8, base)
+    e.slotAddress(RegistersBase, r8)
+    e.contextField(rax, ContextReturnTable)
+    e.code.shiftLeftImmediate(Word64, Spare, 3)
+    e.code.addRegister(Word64, rax, Spare)
+    e.code.loadDouble(rax, rax, 0)
+    e.code.jumpRegister(rax)
+
+  proc callSlow(e: var Emitter, offset: int32, routine: Label)
+      {.raises: [BasicError].} =
+    ## Runs the interpreter's own code for one instruction.
+    e.code.loadImmediate(Word32, SecondArgument, int64(offset))
+    e.code.callLabel(routine)
+
+  proc slowRoutine(e: var Emitter, failed: Label)
+      {.raises: [BasicError].} =
+    ## The one place compiled code calls out. The budgets go into the
+    ## context for the interpreter's code to charge, and come back from it
+    ## along with the frame, since a call or a return may have moved it.
+    ## A failure leaves through the shared exit, dropping the return
+    ## address this routine was called with on the way.
+    let refused = e.label()
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.moveRegister(Word64, FirstArgument, Context)
+    e.code.subtractImmediate(Word64, rsp, Padding)
+    e.contextField(rax, ContextStep)
+    e.code.callRegister(rax)
+    e.code.addImmediate(Word64, rsp, Padding)
+    e.code.moveRegister(Word32, r10, rax)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadWord(rcx, Context, ContextBase)
+    e.slotAddress(RegistersBase, rcx)
+    e.code.testRegister(Word32, r10, r10)
+    e.jumpWhen(NotEqualCondition, refused)
+    e.code.returnToCaller()
+    e.place(refused)
+    e.code.addImmediate(Word64, rsp, 8)
+    e.jump(failed)
+
+  proc dispatch(e: var Emitter) {.raises: [BasicError].} =
+    ## Jumps to the block for whatever offset the context names.
+    e.code.loadWord(rax, Context, ContextOffset)
+    e.code.shiftLeftImmediate(Word64, rax, 3)
+    e.contextField(rcx, ContextReturnTable)
+    e.code.addRegister(Word64, rcx, rax)
+    e.code.loadDouble(rcx, rcx, 0)
+    e.code.jumpRegister(rcx)
+
+  proc prologue(e: var Emitter) {.raises: [BasicError].} =
+    ## Saves what the platform says to keep and loads the machine state.
+    for register in Saved:
+      e.code.push(register)
+    e.code.subtractImmediate(Word64, rsp, Padding)
+    e.code.moveRegister(Word64, Context, FirstArgument)
+    e.code.loadDouble(GlobalsBase, Context, 0)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.contextField(MemoryBase, ContextMemory)
+    e.code.loadWord(rcx, Context, ContextBase)
+    e.slotAddress(RegistersBase, rcx)
+
+  proc epilogue(e: var Emitter, status: NativeStatus)
+      {.raises: [BasicError].} =
+    ## Restores what the platform says to keep and returns a status.
+    e.code.loadImmediate(Word32, rax, int64(ord(status)))
+    e.code.addImmediate(Word64, rsp, Padding)
+    for index in countdown(Saved.len - 1, 0):
+      e.code.pop(Saved[index])
+    e.code.returnToCaller()
+
+  proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
+    ## Publishes the budgets and where the program stopped, then returns.
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.storeWordImmediate(Context, ContextOffset, offset)
+    e.epilogue(NativeCompleted)
+
+  proc finish(e: var Emitter): seq[byte] {.raises: [BasicError].} =
+    ## Resolves every branch and returns the finished bytes.
+    e.code.resolve()
+    e.code.code
+
+  proc offsetBytes(e: Emitter, target: Label): int {.raises: [].} =
+    ## Returns where a label ended up, in bytes.
+    e.code.offsetOf(target)
+
 proc invoke*(machine: Machine, context: var NativeContext): NativeStatus
     {.raises: [].} =
   ## Runs the compiled program from the offset the context names.
@@ -714,7 +1292,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     {.raises: [BasicError].} =
   ## Emits the whole program and returns its bytes along with where each
   ## offset's block starts.
-  when not NativeArm64:
+  when not (NativeArm64 or NativeAmd64):
     raise newException(BasicError, "BASIC has no whole-program backend here")
   else:
     var e = Emitter(far: far)
@@ -1035,7 +1613,7 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
   ## when this target has no backend or the program is outside what the
   ## generator is sure of. Generated code indexes storage without
   ## checking, so every index it will use is proved in range here first.
-  when not NativeArm64:
+  when not (NativeArm64 or NativeAmd64):
     return nil
   else:
     if not layoutMatches() or code.len == 0 or routines.len == 0:

@@ -152,6 +152,36 @@ encodes "pop r12":
   assembler.pop(r12)
 encodes "pop rbp":
   assembler.pop(rbp)
+encodes "and eax, ecx":
+  assembler.andRegister(Word32, rax, rcx)
+encodes "and r9d, esi":
+  assembler.andRegister(Word32, r9, rsi)
+encodes "or edi, r10d":
+  assembler.orRegister(Word32, rdi, r10)
+encodes "xor r8d, r9d":
+  assembler.xorRegister(Word32, r8, r9)
+encodes "xor rax, rdx":
+  assembler.xorRegister(Word64, rax, rdx)
+encodes "not ecx":
+  assembler.notRegister(Word32, rcx)
+encodes "not r10d":
+  assembler.notRegister(Word32, r10)
+encodes "call rax":
+  assembler.callRegister(rax)
+encodes "call r11":
+  assembler.callRegister(r11)
+encodes "jmp rcx":
+  assembler.jumpRegister(rcx)
+encodes "jmp r11":
+  assembler.jumpRegister(r11)
+block:
+  var assembler = Assembler()
+  let target = assembler.label()
+  assembler.callLabel(target)
+  assembler.place(target)
+  assembler.returnToCaller()
+  assembler.resolve()
+  cases.add(("call 1f\n1:\tret", assembler.code))
 encodes "ret":
   assembler.returnToCaller()
 

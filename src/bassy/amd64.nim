@@ -404,3 +404,57 @@ proc storeByteLow*(assembler: var Assembler, base: Register, offset: int,
 proc offsetOf*(assembler: Assembler, target: Label): int {.raises: [].} =
   ## Returns where a label ended up, in bytes.
   assembler.targets[int(target)]
+
+## Logic and indirect control flow
+
+proc logical(assembler: var Assembler, opcode: byte, width: Width,
+    destination, source: Register) {.raises: [].} =
+  ## Encodes one register-to-register logical instruction.
+  assembler.prefix(width, source, destination)
+  assembler.emit(opcode)
+  assembler.directOperand(source, destination)
+
+proc andRegister*(assembler: var Assembler, width: Width,
+    destination, source: Register) {.raises: [].} =
+  ## Keeps the bits both registers hold.
+  assembler.logical(0x21, width, destination, source)
+
+proc orRegister*(assembler: var Assembler, width: Width,
+    destination, source: Register) {.raises: [].} =
+  ## Keeps the bits either register holds.
+  assembler.logical(0x09, width, destination, source)
+
+proc xorRegister*(assembler: var Assembler, width: Width,
+    destination, source: Register) {.raises: [].} =
+  ## Keeps the bits exactly one register holds.
+  assembler.logical(0x31, width, destination, source)
+
+proc notRegister*(assembler: var Assembler, width: Width,
+    target: Register) {.raises: [].} =
+  ## Flips every bit of a register.
+  assembler.prefix(width, Register(2), target)
+  assembler.emit(0xF7)
+  assembler.directOperand(Register(2), target)
+
+proc callLabel*(assembler: var Assembler, target: Label) {.raises: [].} =
+  ## Calls a label, pushing the return address.
+  assembler.emit(0xE8)
+  assembler.fixups.add(
+    Fixup(at: assembler.code.len, next: assembler.code.len + 4,
+      label: int(target))
+  )
+  assembler.emitDouble(0)
+
+proc callRegister*(assembler: var Assembler, target: Register)
+    {.raises: [].} =
+  ## Calls the address held in a register.
+  assembler.prefix(Word32, Register(2), target)
+  assembler.emit(0xFF)
+  assembler.directOperand(Register(2), target)
+
+proc jumpRegister*(assembler: var Assembler, target: Register)
+    {.raises: [].} =
+  ## Jumps to the address held in a register.
+  assembler.prefix(Word32, Register(4), target)
+  assembler.emit(0xFF)
+  assembler.directOperand(Register(4), target)
