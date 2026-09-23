@@ -15,6 +15,10 @@ type
 const
   PageBytes* = 4096
 
+  ## Apple silicon is the one target that keeps pages executable while
+  ## they are written, because it gates the writing per thread instead.
+  AppleSilicon* = defined(macosx) and defined(arm64)
+
   ## Whether this target can emit and run machine code at all. Everywhere
   ## else, including WebAssembly, the interpreter is the only path and no
   ## platform-specific declaration is emitted. Define bassyNoJit to force
@@ -69,10 +73,14 @@ elif NativeCode:
     MapPrivate = 0x0002.cint
     MapFailed = -1
 
-  when defined(macosx):
+  when AppleSilicon:
     const
       MapAnonymous = 0x1000.cint
       MapJit = 0x0800.cint
+  elif defined(macosx):
+    const
+      MapAnonymous = 0x1000.cint
+      MapJit = 0.cint
   else:
     const
       MapAnonymous = 0x20.cint
@@ -88,7 +96,7 @@ elif NativeCode:
   proc munmap(address: pointer, length: csize_t): cint
     {.importc: "munmap", header: "<sys/mman.h>".}
 
-when NativeCode and defined(macosx) and defined(arm64):
+when NativeCode and AppleSilicon:
   proc jitWriteProtect(enabled: cint)
     {.importc: "pthread_jit_write_protect_np", header: "<pthread.h>".}
 
@@ -98,6 +106,20 @@ when NativeCode and defined(macosx) and defined(arm64):
 elif NativeCode and defined(arm64):
   proc clearCache(start, stop: pointer)
     {.importc: "__builtin___clear_cache", nodecl.}
+
+proc `=copy`*(destination: var CodeBuffer, source: CodeBuffer) {.error:
+  "a code buffer owns its pages and cannot be copied".}
+
+proc `=destroy`*(buffer: CodeBuffer) {.raises: [].} =
+  ## Returns the pages when the last owner goes away, so a program that
+  ## compiles many scripts does not accumulate executable mappings. The
+  ## buffer cannot be copied, so there is exactly one owner to go away.
+  if buffer.memory == nil:
+    return
+  when NativeCode and defined(windows):
+    discard virtualFree(buffer.memory, 0.csize_t, MemRelease)
+  elif NativeCode:
+    discard munmap(buffer.memory, csize_t(buffer.capacity))
 
 proc fail(message: string) {.noreturn, raises: [BasicError].} =
   ## Reports a controlled code buffer failure.
@@ -128,10 +150,13 @@ proc initCodeBuffer*(capacity: int): CodeBuffer {.raises: [BasicError].} =
       memory: memory, capacity: size, length: 0, sealed: false
     )
   else:
+    const OpenProtection =
+      when AppleSilicon: ProtRead or ProtWrite or ProtExec
+      else: ProtRead or ProtWrite
     let memory = mmap(
       nil,
       csize_t(size),
-      ProtRead or ProtWrite or ProtExec,
+      OpenProtection,
       MapPrivate or MapAnonymous or MapJit,
       -1,
       0
@@ -152,12 +177,12 @@ proc capacity*(buffer: CodeBuffer): int {.inline, raises: [].} =
 
 proc beginWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Makes the pages writable on platforms that enforce write-xor-execute.
-  when NativeCode and defined(macosx) and defined(arm64):
+  when NativeCode and AppleSilicon:
     jitWriteProtect(0)
 
 proc endWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Restores execute permission after a batch of writes.
-  when NativeCode and defined(macosx) and defined(arm64):
+  when NativeCode and AppleSilicon:
     jitWriteProtect(1)
 
 proc write*(buffer: var CodeBuffer, source: pointer, size: int)
@@ -209,12 +234,13 @@ proc seal*(buffer: var CodeBuffer) {.raises: [BasicError].} =
       currentProcess(), buffer.memory, csize_t(buffer.length)
     )
     buffer.sealed = true
-  elif defined(macosx):
-    # MAP_JIT pages are already executable; only the cache needs a flush.
-    when defined(arm64):
-      invalidateInstructionCache(buffer.memory, csize_t(buffer.length))
+  elif AppleSilicon:
+    # These pages are executable already, and writing to them is what is
+    # gated, so there is nothing to drop here and only the cache to flush.
+    invalidateInstructionCache(buffer.memory, csize_t(buffer.length))
     buffer.sealed = true
   else:
+    # Drop write as execute is granted, so the pages are never both.
     if mprotect(
       buffer.memory, csize_t(buffer.capacity), ProtRead or ProtExec
     ) != 0:
@@ -233,13 +259,8 @@ proc entry*(buffer: CodeBuffer): pointer {.raises: [BasicError].} =
   buffer.memory
 
 proc release*(buffer: var CodeBuffer) {.raises: [].} =
-  ## Returns the pages to the operating system.
-  if buffer.memory == nil:
-    return
-  when NativeCode and defined(windows):
-    discard virtualFree(buffer.memory, 0.csize_t, MemRelease)
-  elif NativeCode:
-    discard munmap(buffer.memory, csize_t(buffer.capacity))
+  ## Returns the pages early, before the owner itself goes away.
+  `=destroy`(buffer)
   buffer.memory = nil
   buffer.capacity = 0
   buffer.length = 0

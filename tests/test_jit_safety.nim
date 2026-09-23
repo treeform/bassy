@@ -123,6 +123,57 @@ block:
     compileRegion(code, 0, 4, Globals) == nil
   )
 
+block:
+  # A block whose charge will not fit the instruction that adds it must
+  # leave that loop interpreted, not abandon the whole compilation.
+  let code = @[
+    Instruction(op: MeterOp, a: 9_000_000, b: 9_000_000),
+    Instruction(
+      op: JumpUnlessGlobalLessImmediateOp, a: 1, b: 10, c: 5
+    ),
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0)
+  ]
+  var raised = false
+  try:
+    discard compileRegion(code, 0, 5, Globals)
+  except BasicError:
+    raised = true
+  # Falling back to the per-block check is a fine outcome here. Refusing
+  # the whole compilation is not.
+  report("a charge too wide to add does not abandon compilation", not raised)
+
+block:
+  # compileLoops must survive a region it cannot finish, because the
+  # interpreter can run anything the generator declines.
+  let code = @[
+    Instruction(op: MeterOp, a: 9_000_000, b: 9_000_000),
+    Instruction(
+      op: JumpUnlessGlobalLessImmediateOp, a: 1, b: 10, c: 5
+    ),
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0),
+    Instruction(op: HaltOp)
+  ]
+  var survived = false
+  try:
+    discard compileLoops(code, Globals)
+    survived = true
+  except BasicError:
+    survived = false
+  report("compiling many loops survives one it cannot finish", survived)
+
+block:
+  # Nothing may hand the generator a global so far out that its offset
+  # would not fit the displacement it is reached through.
+  let code = countingLoop(high(int32) div 8, 4)
+  report(
+    "a global whose offset would not fit is refused",
+    compileRegion(code, 0, 4, high(int32)) == nil
+  )
+
 ## Scripts, down both paths
 
 type Outcome = object

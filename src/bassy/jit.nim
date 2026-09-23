@@ -69,6 +69,8 @@ const
   ContextOffset = 24
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
+  MaxChargeImmediate = 4095
+  MaxDisplacementBytes = int(high(int32))
 
 proc fail(message: string) {.noreturn, raises: [BasicError].} =
   ## Reports a controlled native compilation failure.
@@ -244,6 +246,11 @@ proc planLoop(code: seq[Instruction], start, stop: int): LoopPlan
   # looping for ever against an unmoving total.
   result.spending = result.passInstructions > 0 and result.passWork > 0 and
     code[start].b > 0
+  for index in start ..< stop:
+    if code[index].op == MeterOp:
+      if code[index].b < 0 or code[index].b > MaxChargeImmediate or
+          code[index].a < 0 or code[index].a > MaxChargeImmediate:
+        result.spending = false
   var
     instructions = 0'i64
     work = 0'i64
@@ -804,6 +811,8 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals: int):
     for index in hoisted:
       if index < 0 or int(index) >= globals:
         return nil
+      if int(index) > (MaxDisplacementBytes - ValuePayload) div ValueStride:
+        return nil
     when NativeArm64:
       # The tag is read through a scaled byte offset, which is narrower
       # than the range the bounds check above already allows.
@@ -1027,7 +1036,11 @@ proc compileLoops*(code: seq[Instruction], globals: int): seq[Region]
       continue
     if result.len > 0 and result[int(target)] != nil:
       continue
-    let region = compileRegion(code, int(target), index + 1, globals)
+    var region: Region = nil
+    try:
+      region = compileRegion(code, int(target), index + 1, globals)
+    except BasicError:
+      region = nil
     if region != nil:
       if result.len == 0:
         result = newSeq[Region](code.len)
