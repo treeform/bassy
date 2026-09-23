@@ -81,6 +81,14 @@ const
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
   MaxChargeImmediate = 4095
+  FixedTag = 1
+  FixedShift = 16
+  FixedRounding = 1'i64 shl (FixedShift - 1)
+
+  ## Fixed-point values are only modelled when overflow is allowed to
+  ## wrap. Under fixedChecks the interpreter asserts instead, and nothing
+  ## here would assert with it.
+  ModelsFixed* = not defined(fixedChecks)
   MaxDisplacementBytes = int(high(int32))
 
 proc fail(message: string) {.noreturn, raises: [BasicError].} =
@@ -141,6 +149,7 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
       AddOp, SubtractOp, MultiplyOp, NegateOp,
       EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp,
       JumpIfZeroOp,
+      IntegerDivideOp,
       ArrayGetOp, ArraySetOp, ArrayAddGlobalsOp,
       AddGlobalArrayGlobalIndexOp,
       JumpUnlessGlobalEqualImmediateOp,
@@ -149,6 +158,8 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
       JumpUnlessGlobalLessEqualImmediateOp,
       JumpUnlessGlobalGreaterImmediateOp,
       JumpUnlessGlobalGreaterEqualImmediateOp:
+    true
+  of ModuloOp:
     true
   of JumpUnlessGlobalModuloEqualZeroOp:
     # The interpreter raises on a zero divisor; refuse rather than model it.
@@ -223,7 +234,7 @@ proc touchedSlots(item: Instruction, slots: var seq[int32])
   of MoveOp:
     note(item.a)
     note(item.b)
-  of AddOp, SubtractOp, MultiplyOp,
+  of AddOp, SubtractOp, MultiplyOp, ModuloOp, IntegerDivideOp,
       EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp:
     note(item.a)
     note(item.b)
@@ -642,6 +653,92 @@ when NativeArm64:
     ## Branches when a working register holds zero.
     emitter.branchIfZero(Word32, ValueScratch[scratch], target)
 
+  proc readNumeric(emitter: var Assembler, scratch: int, slot: int32,
+      leave: Label) {.raises: [BasicError].} =
+    ## Reads a slot's tag into Scratch and its payload into a working
+    ## register, leaving the region for anything that is not a number.
+    let base = int(slot) * ValueStride
+    emitter.loadByte(Scratch, RegistersBase, base)
+    emitter.compareImmediate(Word32, Scratch, FixedTag)
+    emitter.branchIf(UnsignedGreaterCondition, leave)
+    emitter.loadWord(ValueScratch[scratch], RegistersBase,
+      base + ValuePayload)
+
+  proc requireSameKind(emitter: var Assembler, slot: int32, leave: Label)
+      {.raises: [BasicError].} =
+    ## Leaves the region unless a second slot carries the same tag as the
+    ## one already held. Whole numbers and fixed-point ones add, subtract
+    ## and compare through the very same instructions, so a pair that
+    ## agrees needs no further telling apart; a mixed pair would have to
+    ## be promoted, which can fail, so it goes back to the interpreter.
+    emitter.loadByte(OtherScratch, RegistersBase, int(slot) * ValueStride)
+    emitter.compareRegister(Word32, Scratch, OtherScratch)
+    emitter.branchIf(NotEqualCondition, leave)
+
+  proc writeNumeric(emitter: var Assembler, scratch: int, slot: int32)
+      {.raises: [BasicError].} =
+    ## Writes a payload back under the tag the operands carried.
+    let base = int(slot) * ValueStride
+    emitter.storeByte(Scratch, RegistersBase, base)
+    emitter.storeWord(ValueScratch[scratch], RegistersBase,
+      base + ValuePayload)
+
+  proc branchIfFixed(emitter: var Assembler, target: Label)
+      {.raises: [BasicError].} =
+    ## Branches when the held tag says fixed point.
+    emitter.compareImmediate(Word32, Scratch, FixedTag)
+    emitter.branchIf(EqualCondition, target)
+
+  proc requireWholeKind(emitter: var Assembler, leave: Label)
+      {.raises: [BasicError].} =
+    ## Leaves the region unless the held tag says whole number.
+    emitter.compareImmediate(Word32, Scratch, 0)
+    emitter.branchIf(NotEqualCondition, leave)
+
+  proc readSlotValue(emitter: var Assembler, scratch: int, slot: int32)
+      {.raises: [BasicError].} =
+    ## Reads a slot's payload, its tag having already been established.
+    emitter.loadWord(ValueScratch[scratch], RegistersBase,
+      int(slot) * ValueStride + ValuePayload)
+
+  proc guardDivisor(emitter: var Assembler, scratch: int, leave: Label)
+      {.raises: [BasicError].} =
+    ## Leaves the region for the two divisors that are not plain division:
+    ## zero, which the interpreter refuses, and minus one, which the other
+    ## architecture traps on.
+    emitter.compareImmediate(Word32, ValueScratch[scratch], 0)
+    emitter.branchIf(EqualCondition, leave)
+    emitter.loadImmediate(Word32, OtherScratch, -1)
+    emitter.compareRegister(Word32, ValueScratch[scratch], OtherScratch)
+    emitter.branchIf(EqualCondition, leave)
+
+  proc quotientScratch(emitter: var Assembler, left, right: int)
+      {.raises: [BasicError].} =
+    ## Divides the first working register by the second, toward zero.
+    emitter.signedDivide(Word32, ValueScratch[left], ValueScratch[left],
+      ValueScratch[right])
+
+  proc remainderScratch(emitter: var Assembler, left, right: int)
+      {.raises: [BasicError].} =
+    ## Leaves what the division of the two working registers left over.
+    emitter.signedDivide(Word32, OtherScratch, ValueScratch[left],
+      ValueScratch[right])
+    emitter.multiplySubtract(Word32, ValueScratch[left], OtherScratch,
+      ValueScratch[right], ValueScratch[left])
+
+  proc multiplyFixed(emitter: var Assembler, left, right: int)
+      {.raises: [BasicError].} =
+    ## Multiplies two Q16.16 numbers through a widened intermediate,
+    ## rounding to nearest exactly as the fixed-point library does.
+    emitter.signedMultiplyLong(OtherScratch, ValueScratch[left],
+      ValueScratch[right])
+    emitter.loadImmediate(Word64, ValueScratch[right], FixedRounding)
+    emitter.addRegister(Word64, OtherScratch, OtherScratch,
+      ValueScratch[right])
+    emitter.arithmeticShiftRight(Word64, OtherScratch, OtherScratch,
+      FixedShift)
+    emitter.moveRegister(Word32, ValueScratch[left], OtherScratch)
+
   proc elementAddress(emitter: var Assembler, scratch: int,
       extent: ArrayExtent, leave: Label) {.raises: [BasicError].} =
     ## Bounds checks an index and leaves the cell's address in Scratch.
@@ -906,6 +1003,95 @@ elif NativeAmd64:
     for index in countdown(Saved.len - 1, 0):
       emitter.pop(Saved[index])
     emitter.returnToCaller()
+
+  proc readNumeric(emitter: var Assembler, scratch: int, slot: int32,
+      leave: Label) {.raises: [BasicError].} =
+    ## Reads a slot's tag into Scratch and its payload into a working
+    ## register, leaving the region for anything that is not a number.
+    let base = int(slot) * ValueStride
+    emitter.loadByteZeroed(Scratch, RegistersBase, base)
+    emitter.compareImmediate(Word32, Scratch, FixedTag)
+    emitter.branchIf(AboveCondition, leave)
+    emitter.loadWord(ValueScratch[scratch], RegistersBase,
+      base + ValuePayload)
+
+  proc requireSameKind(emitter: var Assembler, slot: int32, leave: Label)
+      {.raises: [BasicError].} =
+    ## Leaves the region unless a second slot carries the same tag as the
+    ## one already held. Whole numbers and fixed-point ones add, subtract
+    ## and compare through the very same instructions, so a pair that
+    ## agrees needs no further telling apart; a mixed pair would have to
+    ## be promoted, which can fail, so it goes back to the interpreter.
+    emitter.loadByteZeroed(ValueScratch[1], RegistersBase,
+      int(slot) * ValueStride)
+    emitter.compareRegister(Word32, Scratch, ValueScratch[1])
+    emitter.branchIf(NotEqualCondition, leave)
+
+  proc writeNumeric(emitter: var Assembler, scratch: int, slot: int32)
+      {.raises: [BasicError].} =
+    ## Writes a payload back under the tag the operands carried.
+    let base = int(slot) * ValueStride
+    emitter.storeByteLow(RegistersBase, base, Scratch)
+    emitter.storeWord(ValueScratch[scratch], RegistersBase,
+      base + ValuePayload)
+
+  proc branchIfFixed(emitter: var Assembler, target: Label)
+      {.raises: [BasicError].} =
+    ## Branches when the held tag says fixed point.
+    emitter.compareImmediate(Word32, Scratch, FixedTag)
+    emitter.branchIf(EqualCondition, target)
+
+  proc requireWholeKind(emitter: var Assembler, leave: Label)
+      {.raises: [BasicError].} =
+    ## Leaves the region unless the held tag says whole number.
+    emitter.compareImmediate(Word32, Scratch, 0)
+    emitter.branchIf(NotEqualCondition, leave)
+
+  proc readSlotValue(emitter: var Assembler, scratch: int, slot: int32)
+      {.raises: [BasicError].} =
+    ## Reads a slot's payload, its tag having already been established.
+    emitter.loadWord(ValueScratch[scratch], RegistersBase,
+      int(slot) * ValueStride + ValuePayload)
+
+  proc guardDivisor(emitter: var Assembler, scratch: int, leave: Label)
+      {.raises: [BasicError].} =
+    ## Leaves the region for the two divisors that are not plain division:
+    ## zero, which the interpreter refuses, and minus one, which would
+    ## trap here on the most negative dividend.
+    emitter.compareImmediate(Word32, ValueScratch[scratch], 0)
+    emitter.branchIf(EqualCondition, leave)
+    emitter.compareImmediate(Word32, ValueScratch[scratch], -1)
+    emitter.branchIf(EqualCondition, leave)
+
+  proc quotientScratch(emitter: var Assembler, left, right: int)
+      {.raises: [BasicError].} =
+    ## Divides the first working register by the second, toward zero.
+    ## The divide reads and writes the accumulator pair, so the divisor is
+    ## moved aside first and the answer moved back afterwards.
+    emitter.moveRegister(Word32, Scratch, ValueScratch[right])
+    emitter.moveRegister(Word32, rax, ValueScratch[left])
+    emitter.signExtendToPair(Word32)
+    emitter.signedDivide(Word32, Scratch)
+    emitter.moveRegister(Word32, ValueScratch[left], rax)
+
+  proc remainderScratch(emitter: var Assembler, left, right: int)
+      {.raises: [BasicError].} =
+    ## Leaves what the division of the two working registers left over.
+    emitter.moveRegister(Word32, Scratch, ValueScratch[right])
+    emitter.moveRegister(Word32, rax, ValueScratch[left])
+    emitter.signExtendToPair(Word32)
+    emitter.signedDivide(Word32, Scratch)
+    emitter.moveRegister(Word32, ValueScratch[left], rdx)
+
+  proc multiplyFixed(emitter: var Assembler, left, right: int)
+      {.raises: [BasicError].} =
+    ## Multiplies two Q16.16 numbers through a widened intermediate,
+    ## rounding to nearest exactly as the fixed-point library does.
+    emitter.signExtendDouble(ValueScratch[left], ValueScratch[left])
+    emitter.signExtendDouble(ValueScratch[right], ValueScratch[right])
+    emitter.multiplyRegister(Word64, ValueScratch[left], ValueScratch[right])
+    emitter.addImmediate(Word64, ValueScratch[left], int32(FixedRounding))
+    emitter.shiftRightImmediate(Word64, ValueScratch[left], FixedShift)
 
   proc elementAddress(emitter: var Assembler, scratch: int,
       extent: ArrayExtent, leave: Label) {.raises: [BasicError].} =
@@ -1338,31 +1524,60 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
       of StoreGlobalOp:
         emitter.readSlot(0, item.b, leaveHere)
         emitter.hoistedFromScratch(slotOf(item.a), 0)
-      of AddOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.readSlot(1, item.c, leaveHere)
-        emitter.addScratch(0, 1)
-        emitter.writeSlot(0, item.a)
-      of SubtractOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.readSlot(1, item.c, leaveHere)
-        emitter.subtractScratch(0, 1)
-        emitter.writeSlot(0, item.a)
+      of AddOp, SubtractOp:
+        # Whole and fixed-point numbers add and subtract through the same
+        # instructions, so one path serves both and the answer keeps the
+        # kind its operands agreed on.
+        emitter.readNumeric(0, item.b, leaveHere)
+        emitter.requireSameKind(item.c, leaveHere)
+        emitter.readSlotValue(1, item.c)
+        if item.op == AddOp:
+          emitter.addScratch(0, 1)
+        else:
+          emitter.subtractScratch(0, 1)
+        emitter.writeNumeric(0, item.a)
       of MultiplyOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.readSlot(1, item.c, leaveHere)
-        emitter.multiplyScratch(0, 1)
-        emitter.writeSlot(0, item.a)
+        emitter.readNumeric(0, item.b, leaveHere)
+        emitter.requireSameKind(item.c, leaveHere)
+        emitter.readSlotValue(1, item.c)
+        when ModelsFixed:
+          let fixedWay = emitter.label()
+          let joined = emitter.label()
+          emitter.branchIfFixed(fixedWay)
+          emitter.multiplyScratch(0, 1)
+          emitter.branch(joined)
+          emitter.place(fixedWay)
+          emitter.multiplyFixed(0, 1)
+          emitter.place(joined)
+        else:
+          emitter.requireWholeKind(leaveHere)
+          emitter.multiplyScratch(0, 1)
+        emitter.writeNumeric(0, item.a)
       of NegateOp:
-        emitter.readSlot(0, item.b, leaveHere)
+        emitter.readNumeric(0, item.b, leaveHere)
         emitter.negateScratch(0)
-        emitter.writeSlot(0, item.a)
+        emitter.writeNumeric(0, item.a)
       of EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp,
           GreaterEqualOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.readSlot(1, item.c, leaveHere)
+        # Ordering is the same on the stored bits either way round, and
+        # the answer is always a whole number.
+        emitter.readNumeric(0, item.b, leaveHere)
+        emitter.requireSameKind(item.c, leaveHere)
+        emitter.readSlotValue(1, item.c)
         emitter.compareScratch(0, 1)
         emitter.answerCondition(0, comparisonTest(item.op))
+        emitter.writeSlot(0, item.a)
+      of ModuloOp, IntegerDivideOp:
+        # Both want whole numbers, both refuse a zero divisor, and minus
+        # one would trap on one of the two architectures, so all three go
+        # back to the interpreter rather than being modelled.
+        emitter.readSlot(0, item.b, leaveHere)
+        emitter.readSlot(1, item.c, leaveHere)
+        emitter.guardDivisor(1, leaveHere)
+        if item.op == ModuloOp:
+          emitter.remainderScratch(0, 1)
+        else:
+          emitter.quotientScratch(0, 1)
         emitter.writeSlot(0, item.a)
       of ArrayGetOp:
         emitter.readSlot(0, item.c, leaveHere)

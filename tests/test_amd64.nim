@@ -83,6 +83,11 @@ encodes "movzx r11d, byte ptr [rbx]":
 encodes "mov byte ptr [rbx + 48], 0":
   assembler.storeByteImmediate(rbx, 48, 0)
 
+encodes "mov byte ptr [rbp + 16], r11b":
+  assembler.storeByteLow(rbp, 16, r11)
+encodes "mov byte ptr [rbx], al":
+  assembler.storeByteLow(rbx, 0, rax)
+
 ## Arithmetic
 
 encodes "add esi, ecx":
@@ -129,6 +134,13 @@ encodes "shl rax, 4":
   assembler.shiftLeftImmediate(Word64, rax, 4)
 encodes "shl r11d, 1":
   assembler.shiftLeftImmediate(Word32, r11, 1)
+
+encodes "movsxd rax, ecx":
+  assembler.signExtendDouble(rax, rcx)
+encodes "movsxd r11, edx":
+  assembler.signExtendDouble(r11, rdx)
+encodes "sar rax, 16":
+  assembler.shiftRightImmediate(Word64, rax, 16)
 
 ## Stack and control flow
 

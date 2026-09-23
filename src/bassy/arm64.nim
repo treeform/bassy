@@ -484,3 +484,24 @@ proc testLowBits*(assembler: var Assembler, width: Width, source: Register,
       (if width == Word64: 1'u32 shl 22 else: 0'u32) or
       (uint32(count - 1) shl 10) or (source.number shl 5) or 31'u32
   )
+
+proc signedMultiplyLong*(assembler: var Assembler,
+    destination, left, right: Register) {.raises: [].} =
+  ## Multiplies two 32-bit registers into a full 64-bit result.
+  assembler.emit(
+    0x9B207C00'u32 or (right.number shl 16) or (left.number shl 5) or
+      destination.number
+  )
+
+proc arithmeticShiftRight*(assembler: var Assembler, width: Width,
+    destination, source: Register, count: int) {.raises: [BasicError].} =
+  ## Shifts right, keeping the sign, by a constant.
+  let last = if width == Word64: 63 else: 31
+  if count < 0 or count > last:
+    fail("assembler shift count is out of range")
+  let base =
+    if width == Word64: 0x9340_0000'u32 else: 0x1300_0000'u32
+  assembler.emit(
+    base or (uint32(count) shl 16) or (uint32(last) shl 10) or
+      (source.number shl 5) or destination.number
+  )

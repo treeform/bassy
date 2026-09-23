@@ -99,6 +99,13 @@ encodes "msub w9, w10, w11, w12":
 encodes "sdiv w1, w2, w3":
   assembler.signedDivide(Word32, x1, x2, x3)
 
+encodes "smull x1, w2, w3":
+  assembler.signedMultiplyLong(x1, x2, x3)
+encodes "asr x4, x5, #16":
+  assembler.arithmeticShiftRight(Word64, x4, x5, 16)
+encodes "asr w6, w7, #3":
+  assembler.arithmeticShiftRight(Word32, x6, x7, 3)
+
 ## Logic
 
 encodes "and w1, w2, w3":

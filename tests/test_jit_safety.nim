@@ -435,6 +435,103 @@ while j < 16
 wend
 """)
 
+agrees("fixed point arithmetic", """
+x = 0.5
+delta = 0.25
+total = 0.0
+i = 0
+while i < 200
+  total = total + x * delta
+  x = x - delta
+  i = i + 1
+wend
+""")
+
+agrees("fixed point comparison", """
+x = 0.0
+hits = 0
+i = 0
+while i < 300
+  x = x + 0.125
+  if x > 10.0 then
+    hits = hits + 1
+  end if
+  i = i + 1
+wend
+""")
+
+agrees("mixing whole and fixed operands", """
+x = 0.5
+n = 3
+total = 0
+i = 0
+while i < 100
+  total = total + n
+  x = x + 0.25
+  i = i + 1
+wend
+""")
+
+agrees("fixed point that wraps", """
+x = 32767.0
+i = 0
+while i < 50
+  x = x + 100.0
+  i = i + 1
+wend
+""")
+
+agrees("modulo and integer divide", """
+i = 0
+sum = 0
+while i < 400
+  sum = sum + (i mod 7)
+  sum = sum + (i \ 5)
+  i = i + 1
+wend
+""")
+
+agrees("a divisor that reaches zero", """
+d = 3
+i = 0
+total = 0
+while i < 10
+  total = total + (100 mod d)
+  d = d - 1
+  i = i + 1
+wend
+""")
+
+agrees("dividing the most negative by minus one", """
+a = -2147483648
+d = -1
+i = 0
+total = 0
+while i < 5
+  total = total + (a \ d)
+  i = i + 1
+wend
+""")
+
+agrees("fixed point held in array cells", """
+dim cells(63)
+i = 0
+while i < 64
+  cells(i) = 0.5
+  i = i + 1
+wend
+i = 0
+while i < 63
+  cells(i) = cells(i) + cells(i + 1)
+  i = i + 1
+wend
+j = 0
+while j < 63
+  cells(j) = cells(j) * cells(j + 1)
+  j = j + 1
+wend
+""")
+
 ## Generated scripts
 
 proc generated(seed: int64): string =

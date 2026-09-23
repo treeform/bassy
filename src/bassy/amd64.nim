@@ -374,3 +374,29 @@ proc shiftLeftImmediate*(assembler: var Assembler, width: Width,
   assembler.emit(0xC1)
   assembler.directOperand(Register(4), target)
   assembler.emit(byte(count))
+
+proc signExtendDouble*(assembler: var Assembler,
+    destination, source: Register) {.raises: [].} =
+  ## Widens a 32-bit register into a 64-bit one, keeping the sign.
+  assembler.prefix(Word64, destination, source)
+  assembler.emit(0x63)
+  assembler.directOperand(destination, source)
+
+proc shiftRightImmediate*(assembler: var Assembler, width: Width,
+    target: Register, count: int) {.raises: [BasicError].} =
+  ## Shifts right, keeping the sign, by a constant.
+  if count < 0 or count > 63:
+    fail("assembler shift count is out of range")
+  assembler.prefix(width, Register(7), target)
+  assembler.emit(0xC1)
+  assembler.directOperand(Register(7), target)
+  assembler.emit(byte(count))
+
+proc storeByteLow*(assembler: var Assembler, base: Register, offset: int,
+    source: Register) {.raises: [BasicError].} =
+  ## Stores the low byte of a register through a base register.
+  ## The REX prefix is forced so the low byte is named, not the high one.
+  assembler.emit(byte(0x40'u32 or ((source.number shr 3) shl 2) or
+    (base.number shr 3)))
+  assembler.emit(0x88)
+  assembler.memoryOperand(source, base, offset)
