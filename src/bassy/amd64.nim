@@ -364,3 +364,13 @@ proc setIfCondition*(assembler: var Assembler, target: Register,
   assembler.emit(0x0F)
   assembler.emit(0xB6)
   assembler.directOperand(target, target)
+
+proc shiftLeftImmediate*(assembler: var Assembler, width: Width,
+    target: Register, count: int) {.raises: [BasicError].} =
+  ## Shifts a register left by a constant.
+  if count < 0 or count > 63:
+    fail("assembler shift count is out of range")
+  assembler.prefix(width, Register(4), target)
+  assembler.emit(0xC1)
+  assembler.directOperand(Register(4), target)
+  assembler.emit(byte(count))

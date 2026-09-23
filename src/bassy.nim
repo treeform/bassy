@@ -3136,12 +3136,24 @@ proc compileNative*(runtime: var Runtime): int =
   runtime.regionAt = @[]
   if not jitSupported():
     return 0
+  var extents = newSeq[ArrayExtent](runtime.program.arrays.len)
+  for index, item in runtime.program.arrays:
+    extents[index] = ArrayExtent(base: item.base, length: item.length)
   runtime.regionAt = compileLoops(
     runtime.program.code,
     runtime.globals.len,
-    int(runtime.program.maxRegisters)
+    int(runtime.program.maxRegisters),
+    extents
   )
   runtime.nativeRegions
+
+proc arrayExtent*(program: Program, id: int32): (int32, int32) {.inline.} =
+  ## Returns where one array starts and how many cells it has.
+  (program.arrays[int(id)].base, program.arrays[int(id)].length)
+
+proc maxRegisterCount*(program: Program): int32 {.inline.} =
+  ## Returns the most register slots any routine in the program uses.
+  program.maxRegisters
 
 proc bytecode*(program: Program): lent seq[Instruction] {.inline.} =
   ## Exposes the metered bytecode for tools and the native compiler.
@@ -3536,6 +3548,9 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
             registers:
               if runtime.registers.len == 0: nil
               else: runtime.registers[int(runtime.base)].addr,
+            memory:
+              if runtime.memory.len == 0: nil
+              else: runtime.memory[0].addr,
             remainingInstructions: runtime.remainingInstructions,
             remainingWork: runtime.remainingWork,
             pc: runtime.pc

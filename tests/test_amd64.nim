@@ -125,6 +125,11 @@ encodes "setl al\n\tmovzx eax, al":
 encodes "sete dl\n\tmovzx edx, dl":
   assembler.setIfCondition(rdx, EqualCondition)
 
+encodes "shl rax, 4":
+  assembler.shiftLeftImmediate(Word64, rax, 4)
+encodes "shl r11d, 1":
+  assembler.shiftLeftImmediate(Word32, r11, 1)
+
 ## Stack and control flow
 
 encodes "push rbx":

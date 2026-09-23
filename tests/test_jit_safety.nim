@@ -57,14 +57,14 @@ block:
   let code = countingLoop(1, 4)
   report(
     "a well formed loop still compiles",
-    (not jitSupported()) or compileRegion(code, 0, 4, Globals, Slots) != nil
+    (not jitSupported()) or compileRegion(code, 0, 4, Globals, Slots, @[]) != nil
   )
 
 block:
   let code = countingLoop(Globals, 4)
   report(
     "a global one past the end is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil,
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil,
     "an out of range index would become a fixed offset store"
   )
 
@@ -72,14 +72,14 @@ block:
   let code = countingLoop(1_000_000, 4)
   report(
     "a far out of range global is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
   )
 
 block:
   let code = countingLoop(-1, 4)
   report(
     "a negative global is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil,
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil,
     "a negative index would address below the globals"
   )
 
@@ -87,28 +87,28 @@ block:
   let code = countingLoop(1, 99)
   report(
     "a branch past the end of the code is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
   )
 
 block:
   let code = countingLoop(1, -5)
   report(
     "a negative branch target is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
   )
 
 block:
   let code = countingLoop(1, 4)
   report(
     "a region reaching past the code is refused",
-    compileRegion(code, 0, 99, Globals, Slots) == nil
+    compileRegion(code, 0, 99, Globals, Slots, @[]) == nil
   )
 
 block:
   let code = countingLoop(1, 4)
   report(
     "a region with no storage behind it is refused",
-    compileRegion(code, 0, 4, 0, Slots) == nil
+    compileRegion(code, 0, 4, 0, Slots, @[]) == nil
   )
 
 block:
@@ -122,7 +122,7 @@ block:
   ]
   report(
     "a zero divisor is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
   )
 
 block:
@@ -139,7 +139,7 @@ block:
   ]
   var raised = false
   try:
-    discard compileRegion(code, 0, 5, Globals, Slots)
+    discard compileRegion(code, 0, 5, Globals, Slots, @[])
   except BasicError:
     raised = true
   # Falling back to the per-block check is a fine outcome here. Refusing
@@ -161,7 +161,7 @@ block:
   ]
   var survived = false
   try:
-    discard compileLoops(code, Globals, Slots)
+    discard compileLoops(code, Globals, Slots, @[])
     survived = true
   except BasicError:
     survived = false
@@ -173,7 +173,7 @@ block:
   let code = countingLoop(high(int32) div 8, 4)
   report(
     "a global whose offset would not fit is refused",
-    compileRegion(code, 0, 4, high(int32), Slots) == nil
+    compileRegion(code, 0, 4, high(int32), Slots, @[]) == nil
   )
 
 block:
@@ -185,7 +185,7 @@ block:
   ]
   report(
     "a register slot past the frame is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
   )
 
 block:
@@ -197,7 +197,34 @@ block:
   ]
   report(
     "a negative register slot is refused",
-    compileRegion(code, 0, 4, Globals, Slots) == nil
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
+  )
+
+block:
+  # An operation naming an array that does not exist must be refused.
+  let code = @[
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: ArrayGetOp, a: 0, b: 7, c: 1),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0)
+  ]
+  report(
+    "an array that does not exist is refused",
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
+  )
+
+block:
+  # Cells reaching past what a displacement covers must be refused.
+  let code = @[
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: ArrayGetOp, a: 0, b: 0, c: 1),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0)
+  ]
+  let far = @[ArrayExtent(base: high(int32) div 4, length: 16)]
+  report(
+    "an array placed out of reach is refused",
+    compileRegion(code, 0, 4, Globals, Slots, far) == nil
   )
 
 ## Scripts, down both paths
@@ -355,6 +382,50 @@ i = 0
 total = 0
 while i < 16
   cells(i) = i
+  i = i + 1
+wend
+j = 0
+while j < 16
+  total = total + cells(j)
+  j = j + 1
+wend
+""")
+
+agrees("reading past the end of an array", """
+dim cells(15)
+i = 0
+total = 0
+while i < 40
+  total = total + cells(i)
+  i = i + 1
+wend
+""")
+
+agrees("writing past the end of an array", """
+dim cells(15)
+i = 0
+while i < 40
+  cells(i) = i
+  i = i + 1
+wend
+""")
+
+agrees("a negative array index", """
+dim cells(15)
+i = 5
+total = 0
+while i > -5
+  total = total + cells(i)
+  i = i + -1
+wend
+""")
+
+agrees("an array holding fixed point", """
+dim cells(15)
+i = 0
+total = 0
+while i < 16
+  cells(i) = i + 0.5
   i = i + 1
 wend
 j = 0

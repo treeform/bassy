@@ -41,9 +41,15 @@ type
     remainingWork*: int64
     pc*: int32
     registers*: pointer
+    memory*: pointer
 
   NativeCall = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
+
+  ArrayExtent* = object
+    ## Where one array sits in the shared cell storage, and how long it is.
+    base*: int32
+    length*: int32
 
   Region* = ref object
     ## One compiled loop, addressed by the bytecode offset that enters it.
@@ -71,6 +77,7 @@ const
   ContextWork = 16
   ContextOffset = 24
   ContextRegisters = 32
+  ContextMemory = 40
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
   MaxChargeImmediate = 4095
@@ -119,6 +126,8 @@ proc layoutMatches*(): bool {.raises: [].} =
     return false
   if cast[int](context.registers.addr) - origin != ContextRegisters:
     return false
+  if cast[int](context.memory.addr) - origin != ContextMemory:
+    return false
   true
 
 ## Region discovery
@@ -132,6 +141,8 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
       AddOp, SubtractOp, MultiplyOp, NegateOp,
       EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp,
       JumpIfZeroOp,
+      ArrayGetOp, ArraySetOp, ArrayAddGlobalsOp,
+      AddGlobalArrayGlobalIndexOp,
       JumpUnlessGlobalEqualImmediateOp,
       JumpUnlessGlobalNotEqualImmediateOp,
       JumpUnlessGlobalLessImmediateOp,
@@ -168,6 +179,12 @@ proc touchedGlobals(item: Instruction, globals: var seq[int32])
     note(item.b)
   of StoreGlobalOp:
     note(item.a)
+  of ArrayAddGlobalsOp:
+    note(item.b)
+    note(item.c)
+  of AddGlobalArrayGlobalIndexOp:
+    note(item.a)
+    note(item.c)
   else:
     discard
 
@@ -211,10 +228,28 @@ proc touchedSlots(item: Instruction, slots: var seq[int32])
     note(item.a)
     note(item.b)
     note(item.c)
+  of ArrayGetOp:
+    note(item.a)
+    note(item.c)
+  of ArraySetOp:
+    note(item.b)
+    note(item.c)
   else:
     discard
   if item.op == NegateOp:
     note(item.a)
+
+proc namedArray(item: Instruction, id: var int32): bool {.raises: [].} =
+  ## Reports whether an operation reaches into an array, and which one.
+  case item.op
+  of ArrayGetOp, AddGlobalArrayGlobalIndexOp:
+    id = item.b
+    true
+  of ArraySetOp, ArrayAddGlobalsOp:
+    id = item.a
+    true
+  else:
+    false
 
 proc usesRegisterFile(item: Instruction): bool {.raises: [].} =
   ## Reports whether an operation reaches into the frame's slots.
@@ -607,6 +642,55 @@ when NativeArm64:
     ## Branches when a working register holds zero.
     emitter.branchIfZero(Word32, ValueScratch[scratch], target)
 
+  proc elementAddress(emitter: var Assembler, scratch: int,
+      extent: ArrayExtent, leave: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index and leaves the cell's address in Scratch.
+    ## One unsigned comparison covers both ends, exactly as the
+    ## interpreter's does, and a refusal hands the offset back so the
+    ## interpreter can raise with the array's own name.
+    let index = ValueScratch[scratch]
+    emitter.loadImmediate(Word32, OtherScratch, int64(extent.length))
+    emitter.compareRegister(Word32, index, OtherScratch)
+    emitter.branchIf(CarrySetCondition, leave)
+    emitter.loadImmediate(Word32, OtherScratch, int64(extent.base))
+    emitter.addRegister(Word32, OtherScratch, OtherScratch, index)
+    emitter.loadDouble(Scratch, Context, ContextMemory)
+    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch, 4)
+
+  proc copyElementToSlot(emitter: var Assembler, slot: int32)
+      {.raises: [BasicError].} =
+    ## Copies a whole cell into a register slot, whatever it holds. The
+    ## interpreter copies the value entire, so this does too, and neither
+    ## needs to know what kind it is.
+    let base = int(slot) * ValueStride
+    emitter.loadDouble(ValueScratch[0], Scratch, 0)
+    emitter.loadDouble(ValueScratch[1], Scratch, ValuePayload)
+    emitter.storeDouble(ValueScratch[0], RegistersBase, base)
+    emitter.storeDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
+
+  proc copySlotToElement(emitter: var Assembler, slot: int32)
+      {.raises: [BasicError].} =
+    ## Copies a whole register slot into a cell, whatever it holds.
+    let base = int(slot) * ValueStride
+    emitter.loadDouble(ValueScratch[0], RegistersBase, base)
+    emitter.loadDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
+    emitter.storeDouble(ValueScratch[0], Scratch, 0)
+    emitter.storeDouble(ValueScratch[1], Scratch, ValuePayload)
+
+  proc readElement(emitter: var Assembler, scratch: int, leave: Label)
+      {.raises: [BasicError].} =
+    ## Reads a cell as an integer, leaving the region if it holds else.
+    let target = ValueScratch[scratch]
+    emitter.loadByte(target, Scratch, 0)
+    emitter.branchIfNotZero(Word32, target, leave)
+    emitter.loadWord(target, Scratch, ValuePayload)
+
+  proc writeElement(emitter: var Assembler, scratch: int)
+      {.raises: [BasicError].} =
+    ## Writes a cell as an integer.
+    emitter.storeByte(zeroRegister, Scratch, 0)
+    emitter.storeWord(ValueScratch[scratch], Scratch, ValuePayload)
+
   proc beginCountedLoop(emitter: var Assembler, instructions, work: int64,
       refused: Label) {.raises: [BasicError].} =
     ## Settles the whole loop's budget once: how many passes both budgets
@@ -823,6 +907,55 @@ elif NativeAmd64:
       emitter.pop(Saved[index])
     emitter.returnToCaller()
 
+  proc elementAddress(emitter: var Assembler, scratch: int,
+      extent: ArrayExtent, leave: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index and leaves the cell's address in Scratch.
+    ## One unsigned comparison covers both ends, exactly as the
+    ## interpreter's does, and a refusal hands the offset back so the
+    ## interpreter can raise with the array's own name.
+    let index = ValueScratch[scratch]
+    emitter.compareImmediate(Word32, index, extent.length)
+    emitter.branchIf(AboveEqualCondition, leave)
+    emitter.addImmediate(Word32, index, extent.base)
+    emitter.shiftLeftImmediate(Word64, index, 4)
+    emitter.loadDouble(Scratch, Context, ContextMemory)
+    emitter.addRegister(Word64, Scratch, index)
+
+  proc copyElementToSlot(emitter: var Assembler, slot: int32)
+      {.raises: [BasicError].} =
+    ## Copies a whole cell into a register slot, whatever it holds. The
+    ## interpreter copies the value entire, so this does too, and neither
+    ## needs to know what kind it is.
+    let base = int(slot) * ValueStride
+    emitter.loadDouble(ValueScratch[0], Scratch, 0)
+    emitter.loadDouble(ValueScratch[1], Scratch, ValuePayload)
+    emitter.storeDouble(ValueScratch[0], RegistersBase, base)
+    emitter.storeDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
+
+  proc copySlotToElement(emitter: var Assembler, slot: int32)
+      {.raises: [BasicError].} =
+    ## Copies a whole register slot into a cell, whatever it holds.
+    let base = int(slot) * ValueStride
+    emitter.loadDouble(ValueScratch[0], RegistersBase, base)
+    emitter.loadDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
+    emitter.storeDouble(ValueScratch[0], Scratch, 0)
+    emitter.storeDouble(ValueScratch[1], Scratch, ValuePayload)
+
+  proc readElement(emitter: var Assembler, scratch: int, leave: Label)
+      {.raises: [BasicError].} =
+    ## Reads a cell as an integer, leaving the region if it holds else.
+    let target = ValueScratch[scratch]
+    emitter.loadByteZeroed(target, Scratch, 0)
+    emitter.testRegister(Word32, target, target)
+    emitter.branchIf(NotEqualCondition, leave)
+    emitter.loadWord(target, Scratch, ValuePayload)
+
+  proc writeElement(emitter: var Assembler, scratch: int)
+      {.raises: [BasicError].} =
+    ## Writes a cell as an integer.
+    emitter.storeByteImmediate(Scratch, 0, 0)
+    emitter.storeWord(ValueScratch[scratch], Scratch, ValuePayload)
+
   proc guardInteger(emitter: var Assembler, base: int, failed: Label)
       {.raises: [BasicError].} =
     ## Leaves the region unless the global at this offset holds an integer.
@@ -988,7 +1121,8 @@ elif NativeAmd64:
     emitter.endRegion()
 
 proc compileRegion*(code: seq[Instruction], start, stop, globals,
-    slots: int): Region {.raises: [BasicError].} =
+    slots: int, extents: seq[ArrayExtent]): Region
+    {.raises: [BasicError].} =
   ## Compiles one loop, or returns nil when it is outside the modelled set.
   ##
   ## Generated code indexes global storage without checking, so every
@@ -1016,6 +1150,19 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
       item.touchedGlobals(hoisted)
       # Slots are read and written where they sit, so each index only has
       # to be proved in range; nothing is carried across the region.
+      # Every array named must exist, and its cells must sit where a
+      # displacement can reach them.
+      var arrayId = 0'i32
+      if item.namedArray(arrayId):
+        if arrayId < 0 or int(arrayId) >= extents.len:
+          return nil
+        let extent = extents[int(arrayId)]
+        if extent.length <= 0 or extent.base < 0:
+          return nil
+        if int(extent.base) + int(extent.length) >
+            MaxDisplacementBytes div ValueStride:
+          return nil
+        usesSlots = true
       var touched: seq[int32]
       item.touchedSlots(touched)
       if touched.len > 0:
@@ -1217,6 +1364,28 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         emitter.compareScratch(0, 1)
         emitter.answerCondition(0, comparisonTest(item.op))
         emitter.writeSlot(0, item.a)
+      of ArrayGetOp:
+        emitter.readSlot(0, item.c, leaveHere)
+        emitter.elementAddress(0, extents[int(item.b)], leaveHere)
+        emitter.copyElementToSlot(item.a)
+      of ArraySetOp:
+        emitter.readSlot(0, item.b, leaveHere)
+        emitter.elementAddress(0, extents[int(item.a)], leaveHere)
+        emitter.copySlotToElement(item.c)
+      of ArrayAddGlobalsOp:
+        emitter.scratchFromHoisted(0, slotOf(item.b))
+        emitter.elementAddress(0, extents[int(item.a)], leaveHere)
+        emitter.readElement(0, leaveHere)
+        emitter.scratchFromHoisted(1, slotOf(item.c))
+        emitter.addScratch(0, 1)
+        emitter.writeElement(0)
+      of AddGlobalArrayGlobalIndexOp:
+        emitter.scratchFromHoisted(0, slotOf(item.c))
+        emitter.elementAddress(0, extents[int(item.b)], leaveHere)
+        emitter.readElement(0, leaveHere)
+        emitter.scratchFromHoisted(1, slotOf(item.a))
+        emitter.addScratch(1, 0)
+        emitter.hoistedFromScratch(slotOf(item.a), 1)
       of JumpIfZeroOp:
         emitter.readSlot(0, item.a, leaveHere)
         if int(item.b) >= start and int(item.b) < stop:
@@ -1300,7 +1469,8 @@ proc invoke*(region: Region, context: var NativeContext): NativeStatus
   ## Runs one compiled loop and reports why it returned.
   NativeStatus(region.call(context.addr))
 
-proc compileLoops*(code: seq[Instruction], globals, slots: int): seq[Region]
+proc compileLoops*(code: seq[Instruction], globals, slots: int,
+    extents: seq[ArrayExtent] = @[]): seq[Region]
     {.raises: [BasicError].} =
   ## Compiles every backward-branching loop the code generator models.
   ## The result is indexed by bytecode offset, so the interpreter reaches
@@ -1317,7 +1487,9 @@ proc compileLoops*(code: seq[Instruction], globals, slots: int): seq[Region]
       continue
     var region: Region = nil
     try:
-      region = compileRegion(code, int(target), index + 1, globals, slots)
+      region = compileRegion(
+        code, int(target), index + 1, globals, slots, extents
+      )
     except BasicError:
       region = nil
     if region != nil:
