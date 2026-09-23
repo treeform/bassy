@@ -125,6 +125,8 @@ const
   ModelsFixed* = not defined(fixedChecks)
 
   MaxProgramBytes = 64 * 1024 * 1024
+  ## How many blocks one fast version carries on into, holding values.
+  MaxChain = 4
   ## Leaving a routine without one of these would run on into the next
   ## routine's code, which no call set up.
   Terminators = {JumpOp, ReturnOp, ReturnLabelOp, ExitSubOp, HaltOp}
@@ -3152,6 +3154,10 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       let offset = at
       var done = true
       case item.op
+      of MeterOp:
+        # The budget is looked at exactly as the general code would, and a
+        # block short of it writes back and goes there to be refused.
+        e.meter(item.b, item.a, leaveHere(offset))
       of LoadImmediateOp, LoadFixedOp, StoreGlobalImmediateOp:
         makeRoom(newSeq[Place](), 1)
         let register = acquire()
@@ -3494,19 +3500,63 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         pinned[register] = false
       done
 
-    template emitFastBlock(start, stop: int) =
+    template blockEnd(start: int): int =
+      ## Returns the offset just past the block starting here.
+      var stop = start + 1
+      while stop < code.len and code[stop].op != MeterOp:
+        inc stop
+      stop
+
+    template chainable(target: int): bool =
+      ## Reports whether a block can be carried on into with values still
+      ## held: an ordinary block, starting at its meter.
+      target >= 0 and target < code.len and code[target].op == MeterOp and
+        not inLoop[target]
+
+    template emitFastBlock(start: int) =
       ## Emits one block's fast version, then its ways out.
+      ##
+      ## Where the block carries on into another, by falling through or by
+      ## an unconditional jump, a copy of that one follows with every value
+      ## still held, so nothing is written back or read again at the seam.
+      ## Only this way in reaches the copy; the block's own fast version
+      ## serves every other. A chain stops after a few blocks, at a block
+      ## it has already taken in, and wherever general code took over.
       held.setLen(0)
       for register in 0 ..< Pool.len:
         uses[register] = 0
         pinned[register] = false
-      for at in start ..< stop:
-        if not emitFast(at):
-          clearAll()
-          emitInstruction(at, false, Loop(), @[], noExits)
-      if fallsOnward(code[stop - 1].op):
-        flushAll()
-        e.jump(blocks[stop])
+      var current = start
+      var chained = @[start]
+      while true:
+        let stop = blockEnd(current)
+        var handled = true
+        var next = -1
+        for at in current ..< stop:
+          let item = code[at]
+          if at == stop - 1 and item.op == JumpOp and
+              chainable(int(item.a)) and int(item.a) notin chained and
+              chained.len < MaxChain:
+            next = int(item.a)
+            break
+          if emitFast(at):
+            handled = true
+          else:
+            handled = false
+            clearAll()
+            emitInstruction(at, false, Loop(), @[], noExits)
+        let last = code[stop - 1]
+        if next < 0 and handled and fallsOnward(last.op) and
+            chainable(stop) and stop notin chained and
+            chained.len < MaxChain:
+          next = stop
+        if next < 0:
+          if fallsOnward(last.op):
+            flushAll()
+            e.jump(blocks[stop])
+          break
+        chained.add(next)
+        current = next
       for (exit, pending, offset) in fastExits:
         e.place(exit)
         for value in pending:
@@ -3531,7 +3581,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         inc stop
       if code[index].op == MeterOp and not inLoop[index]:
         e.place(blocks[index])
-        emitFastBlock(index, stop)
+        emitFastBlock(index)
         e.place(general[index])
         for at in index ..< stop:
           if at > index:
