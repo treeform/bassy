@@ -443,6 +443,54 @@ when NativeArm64:
     e.code.compareRegister(Word32, temp(tag), temp(other))
     e.jumpWhen(NotEqualCondition, slow)
 
+  proc jumpIfSame(e: var Emitter, tag, other: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when two kinds agree.
+    e.code.compareRegister(Word32, temp(tag), temp(other))
+    e.jumpWhen(EqualCondition, target)
+
+  proc whenWhole(e: var Emitter, tag: int, target: Label) {.raises: [].} =
+    ## Jumps when a kind says whole number.
+    e.jumpIfZero(temp(tag), target)
+
+  proc unlessFixed(e: var Emitter, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless a kind says fixed point.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc toFixed(e: var Emitter, value: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Turns a whole number into Q16.16 bits. One outside the fixed-point
+    ## range cannot be, which the interpreter refuses, so that goes slow.
+    let register = temp(value)
+    e.code.loadImmediate(Word32, temp(6), 32767)
+    e.code.compareRegister(Word32, register, temp(6))
+    e.jumpWhen(GreaterCondition, slow)
+    e.code.loadImmediate(Word32, temp(6), -32768)
+    e.code.compareRegister(Word32, register, temp(6))
+    e.jumpWhen(LessCondition, slow)
+    e.code.shiftLeftImmediate(Word32, register, register, FixedShift)
+
+  proc scaleWide(e: var Emitter, value, tag: int) {.raises: [BasicError].} =
+    ## Widens a number of either kind to sixty-four bits on the fixed-point
+    ## scale, where every whole number and every fixed-point one compare
+    ## exactly, as the interpreter compares them.
+    let register = temp(value)
+    let done = e.label()
+    e.code.signExtendWord(register, register)
+    e.jumpIfNotZero(temp(tag), done)
+    e.code.shiftLeftImmediate(Word64, register, register, FixedShift)
+    e.place(done)
+
+  proc loadWide(e: var Emitter, value: int, bits: int64) {.raises: [].} =
+    ## Loads a sixty-four bit constant into a working register.
+    e.code.loadImmediate(Word64, temp(value), bits)
+
+  proc compareWide(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two widened working registers.
+    e.code.compareRegister(Word64, temp(left), temp(right))
+
   proc whenFixed(e: var Emitter, tag: int, target: Label)
       {.raises: [BasicError].} =
     ## Jumps when a kind says fixed point.
@@ -730,10 +778,12 @@ when NativeArm64:
       e.clearValues(RegistersBase, int(calleeRegisters))
       e.copyValues(RegistersBase, ArgumentsBase, int(calleeParameters))
 
-  proc leaveRoutine(e: var Emitter, parameters: int32, slow: Label)
-      {.raises: [BasicError].} =
+  proc leaveRoutine(e: var Emitter, parameters: int32, exitSub: bool,
+      slow: Label) {.raises: [BasicError].} =
     ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
-    ## frame first hands the shared parameters back to the caller.
+    ## frame first hands the shared parameters back to the caller. Leaving
+    ## a sub outright only goes this way when its own frame is on top.
+    ## Nothing is written until both refusals have been passed.
     let depth = temp(0)
     let frame = temp(1)
     let base = temp(2)
@@ -741,8 +791,11 @@ when NativeArm64:
     e.code.loadWord(depth, Context, ContextDepth)
     e.jumpIfZero(depth, slow)
     e.code.subtractImmediate(Word32, depth, depth, 1)
-    e.code.storeWord(depth, Context, ContextDepth)
     e.code.addRegister(Word64, frame, FramesBase, depth, 4)
+    if exitSub:
+      e.code.loadByte(temp(4), frame, FrameTag)
+      e.jumpIfNotZero(temp(4), slow)
+    e.code.storeWord(depth, Context, ContextDepth)
     e.code.loadWord(base, frame, FrameBase)
     if parameters > 0:
       let plain = e.label()
@@ -1008,6 +1061,53 @@ elif NativeAmd64:
     ## Takes the slow path unless two kinds agree.
     e.code.compareRegister(Word32, temp(tag), temp(other))
     e.jumpWhen(NotEqualCondition, slow)
+
+  proc jumpIfSame(e: var Emitter, tag, other: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when two kinds agree.
+    e.code.compareRegister(Word32, temp(tag), temp(other))
+    e.jumpWhen(EqualCondition, target)
+
+  proc whenWhole(e: var Emitter, tag: int, target: Label) {.raises: [].} =
+    ## Jumps when a kind says whole number.
+    e.code.testRegister(Word32, temp(tag), temp(tag))
+    e.jumpWhen(EqualCondition, target)
+
+  proc unlessFixed(e: var Emitter, tag: int, slow: Label) {.raises: [].} =
+    ## Takes the slow path unless a kind says fixed point.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc toFixed(e: var Emitter, value: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Turns a whole number into Q16.16 bits. One outside the fixed-point
+    ## range cannot be, which the interpreter refuses, so that goes slow.
+    let register = temp(value)
+    e.code.compareImmediate(Word32, register, 32767)
+    e.jumpWhen(GreaterCondition, slow)
+    e.code.compareImmediate(Word32, register, -32768)
+    e.jumpWhen(LessCondition, slow)
+    e.code.shiftLeftImmediate(Word32, register, FixedShift)
+
+  proc scaleWide(e: var Emitter, value, tag: int) {.raises: [BasicError].} =
+    ## Widens a number of either kind to sixty-four bits on the fixed-point
+    ## scale, where every whole number and every fixed-point one compare
+    ## exactly, as the interpreter compares them.
+    let register = temp(value)
+    let done = e.label()
+    e.code.signExtendDouble(register, register)
+    e.code.testRegister(Word32, temp(tag), temp(tag))
+    e.jumpWhen(NotEqualCondition, done)
+    e.code.shiftLeftImmediate(Word64, register, FixedShift)
+    e.place(done)
+
+  proc loadWide(e: var Emitter, value: int, bits: int64) {.raises: [].} =
+    ## Loads a sixty-four bit constant into a working register.
+    e.code.loadImmediate(Word64, temp(value), bits)
+
+  proc compareWide(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two widened working registers.
+    e.code.compareRegister(Word64, temp(left), temp(right))
 
   proc whenFixed(e: var Emitter, tag: int, target: Label)
       {.raises: [].} =
@@ -1307,10 +1407,12 @@ elif NativeAmd64:
         e.contextField(Cell, ContextArguments)
         e.copyValues(RegistersBase, Cell, int(calleeParameters))
 
-  proc leaveRoutine(e: var Emitter, parameters: int32, slow: Label)
-      {.raises: [BasicError].} =
+  proc leaveRoutine(e: var Emitter, parameters: int32, exitSub: bool,
+      slow: Label) {.raises: [BasicError].} =
     ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
-    ## frame first hands the shared parameters back to the caller.
+    ## frame first hands the shared parameters back to the caller. Leaving
+    ## a sub outright only goes this way when its own frame is on top.
+    ## Nothing is written until both refusals have been passed.
     let depth = rax
     let frame = rcx
     let base = rsi
@@ -1318,11 +1420,15 @@ elif NativeAmd64:
     e.code.testRegister(Word32, depth, depth)
     e.jumpWhen(EqualCondition, slow)
     e.code.subtractImmediate(Word32, depth, 1)
-    e.code.storeWord(depth, Context, ContextDepth)
     e.contextField(frame, ContextFrames)
     e.code.moveRegister(Word32, r8, depth)
     e.code.shiftLeftImmediate(Word64, r8, 4)
     e.code.addRegister(Word64, frame, r8)
+    if exitSub:
+      e.code.loadByteZeroed(Spare, frame, FrameTag)
+      e.code.testRegister(Word32, Spare, Spare)
+      e.jumpWhen(NotEqualCondition, slow)
+    e.code.storeWord(depth, Context, ContextDepth)
     e.code.loadWord(base, frame, FrameBase)
     if parameters > 0:
       let plain = e.label()
@@ -1549,10 +1655,24 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         let slow = slowFor(ToNext)
         e.readValue(0, 2, slot(item.b))
         e.readValue(1, 3, slot(item.c))
-        e.unlessSame(2, 3, slow)
         when ModelsFixed:
+          # A whole number beside a fixed-point one becomes fixed point
+          # first, exactly as the interpreter promotes it, and the answer
+          # is fixed point.
+          let ready = e.label()
+          let promoteRight = e.label()
           e.unlessNumeric(2, slow)
+          e.unlessNumeric(3, slow)
+          e.jumpIfSame(2, 3, ready)
+          e.whenFixed(2, promoteRight)
+          e.toFixed(0, slow)
+          e.loadConstant(2, FixedTag)
+          e.jump(ready)
+          e.place(promoteRight)
+          e.toFixed(1, slow)
+          e.place(ready)
         else:
+          e.unlessSame(2, 3, slow)
           e.unlessWhole(2, slow)
         case item.op
         of AddOp:
@@ -1613,9 +1733,20 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         let slow = slowFor(ToNext)
         e.readValue(0, 2, slot(item.b))
         e.readValue(1, 3, slot(item.c))
-        e.unlessSame(2, 3, slow)
         e.unlessNumeric(2, slow)
+        e.unlessNumeric(3, slow)
+        let sameKind = e.label()
+        let decided = e.label()
+        e.jumpIfSame(2, 3, sameKind)
+        # Kinds that differ compare on the widened fixed-point scale,
+        # where every value of either kind has an exact place.
+        e.scaleWide(0, 2)
+        e.scaleWide(1, 3)
+        e.compareWide(0, 1)
+        e.jump(decided)
+        e.place(sameKind)
         e.compare(0, 1)
+        e.place(decided)
         e.answer(0, comparisonCheck(item.op))
         e.writeWhole(slot(item.a), 0)
       of AndOp, OrOp, XorOp, EqvOp, ImpOp:
@@ -1661,9 +1792,19 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
           JumpUnlessGlobalGreaterImmediateOp,
           JumpUnlessGlobalGreaterEqualImmediateOp:
         let slow = slowFor(ToOffset)
+        let whole = e.label()
+        let decided = e.label()
         e.readValue(0, 2, global(item.a))
-        e.unlessWhole(2, slow)
+        e.whenWhole(2, whole)
+        # A fixed-point global meets the constant on the widened scale.
+        e.unlessFixed(2, slow)
+        e.scaleWide(0, 2)
+        e.loadWide(1, int64(item.b) * 65536)
+        e.compareWide(0, 1)
+        e.jump(decided)
+        e.place(whole)
         e.compareConstant(0, item.b)
+        e.place(decided)
         e.jumpOn(takenOn(item.op), blocks[int(item.c)])
       of JumpUnlessGlobalModuloEqualZeroOp:
         if item.b == 0:
@@ -1704,12 +1845,18 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         fallsThrough = false
       of ReturnOp:
         let owner = routines[int(ownerOf[index])]
-        e.leaveRoutine(owner.parameters, slowFor(ToOffset))
+        e.leaveRoutine(owner.parameters, false, slowFor(ToOffset))
+        fallsThrough = false
+      of ExitSubOp:
+        # With the sub's own frame on top there are no GOSUB frames to
+        # unwind first, so leaving is a plain return. Anything else is
+        # left to the interpreter's code, which unwinds them.
+        e.leaveRoutine(0, true, slowFor(ToOffset))
         fallsThrough = false
       of HaltOp:
         e.halt(offset)
         fallsThrough = false
-      of ReturnLabelOp, ExitSubOp:
+      of ReturnLabelOp:
         runSlow()
         e.jump(dispatchLabel)
         fallsThrough = false
