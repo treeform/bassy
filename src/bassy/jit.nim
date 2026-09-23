@@ -25,6 +25,9 @@ const
   ## they were written anywhere.
   ModelsCalls* = NativeArm64
 
+  ## Dividing to a fixed-point answer is written for AArch64 so far.
+  ModelsDivide* = NativeArm64
+
 when NativeArm64:
   import arm64
 elif NativeAmd64:
@@ -35,7 +38,8 @@ type
     ## Why compiled code returned control to the interpreter.
     NativeCompleted,
     NativeGuardFailed,
-    NativeExhausted
+    NativeExhausted,
+    NativeFailed
 
   NativeContext* = object
     ## The mutable interpreter state compiled code is allowed to touch.
@@ -55,6 +59,8 @@ type
     base*: int32
     depth*: int32
     routine*: int32
+    runtime*: pointer
+    hostCall*: pointer
 
   NativeCall = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -114,6 +120,8 @@ const
   ContextBase = 88
   ContextDepth = 92
   ContextRoutine = 96
+  ContextRuntime = 104
+  ContextHostCall = 112
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -201,6 +209,10 @@ proc layoutMatches*(): bool {.raises: [].} =
     return false
   if cast[int](context.routine.addr) - origin != ContextRoutine:
     return false
+  if cast[int](context.runtime.addr) - origin != ContextRuntime:
+    return false
+  if cast[int](context.hostCall.addr) - origin != ContextHostCall:
+    return false
   true
 
 ## Region discovery
@@ -228,8 +240,12 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
     true
   of ModuloOp:
     true
+  of DivideOp:
+    # Dividing wraps here and asserts under fixedChecks, so that build
+    # leaves it alone, as it leaves the rest of fixed point alone.
+    ModelsFixed and ModelsDivide
   of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp,
-      CallOp, ReturnOp, ExitSubOp:
+      CallOp, ReturnOp, ExitSubOp, HostCallOp:
     ModelsCalls
   of JumpUnlessGlobalModuloEqualZeroOp:
     # The interpreter raises on a zero divisor; refuse rather than model it.
@@ -314,13 +330,16 @@ proc touchedSlots(item: Instruction, slots: var seq[int32])
   of MoveOp:
     note(item.a)
     note(item.b)
-  of AddOp, SubtractOp, MultiplyOp, ModuloOp, IntegerDivideOp,
+  of AddOp, SubtractOp, MultiplyOp, ModuloOp, IntegerDivideOp, DivideOp,
       EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp:
     note(item.a)
     note(item.b)
     note(item.c)
   of LoadFixedOp, LoadHostDataOp:
     note(item.a)
+  of HostCallOp:
+    if item.a >= 0:
+      note(item.a)
   of AddGlobalRegisterOp, SetArgumentOp:
     note(item.b)
   of ArrayGetOp:
@@ -581,7 +600,10 @@ when NativeArm64:
     LimitInstructions = x7
     LimitWork = x8
     FirstPooled = 1
-    FrameBytes = 96
+    FrameBytes = 112
+    ## Where the context and the frame base are kept while host code runs,
+    ## both of them being registers a callee is free to use.
+    AcrossHostCall = 96
     MaxDisplacement = 4095
 
   const MaxPooled* = 4
@@ -1177,6 +1199,100 @@ when NativeArm64:
     emitter.loadImmediate(Word32, Context, int64(ord(NativeCompleted)))
     emitter.endRegion()
 
+  proc setSlotKind(emitter: var Assembler, slot: int32, tag: int)
+      {.raises: [BasicError].} =
+    ## Says what kind a slot now holds, leaving its payload alone.
+    emitter.loadImmediate(Word32, OtherScratch, int64(tag))
+    emitter.storeByte(OtherScratch, RegistersBase, int(slot) * ValueStride)
+
+  proc writeSlotPayload(emitter: var Assembler, scratch: int, slot: int32)
+      {.raises: [BasicError].} =
+    ## Writes a slot's payload, its kind having just been said.
+    emitter.storeWord(ValueScratch[scratch], RegistersBase,
+      int(slot) * ValueStride + ValuePayload)
+
+  proc widenToFixed(emitter: var Assembler, scratch: int, leave: Label)
+      {.raises: [BasicError].} =
+    ## Turns a number of either kind into its Q16.16 bits, widened to
+    ## sixty-four. A whole number outside the fixed-point range cannot be
+    ## turned into one at all, which is what the interpreter refuses, so
+    ## that goes back rather than being approximated.
+    let value = ValueScratch[scratch]
+    let already = emitter.label()
+    let ready = emitter.label()
+    emitter.compareImmediate(Word32, Scratch, FixedTag)
+    emitter.branchIf(EqualCondition, already)
+    emitter.loadImmediate(Word32, OtherScratch, 32767)
+    emitter.compareRegister(Word32, value, OtherScratch)
+    emitter.branchIf(GreaterCondition, leave)
+    emitter.loadImmediate(Word32, OtherScratch, -32768)
+    emitter.compareRegister(Word32, value, OtherScratch)
+    emitter.branchIf(LessCondition, leave)
+    emitter.signExtendWord(value, value)
+    emitter.shiftLeftImmediate(Word64, value, value, FixedShift)
+    emitter.branch(ready)
+    emitter.place(already)
+    emitter.signExtendWord(value, value)
+    emitter.place(ready)
+
+  proc divideFixed(emitter: var Assembler, leave: Label)
+      {.raises: [BasicError].} =
+    ## Divides one Q16.16 number by another, rounding to nearest with
+    ## halves going up, for either sign, exactly as the fixed-point
+    ## library does: the signs are put right first, half the divisor is
+    ## added, and the truncating divide is corrected back to a floor.
+    let numerator = ValueScratch[0]
+    let denominator = ValueScratch[1]
+    emitter.compareImmediate(Word64, denominator, 0)
+    emitter.branchIf(EqualCondition, leave)
+
+    let signsSettled = emitter.label()
+    emitter.compareImmediate(Word64, denominator, 0)
+    emitter.branchIf(GreaterCondition, signsSettled)
+    emitter.negate(Word64, numerator, numerator)
+    emitter.negate(Word64, denominator, denominator)
+    emitter.place(signsSettled)
+
+    emitter.shiftLeftImmediate(Word64, numerator, numerator, FixedShift)
+    emitter.shiftRightImmediate(Word64, Scratch, denominator, 1)
+    emitter.addRegister(Word64, numerator, numerator, Scratch)
+
+    emitter.signedDivide(Word64, Scratch, numerator, denominator)
+    emitter.multiplySubtract(Word64, OtherScratch, Scratch, denominator,
+      numerator)
+
+    let done = emitter.label()
+    emitter.compareImmediate(Word64, OtherScratch, 0)
+    emitter.branchIf(EqualCondition, done)
+    emitter.compareImmediate(Word64, numerator, 0)
+    emitter.branchIf(GreaterEqualCondition, done)
+    emitter.subtractImmediate(Word64, Scratch, Scratch, 1)
+    emitter.place(done)
+    emitter.moveRegister(Word32, numerator, Scratch)
+
+  proc callHost(emitter: var Assembler, functionId, destination: int32,
+      failed: Label) {.raises: [BasicError].} =
+    ## Runs one host function through a trampoline.
+    ##
+    ## This is the one place compiled code leaves for code it did not
+    ## write, so it is also the one place that has to keep the calling
+    ## convention. The context and the frame base are registers a callee
+    ## may use, so they go on the stack; the budgets, the globals base and
+    ## the hoisted globals are ones a callee must leave alone.
+    ##
+    ## Host code can refuse. It cannot refuse by raising through a frame
+    ## nothing described, so the trampoline catches whatever it raised and
+    ## says so in its answer, and the offset goes back with the failure
+    ## already made rather than to be made again.
+    emitter.storePair(Context, RegistersBase, stackPointer, AcrossHostCall)
+    emitter.loadDouble(Scratch, Context, ContextHostCall)
+    emitter.loadImmediate(Word32, x1, int64(functionId))
+    emitter.loadImmediate(Word32, x2, int64(destination))
+    emitter.callRegister(Scratch)
+    emitter.moveRegister(Word32, Scratch, x0)
+    emitter.loadPair(Context, RegistersBase, stackPointer, AcrossHostCall)
+    emitter.branchIfNotZero(Word32, Scratch, failed)
+
   proc leaveRoutine(emitter: var Assembler, leave: Label)
       {.raises: [BasicError].} =
     ## Pops a frame and jumps to wherever it said to carry on. The table
@@ -1641,6 +1757,7 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
       return nil
     var usesSlots = false
     var usesCalls = false
+    var usesHostCalls = false
 
     ## The offsets this region covers, and where each one's block sits.
     ## A call brings the callee's whole body in with it.
@@ -1745,9 +1862,15 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         # interpreter stops, but never beyond it.
         if int(target) < 0 or int(target) > code.len:
           return nil
-      if item.op in {CallOp, ReturnOp, ExitSubOp}:
+      if item.op in {CallOp, ReturnOp, ExitSubOp, HostCallOp}:
         usesCalls = true
         usesSlots = true
+      if item.op == HostCallOp:
+        # A host function may use any register a callee is allowed to,
+        # so nothing loop-invariant may be left in one across the call.
+        usesHostCalls = true
+        if item.a >= 0 and (item.a < 0 or int(item.a) >= slots):
+          return nil
       var calleeId = 0'i32
       if item.calledRoutine(calleeId):
         let callee = routines[int(calleeId)]
@@ -1794,7 +1917,8 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     let spending = CountedLoops and plan.spending and not plan.counted and
       not usesCalls
     let pool =
-      if MaxPooled > 0: pooledConstants(code, start, stop, MaxPooled)
+      if MaxPooled > 0 and not usesHostCalls:
+        pooledConstants(code, start, stop, MaxPooled)
       else: @[]
 
     proc poolSlot(value: int32): int {.closure, raises: [].} =
@@ -1964,6 +2088,19 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         emitter.compareScratch(0, 1)
         emitter.answerCondition(0, comparisonTest(item.op))
         emitter.writeSlot(0, item.a)
+      of DivideOp:
+        when ModelsFixed and ModelsDivide:
+          # Either kind may appear on either side here, unlike adding,
+          # because both are widened to the same thing before dividing.
+          emitter.readNumeric(0, item.b, leaveHere)
+          emitter.widenToFixed(0, leaveHere)
+          emitter.readNumeric(1, item.c, leaveHere)
+          emitter.widenToFixed(1, leaveHere)
+          emitter.divideFixed(leaveHere)
+          emitter.setSlotKind(item.a, FixedTag)
+          emitter.writeSlotPayload(0, item.a)
+        else:
+          return nil
       of ModuloOp, IntegerDivideOp:
         # Both want whole numbers, both refuse a zero divisor, and minus
         # one would trap on one of the two architectures, so all three go
@@ -1996,7 +2133,7 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         emitter.remainderScratch(0, 1)
         emitter.hoistedFromScratch(slotOf(item.a), 0)
       of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp,
-          CallOp, ReturnOp, ExitSubOp:
+          CallOp, ReturnOp, ExitSubOp, HostCallOp:
         when ModelsCalls:
           case item.op
           of SetArgumentOp:
@@ -2012,6 +2149,11 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
               int32(index + 1), limits, leaveHere
             )
             emitter.branch(blockAt(callee.entry))
+          of HostCallOp:
+            emitter.callHost(
+              item.b, item.a,
+              exitLabel(int32(index), NativeFailed, index)
+            )
           else:
             emitter.leaveRoutine(leaveHere)
         else:

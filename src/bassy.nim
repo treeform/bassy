@@ -216,6 +216,7 @@ type
     finished: bool
     regionAt: seq[Region]
     bypass: int32
+    hostFailure: string
 
   Expr = object
     text: bool
@@ -3132,6 +3133,11 @@ proc routineExtents*(program: Program): seq[RoutineExtent] =
       parameters: routine.parameterCount
     ))
 
+proc runHostCall(context: ptr NativeContext, functionId,
+    destination: int32): int32 {.cdecl.}
+  ## Runs one host function on behalf of compiled code. The body sits
+  ## further down, beside the checks it needs.
+
 proc frameLayoutMatches*(): bool =
   ## Confirms the frame layout compiled code would write by hand. These
   ## offsets were read off this Nim version, and compiled code pushes and
@@ -3569,6 +3575,46 @@ proc leaveFrame(runtime: var Runtime) =
   runtime.routine = frame.routine
   runtime.pc = frame.returnPc
 
+proc runHostCall(context: ptr NativeContext, functionId,
+    destination: int32): int32 {.cdecl.} =
+  ## Runs one host function on behalf of compiled code.
+  ##
+  ## Compiled code cannot let a refusal travel back through a frame that
+  ## nothing described, so whatever the host raises is caught here and
+  ## reported as an answer instead. The offset then goes back to the
+  ## interpreter with the refusal already made, so the function is not
+  ## called a second time on the way out.
+  let runtime = cast[Runtime](context.runtime)
+  try:
+    let
+      id = int(functionId)
+      count = int(runtime.program.hostFunctions[id].parameters)
+      callback = runtime.hostCallbacks[id]
+    var value: Value
+    if callback.numeric != nil:
+      if count == 0:
+        value = callback.numeric([])
+      else:
+        value = callback.numeric(runtime.arguments.toOpenArray(0, count - 1))
+    else:
+      for i in 0 ..< count:
+        runtime.integerArguments[i] = runtime.arguments[i].asInt
+      if count == 0:
+        value = callback.integer(EmptyArguments)
+      else:
+        value = callback.integer(
+          runtime.integerArguments.toOpenArray(0, count - 1)
+        )
+    runtime.requireValue(value)
+    requireType(runtime.program.hostFunctions[id].name, value)
+    if destination >= 0:
+      let slots = cast[ptr UncheckedArray[Value]](context.registerFile)
+      slots[int(context.base) + int(destination)] = value
+    0'i32
+  except CatchableError as error:
+    runtime.hostFailure = error.msg
+    1'i32
+
 proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
   ## Executes verified bytecode with bounded work, memory, calls, and output.
   if runtime.finished:
@@ -3612,6 +3658,8 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
             base: runtime.base,
             depth: runtime.depth,
             routine: runtime.routine,
+            runtime: cast[pointer](runtime),
+            hostCall: cast[pointer](runHostCall),
             remainingInstructions: runtime.remainingInstructions,
             remainingWork: runtime.remainingWork,
             pc: runtime.pc
@@ -3629,6 +3677,10 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
           of NativeExhausted:
             # Let the interpreter re-run the meter and raise the real error.
             runtime.bypass = context.pc
+          of NativeFailed:
+            # Host code already refused, and saying so again would call it
+            # a second time, so the refusal is repeated rather than remade.
+            raise newException(BasicError, runtime.hostFailure)
           of NativeGuardFailed:
             # A value stopped being an integer, so retire the compiled form.
             runtime.regionAt[int(region.start)] = nil

@@ -509,3 +509,35 @@ proc arithmeticShiftRight*(assembler: var Assembler, width: Width,
 proc offsetOf*(assembler: Assembler, target: Label): int {.raises: [].} =
   ## Returns where a label ended up, in instruction words.
   assembler.targets[int(target)]
+
+proc signExtendWord*(assembler: var Assembler,
+    destination, source: Register) {.raises: [].} =
+  ## Widens a 32-bit register into a 64-bit one, keeping the sign.
+  assembler.emit(
+    0x93407C00'u32 or (source.number shl 5) or destination.number
+  )
+
+proc shiftLeftImmediate*(assembler: var Assembler, width: Width,
+    destination, source: Register, count: int) {.raises: [BasicError].} =
+  ## Shifts left by a constant, which is a bitfield move underneath.
+  let size = if width == Word64: 64 else: 32
+  if count < 0 or count >= size:
+    fail("assembler shift count is out of range")
+  let base = if width == Word64: 0xD3400000'u32 else: 0x53000000'u32
+  assembler.emit(
+    base or (uint32((size - count) mod size) shl 16) or
+      (uint32(size - 1 - count) shl 10) or (source.number shl 5) or
+      destination.number
+  )
+
+proc shiftRightImmediate*(assembler: var Assembler, width: Width,
+    destination, source: Register, count: int) {.raises: [BasicError].} =
+  ## Shifts right without keeping the sign, by a constant.
+  let size = if width == Word64: 64 else: 32
+  if count < 0 or count >= size:
+    fail("assembler shift count is out of range")
+  let base = if width == Word64: 0xD3400000'u32 else: 0x53000000'u32
+  assembler.emit(
+    base or (uint32(count) shl 16) or (uint32(size - 1) shl 10) or
+      (source.number shl 5) or destination.number
+  )

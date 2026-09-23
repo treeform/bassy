@@ -130,6 +130,17 @@ encodes "tst w3, #7":
 encodes "tst x4, #0xffff":
   assembler.testLowBits(Word64, x4, 16)
 
+encodes "sxtw x5, w6":
+  assembler.signExtendWord(x5, x6)
+encodes "lsl x7, x8, #16":
+  assembler.shiftLeftImmediate(Word64, x7, x8, 16)
+encodes "lsl w9, w10, #3":
+  assembler.shiftLeftImmediate(Word32, x9, x10, 3)
+encodes "lsr x11, x12, #1":
+  assembler.shiftRightImmediate(Word64, x11, x12, 1)
+encodes "lsr w13, w14, #8":
+  assembler.shiftRightImmediate(Word32, x13, x14, 8)
+
 ## Memory
 
 encodes "ldr w5, [x6, #12]":

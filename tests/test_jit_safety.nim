@@ -651,6 +651,57 @@ while i < 100000
 wend
 """, maximum = 977)
 
+agrees("dividing between array cells", """
+dim cells(63)
+i = 0
+while i < 64
+  cells(i) = 100.0
+  i = i + 1
+wend
+i = 1
+while i < 64
+  cells(i) = cells(i) / cells(i - 1)
+  cells(i) = cells(i) + 99.5
+  i = i + 1
+wend
+""")
+
+agrees("dividing negatives between cells", """
+dim cells(63)
+i = 0
+while i < 64
+  cells(i) = 0.0 - 7.25
+  i = i + 1
+wend
+i = 1
+while i < 64
+  cells(i) = cells(i) / cells(i - 1)
+  cells(i) = cells(i) - 8.25
+  i = i + 1
+wend
+""")
+
+agrees("dividing by zero part way", """
+d = 3
+total = 0.0
+i = 0
+while i < 10
+  total = total + 100 / d
+  d = d - 1
+  i = i + 1
+wend
+""")
+
+agrees("dividing a whole too large to widen", """
+n = 40000
+total = 0.0
+i = 0
+while i < 10
+  total = total + n / 2
+  i = i + 1
+wend
+""")
+
 ## Generated scripts
 
 proc generated(seed: int64): string =
