@@ -3122,6 +3122,11 @@ proc instructions*(program: Program): int {.inline.} =
   ## Returns the number of metered register-machine instructions.
   program.code.len
 
+proc fixedConstants*(program: Program): seq[int32] =
+  ## Returns the raw bits of every fixed-point constant the code names.
+  for value in program.fixedValues:
+    result.add(int32(value))
+
 proc nativeRegions*(runtime: Runtime): int =
   ## Returns how many compiled loops are still active.
   for region in runtime.regionAt:
@@ -3143,7 +3148,9 @@ proc compileNative*(runtime: var Runtime): int =
     runtime.program.code,
     runtime.globals.len,
     int(runtime.program.maxRegisters),
-    extents
+    extents,
+    runtime.program.fixedConstants,
+    runtime.hostData.len
   )
   runtime.nativeRegions
 
@@ -3551,6 +3558,9 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
             memory:
               if runtime.memory.len == 0: nil
               else: runtime.memory[0].addr,
+            hostData:
+              if runtime.hostData.len == 0: nil
+              else: runtime.hostData[0].addr,
             remainingInstructions: runtime.remainingInstructions,
             remainingWork: runtime.remainingWork,
             pc: runtime.pc

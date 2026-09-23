@@ -42,6 +42,7 @@ type
     pc*: int32
     registers*: pointer
     memory*: pointer
+    hostData*: pointer
 
   NativeCall = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -78,6 +79,7 @@ const
   ContextOffset = 24
   ContextRegisters = 32
   ContextMemory = 40
+  ContextHostData = 48
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
   MaxChargeImmediate = 4095
@@ -136,6 +138,8 @@ proc layoutMatches*(): bool {.raises: [].} =
     return false
   if cast[int](context.memory.addr) - origin != ContextMemory:
     return false
+  if cast[int](context.hostData.addr) - origin != ContextHostData:
+    return false
   true
 
 ## Region discovery
@@ -150,6 +154,8 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
       EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp,
       JumpIfZeroOp,
       IntegerDivideOp,
+      LoadFixedOp, LoadHostDataOp, AddGlobalHostDataOp,
+      AddGlobalRegisterOp, ModuloGlobalImmediateOp,
       ArrayGetOp, ArraySetOp, ArrayAddGlobalsOp,
       AddGlobalArrayGlobalIndexOp,
       JumpUnlessGlobalEqualImmediateOp,
@@ -190,6 +196,11 @@ proc touchedGlobals(item: Instruction, globals: var seq[int32])
     note(item.b)
   of StoreGlobalOp:
     note(item.a)
+  of AddGlobalHostDataOp, AddGlobalRegisterOp:
+    note(item.a)
+  of ModuloGlobalImmediateOp:
+    note(item.a)
+    note(item.b)
   of ArrayAddGlobalsOp:
     note(item.b)
     note(item.c)
@@ -239,6 +250,10 @@ proc touchedSlots(item: Instruction, slots: var seq[int32])
     note(item.a)
     note(item.b)
     note(item.c)
+  of LoadFixedOp, LoadHostDataOp:
+    note(item.a)
+  of AddGlobalRegisterOp:
+    note(item.b)
   of ArrayGetOp:
     note(item.a)
     note(item.c)
@@ -938,6 +953,34 @@ when NativeArm64:
     emitter.storeWord(ResumeOffset, Context, ContextOffset)
     emitter.loadImmediate(Word32, Context, int64(ord(NativeGuardFailed)))
     emitter.endRegion()
+  proc setSlotConstant(emitter: var Assembler, slot: int32, tag: int,
+      bits: int32) {.raises: [BasicError].} =
+    ## Writes a constant of a known kind straight into a slot.
+    let base = int(slot) * ValueStride
+    emitter.loadImmediate(Word32, Scratch, int64(tag))
+    emitter.storeByte(Scratch, RegistersBase, base)
+    emitter.loadImmediate(Word32, ValueScratch[0], int64(bits))
+    emitter.storeWord(ValueScratch[0], RegistersBase, base + ValuePayload)
+
+  proc hostDataAddress(emitter: var Assembler, index: int32)
+      {.raises: [BasicError].} =
+    ## Leaves one host data value's address in Scratch.
+    emitter.loadDouble(Scratch, Context, ContextHostData)
+    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
+    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
+
+  proc copyHostDataToSlot(emitter: var Assembler, index, slot: int32)
+      {.raises: [BasicError].} =
+    ## Copies a host value entire into a slot, as the interpreter does.
+    emitter.hostDataAddress(index)
+    emitter.copyElementToSlot(slot)
+
+  proc readHostDataInteger(emitter: var Assembler, scratch: int,
+      index: int32, leave: Label) {.raises: [BasicError].} =
+    ## Reads a host value as an integer, leaving the region if it is not.
+    emitter.hostDataAddress(index)
+    emitter.readElement(scratch, leave)
+
 
 elif NativeAmd64:
   ## x86-64 code generation
@@ -1305,10 +1348,36 @@ elif NativeAmd64:
     emitter.storeWordImmediate(Context, ContextOffset, start)
     emitter.loadImmediate(Word32, rax, int64(ord(NativeGuardFailed)))
     emitter.endRegion()
+  proc setSlotConstant(emitter: var Assembler, slot: int32, tag: int,
+      bits: int32) {.raises: [BasicError].} =
+    ## Writes a constant of a known kind straight into a slot.
+    let base = int(slot) * ValueStride
+    emitter.storeByteImmediate(RegistersBase, base, byte(tag))
+    emitter.loadImmediate(Word32, ValueScratch[0], int64(bits))
+    emitter.storeWord(ValueScratch[0], RegistersBase, base + ValuePayload)
+
+  proc hostDataAddress(emitter: var Assembler, index: int32)
+      {.raises: [BasicError].} =
+    ## Leaves one host data value's address in Scratch.
+    emitter.loadDouble(Scratch, Context, ContextHostData)
+    emitter.addImmediate(Word64, Scratch, index * int32(ValueStride))
+
+  proc copyHostDataToSlot(emitter: var Assembler, index, slot: int32)
+      {.raises: [BasicError].} =
+    ## Copies a host value entire into a slot, as the interpreter does.
+    emitter.hostDataAddress(index)
+    emitter.copyElementToSlot(slot)
+
+  proc readHostDataInteger(emitter: var Assembler, scratch: int,
+      index: int32, leave: Label) {.raises: [BasicError].} =
+    ## Reads a host value as an integer, leaving the region if it is not.
+    emitter.hostDataAddress(index)
+    emitter.readElement(scratch, leave)
+
 
 proc compileRegion*(code: seq[Instruction], start, stop, globals,
-    slots: int, extents: seq[ArrayExtent]): Region
-    {.raises: [BasicError].} =
+    slots: int, extents: seq[ArrayExtent], constants: seq[int32] = @[],
+    hostData = 0): Region {.raises: [BasicError].} =
   ## Compiles one loop, or returns nil when it is outside the modelled set.
   ##
   ## Generated code indexes global storage without checking, so every
@@ -1320,8 +1389,10 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     return nil
   else:
     if start < 0 or stop > code.len or start >= stop:
+      echo "nil range"
       return nil
     if code.reachesOutside(start, stop):
+      echo "nil outside"
       return nil
 
     if globals < 0 or slots < 0:
@@ -1332,12 +1403,35 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     for index in start ..< stop:
       let item = code[index]
       if not item.isCompilable:
+        echo "nil op ", item.op, " at ", index
         return nil
       item.touchedGlobals(hoisted)
       # Slots are read and written where they sit, so each index only has
       # to be proved in range; nothing is carried across the region.
       # Every array named must exist, and its cells must sit where a
       # displacement can reach them.
+      # Every constant and host slot named has to exist, and a divisor
+      # fixed at compile time has to be one that divides plainly.
+      case item.op
+      of LoadFixedOp:
+        if item.b < 0 or int(item.b) >= constants.len:
+          return nil
+        usesSlots = true
+      of LoadHostDataOp, AddGlobalHostDataOp:
+        if item.b < 0 or int(item.b) >= hostData:
+          return nil
+        if int(item.b) >
+            (MaxDisplacementBytes - ValuePayload) div ValueStride:
+          return nil
+        if item.op == LoadHostDataOp:
+          usesSlots = true
+      of AddGlobalRegisterOp:
+        usesSlots = true
+      of ModuloGlobalImmediateOp:
+        if item.c == 0 or item.c == -1:
+          return nil
+      else:
+        discard
       var arrayId = 0'i32
       if item.namedArray(arrayId):
         if arrayId < 0 or int(arrayId) >= extents.len:
@@ -1365,6 +1459,7 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         if int(target) < 0 or int(target) > code.len:
           return nil
     if hoisted.len == 0 or hoisted.len > MaxHoistedGlobals:
+      echo "nil hoisted ", hoisted.len
       return nil
     for index in hoisted:
       if index < 0 or int(index) >= globals:
@@ -1579,6 +1674,25 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         else:
           emitter.quotientScratch(0, 1)
         emitter.writeSlot(0, item.a)
+      of LoadFixedOp:
+        emitter.setSlotConstant(item.a, FixedTag, constants[int(item.b)])
+      of LoadHostDataOp:
+        emitter.copyHostDataToSlot(item.b, item.a)
+      of AddGlobalHostDataOp:
+        emitter.readHostDataInteger(0, item.b, leaveHere)
+        emitter.scratchFromHoisted(1, slotOf(item.a))
+        emitter.addScratch(1, 0)
+        emitter.hoistedFromScratch(slotOf(item.a), 1)
+      of AddGlobalRegisterOp:
+        emitter.readSlot(0, item.b, leaveHere)
+        emitter.scratchFromHoisted(1, slotOf(item.a))
+        emitter.addScratch(1, 0)
+        emitter.hoistedFromScratch(slotOf(item.a), 1)
+      of ModuloGlobalImmediateOp:
+        emitter.scratchFromHoisted(0, slotOf(item.b))
+        emitter.setScratch(1, item.c)
+        emitter.remainderScratch(0, 1)
+        emitter.hoistedFromScratch(slotOf(item.a), 0)
       of ArrayGetOp:
         emitter.readSlot(0, item.c, leaveHere)
         emitter.elementAddress(0, extents[int(item.b)], leaveHere)
@@ -1685,7 +1799,8 @@ proc invoke*(region: Region, context: var NativeContext): NativeStatus
   NativeStatus(region.call(context.addr))
 
 proc compileLoops*(code: seq[Instruction], globals, slots: int,
-    extents: seq[ArrayExtent] = @[]): seq[Region]
+    extents: seq[ArrayExtent] = @[], constants: seq[int32] = @[],
+    hostData = 0): seq[Region]
     {.raises: [BasicError].} =
   ## Compiles every backward-branching loop the code generator models.
   ## The result is indexed by bytecode offset, so the interpreter reaches
@@ -1703,7 +1818,8 @@ proc compileLoops*(code: seq[Instruction], globals, slots: int,
     var region: Region = nil
     try:
       region = compileRegion(
-        code, int(target), index + 1, globals, slots, extents
+        code, int(target), index + 1, globals, slots, extents,
+        constants, hostData
       )
     except BasicError:
       region = nil
