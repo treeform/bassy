@@ -56,6 +56,7 @@ type
     routine*: int32
     runtime*: pointer
     step*: pointer
+    hostStep*: pointer
 
   NativeCall* = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -95,6 +96,7 @@ const
   ContextRoutine = 88
   ContextRuntime = 96
   ContextStep = 104
+  ContextHostStep = 112
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -169,7 +171,8 @@ proc layoutMatches*(): bool {.raises: [].} =
     at(depth) == ContextDepth and
     at(routine) == ContextRoutine and
     at(runtime) == ContextRuntime and
-    at(step) == ContextStep
+    at(step) == ContextStep and
+    at(hostStep) == ContextHostStep
 
 type
   Machine* = ref object
@@ -845,7 +848,7 @@ when NativeArm64:
     e.code.loadImmediate(Word32, x1, int64(offset))
     e.code.branchLink(routine)
 
-  proc slowRoutine(e: var Emitter, failed: Label)
+  proc slowRoutine(e: var Emitter, failed: Label, helper: int)
       {.raises: [BasicError].} =
     ## The one place compiled code calls out. The budgets go into the
     ## context for the interpreter's code to charge, and come back from it
@@ -854,7 +857,7 @@ when NativeArm64:
     e.code.storeDouble(Instructions, Context, ContextInstructions)
     e.code.storeDouble(Work, Context, ContextWork)
     e.code.moveRegister(Word64, x0, Context)
-    e.code.loadDouble(temp(0), Context, ContextStep)
+    e.code.loadDouble(temp(0), Context, helper)
     e.code.callRegister(temp(0))
     e.code.moveRegister(Word32, temp(0), x0)
     e.code.loadDouble(Instructions, Context, ContextInstructions)
@@ -1594,7 +1597,7 @@ elif NativeAmd64:
     e.code.loadImmediate(Word32, SecondArgument, int64(offset))
     e.code.callLabel(routine)
 
-  proc slowRoutine(e: var Emitter, failed: Label)
+  proc slowRoutine(e: var Emitter, failed: Label, helper: int)
       {.raises: [BasicError].} =
     ## The one place compiled code calls out. The budgets go into the
     ## context for the interpreter's code to charge, and come back from it
@@ -1606,7 +1609,7 @@ elif NativeAmd64:
     e.code.storeDouble(Work, Context, ContextWork)
     e.code.moveRegister(Word64, FirstArgument, Context)
     e.code.subtractImmediate(Word64, rsp, Padding)
-    e.contextField(rax, ContextStep)
+    e.contextField(rax, helper)
     e.code.callRegister(rax)
     e.code.addImmediate(Word64, rsp, Padding)
     e.code.moveRegister(Word32, r10, rax)
@@ -1912,6 +1915,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       general[index] = blocks[index]
     let dispatchLabel = e.label()
     let slowLabel = e.label()
+    let hostLabel = e.label()
     let failedLabel = e.label()
 
     let loops = findLoops(code, Hoisting.len)
@@ -2328,7 +2332,11 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         runSlow()
         e.jump(dispatchLabel)
         fallsThrough = false
-      of LoadStringOp, TextCallOp, HostCallOp, PrintTextOp, PrintValueOp,
+      of HostCallOp:
+        # Host calls have a helper of their own, which goes straight to
+        # the host call's code instead of through the general dispatch.
+        e.callSlow(offset, hostLabel)
+      of LoadStringOp, TextCallOp, PrintTextOp, PrintValueOp,
           PrintNewlineOp:
         runSlow()
 
@@ -2405,7 +2413,9 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     e.place(dispatchLabel)
     e.dispatch()
     e.place(slowLabel)
-    e.slowRoutine(failedLabel)
+    e.slowRoutine(failedLabel, ContextStep)
+    e.place(hostLabel)
+    e.slowRoutine(failedLabel, ContextHostStep)
     e.place(failedLabel)
     e.epilogue(NativeFailed)
 

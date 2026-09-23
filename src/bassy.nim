@@ -3596,6 +3596,40 @@ template chargeMeter(runtime: Runtime, item: Instruction) =
   runtime.remainingInstructions -= instructionCount
   runtime.remainingWork -= cost
 
+template callHost(runtime: Runtime, item: Instruction) =
+  ## Runs one host function and stores its answer. The interpreter, and
+  ## compiled code's own path for host calls, both expand this.
+  template register(index: int32): untyped =
+    runtime.registers[int(runtime.base + index)]
+  let
+    functionId = int(item.b)
+    count = int(
+      runtime.program.hostFunctions[functionId].parameters
+    )
+  # Read in place: copying the closures would count references and ask
+  # the cycle collector about them on every single call.
+  template callback(): untyped = runtime.hostCallbacks[functionId]
+  var value: Value
+  if callback.numeric != nil:
+    if count == 0:
+      value = callback.numeric([])
+    else:
+      value = callback.numeric(runtime.arguments.toOpenArray(0, count - 1))
+  else:
+    for i in 0 ..< count:
+      runtime.integerArguments[i] = runtime.arguments[i].asInt
+    if count == 0:
+      value = callback.integer(EmptyArguments)
+    else:
+      value = callback.integer(
+        runtime.integerArguments.toOpenArray(0, count - 1)
+      )
+  runtime.requireValue(value)
+  requireType(runtime.program.hostFunctions[functionId].name, value)
+  if item.a >= 0:
+    register(item.a) = value
+  inc runtime.pc
+
 template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
   ## Executes one instruction after its block was charged. The interpreter
   ## loop and compiled code's slow path both expand this, so the two run
@@ -3791,34 +3825,7 @@ template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
     runtime.arguments[int(item.a)] = runtime.globals[int(item.b)]
     inc runtime.pc
   of HostCallOp:
-    let
-      functionId = int(item.b)
-      count = int(
-        runtime.program.hostFunctions[functionId].parameters
-      )
-    # Read in place: copying the closures would count references and ask
-    # the cycle collector about them on every single call.
-    template callback(): untyped = runtime.hostCallbacks[functionId]
-    var value: Value
-    if callback.numeric != nil:
-      if count == 0:
-        value = callback.numeric([])
-      else:
-        value = callback.numeric(runtime.arguments.toOpenArray(0, count - 1))
-    else:
-      for i in 0 ..< count:
-        runtime.integerArguments[i] = runtime.arguments[i].asInt
-      if count == 0:
-        value = callback.integer(EmptyArguments)
-      else:
-        value = callback.integer(
-          runtime.integerArguments.toOpenArray(0, count - 1)
-        )
-    runtime.requireValue(value)
-    requireType(runtime.program.hostFunctions[functionId].name, value)
-    if item.a >= 0:
-      register(item.a) = value
-    inc runtime.pc
+    runtime.callHost(item)
   of CallOp, GosubOp:
     if runtime.depth + 1 >= int32(runtime.frames.len):
       fail("BASIC call depth limit exceeded")
@@ -3923,13 +3930,15 @@ template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
       print(PrintEvent(kind: NewlinePrint))
     inc runtime.pc
 
-proc nativeStep(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
-  ## Runs one instruction for compiled code, through the very code the
-  ## interpreter runs. Compiled code keeps the frame and budgets in the
-  ## context, so they are carried in and back out around it. A failure
-  ## cannot travel back through frames compiled code built, so it is kept
-  ## here and raised again once compiled code has returned.
-  var runtime = cast[Runtime](context.runtime)
+template handOver(context: ptr NativeContext, pc: int32,
+    body: untyped): int32 =
+  ## Runs interpreter code for compiled code. Compiled code keeps the frame
+  ## and budgets in the context, so they are carried in and back out
+  ## around it. A failure cannot travel back through frames compiled code
+  ## built, so it is kept and raised again once compiled code returns.
+  # A cursor, so no reference is counted and no cycle root registered on
+  # every call; the runtime is alive for as long as compiled code runs.
+  var runtime {.cursor, inject.} = cast[Runtime](context.runtime)
   inc runtime.handedBack
   runtime.pc = pc
   runtime.base = context.base
@@ -3937,23 +3946,38 @@ proc nativeStep(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
   runtime.routine = context.routine
   runtime.remainingInstructions = context.remainingInstructions
   runtime.remainingWork = context.remainingWork
+  var status = 0'i32
   try:
+    body
+  except Exception as error:
+    runtime.nativeError = error
+    status = 1
+  if status == 0:
+    context.pc = runtime.pc
+    context.base = runtime.base
+    context.depth = runtime.depth
+    context.routine = runtime.routine
+    context.remainingInstructions = runtime.remainingInstructions
+    context.remainingWork = runtime.remainingWork
+  status
+
+proc nativeStep(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
+  ## Runs any one instruction for compiled code, through the very code the
+  ## interpreter runs for it.
+  handOver(context, pc):
     let item = runtime.program.code[int(pc)]
     if item.op == MeterOp:
       runtime.chargeMeter(item)
       inc runtime.pc
     else:
       runtime.performOp(item, runtime.printer)
-  except Exception as error:
-    runtime.nativeError = error
-    return 1
-  context.pc = runtime.pc
-  context.base = runtime.base
-  context.depth = runtime.depth
-  context.routine = runtime.routine
-  context.remainingInstructions = runtime.remainingInstructions
-  context.remainingWork = runtime.remainingWork
-  0
+
+proc nativeHostCall(context: ptr NativeContext, pc: int32): int32
+    {.cdecl.} =
+  ## Runs one host call for compiled code, going straight to the host
+  ## call's own code rather than through the general dispatch.
+  handOver(context, pc):
+    runtime.callHost(runtime.program.code[int(pc)])
 
 proc runMachine(runtime: var Runtime, print: PrintProc) =
   ## Runs the compiled program from wherever the runtime stands until it
@@ -3983,6 +4007,7 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     routine: runtime.routine,
     runtime: cast[pointer](runtime),
     step: cast[pointer](nativeStep),
+    hostStep: cast[pointer](nativeHostCall),
     remainingInstructions: runtime.remainingInstructions,
     remainingWork: runtime.remainingWork,
     pc: runtime.pc
