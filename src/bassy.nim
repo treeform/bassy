@@ -3201,7 +3201,8 @@ proc compileNative*(runtime: var Runtime): int =
     runtime.globals.len,
     runtime.hostData.len,
     runtime.arguments.len,
-    limits
+    limits,
+    textLayoutMatches()
   )
   if runtime.machine != nil:
     return runtime.program.code.len
@@ -4008,6 +4009,9 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     runtime: cast[pointer](runtime),
     step: cast[pointer](nativeStep),
     hostStep: cast[pointer](nativeHostCall),
+    stringOwner: runtime.strings.ownerAddress,
+    stringSpans: runtime.strings.spansAddress,
+    stringArena: runtime.strings.arenaAddress,
     remainingInstructions: runtime.remainingInstructions,
     remainingWork: runtime.remainingWork,
     pc: runtime.pc

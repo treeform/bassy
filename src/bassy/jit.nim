@@ -18,7 +18,7 @@
 ## small set of emitters, so AArch64 and x86-64 stay in step.
 
 import
-  bytecode, machine, numbers
+  bytecode, machine, numbers, texts
 
 export machine.jitSupported
 
@@ -57,6 +57,9 @@ type
     runtime*: pointer
     step*: pointer
     hostStep*: pointer
+    stringOwner*: pointer
+    stringSpans*: pointer
+    stringArena*: pointer
 
   NativeCall* = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -97,6 +100,9 @@ const
   ContextRuntime = 96
   ContextStep = 104
   ContextHostStep = 112
+  ContextStringOwner = 120
+  ContextStringSpans = 128
+  ContextStringArena = 136
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -109,6 +115,7 @@ const
   FrameTag* = 12
 
   FixedTag = 1
+  StringTag = 2
   FixedShift = 16
   FixedRounding = 1'i64 shl (FixedShift - 1)
 
@@ -144,7 +151,8 @@ proc layoutMatches*(): bool {.raises: [].} =
   # because the generated code tests the tag byte for exactly those.
   if image[0] != byte(ord(IntegerValue)) or ord(IntegerValue) != 0:
     return false
-  if image[ValueStride] != byte(FixedTag) or ord(FixedValue) != FixedTag:
+  if image[ValueStride] != byte(FixedTag) or ord(FixedValue) != FixedTag or
+      ord(StringValue) != StringTag:
     return false
   var payload = 0'i32
   copyMem(payload.addr, image[ValuePayload].addr, sizeof(int32))
@@ -172,7 +180,10 @@ proc layoutMatches*(): bool {.raises: [].} =
     at(routine) == ContextRoutine and
     at(runtime) == ContextRuntime and
     at(step) == ContextStep and
-    at(hostStep) == ContextHostStep
+    at(hostStep) == ContextHostStep and
+    at(stringOwner) == ContextStringOwner and
+    at(stringSpans) == ContextStringSpans and
+    at(stringArena) == ContextStringArena
 
 type
   Machine* = ref object
@@ -1168,6 +1179,109 @@ when NativeArm64:
     e.code.addRegister(Word32, FastScratch, FastScratch, position)
     e.code.addRegister(Word64, Cell, MemoryBase, FastScratch, 4)
 
+  ## Strings read in place
+  ##
+  ## A string value is its storage's owner in the high half and a handle
+  ## into the span table in the low half. Everything is checked just as
+  ## the interpreter checks it, and anything amiss takes the slow path,
+  ## which raises the interpreter's own error.
+
+  proc stringSpan(e: var Emitter, place: Place, reference, start,
+      length: Register, slow: Label) {.raises: [BasicError].} =
+    ## Reads a string's start and length, or takes the slow path unless
+    ## the value is a string of this storage's current generation.
+    let (base, offset) = e.reach(place)
+    e.code.loadByte(start, base, offset)
+    e.code.compareImmediate(Word32, start, StringTag)
+    e.jumpWhen(NotEqualCondition, slow)
+    e.code.loadDouble(reference, base, offset + ValuePayload)
+    e.code.loadDouble(length, Context, ContextStringOwner)
+    e.code.loadWord(length, length, 0)
+    e.jumpIfZero(length, slow)
+    e.code.shiftRightImmediate(Word64, start, reference, 32)
+    e.code.compareRegister(Word32, start, length)
+    e.jumpWhen(NotEqualCondition, slow)
+    e.code.loadDouble(length, Context, ContextStringSpans)
+    e.code.loadDouble(start, length, 0)
+    e.code.moveRegister(Word32, reference, reference)
+    e.code.compareRegister(Word64, reference, start)
+    e.jumpWhen(CarrySetCondition, slow)
+    e.code.loadDouble(length, length, 8)
+    e.code.addRegister(Word64, length, length, reference, 3)
+    e.code.loadWord(start, length, 8)
+    e.code.loadWord(length, length, 12)
+
+  proc chargeWork(e: var Emitter, cost: Register, slow: Label)
+      {.raises: [].} =
+    ## Charges work worked out at run time, or takes the slow path when it
+    ## cannot be afforded, where the interpreter raises.
+    e.code.compareRegister(Word64, Work, cost)
+    e.jumpWhen(LessCondition, slow)
+    e.code.subtractRegister(Word64, Work, Work, cost)
+
+  proc arenaBase(e: var Emitter, destination: Register)
+      {.raises: [BasicError].} =
+    ## Points at the first byte of the string arena.
+    e.code.loadDouble(destination, Context, ContextStringArena)
+    e.code.loadDouble(destination, destination, 8)
+    e.code.addImmediate(Word64, destination, destination, 8)
+
+  proc stringFunction(e: var Emitter, function: TextFunction, slow: Label)
+      {.raises: [BasicError].} =
+    ## Answers LEN or ASC of the first argument into the first working
+    ## register, charging what the interpreter charges.
+    e.stringSpan(argument(0), x0, x1, x2, slow)
+    if function == CodeFunction:
+      e.jumpIfZero(x2, slow)
+    e.code.addImmediate(Word64, x3, x2, 1)
+    e.chargeWork(x3, slow)
+    if function == LengthFunction:
+      e.code.moveRegister(Word32, temp(0), x2)
+    else:
+      e.arenaBase(x4)
+      e.code.addRegister(Word64, x4, x4, x1)
+      e.code.loadByte(temp(0), x4, 0)
+
+  proc stringEquality(e: var Emitter, left, right: Place, equal: bool,
+      slow: Label) {.raises: [BasicError].} =
+    ## Answers whether two strings hold the same bytes, into the first
+    ## working register, charging both lengths as the interpreter does.
+    e.stringSpan(left, x0, x1, x2, slow)
+    e.stringSpan(right, x3, x4, x5, slow)
+    e.code.addRegister(Word64, x6, x2, x5)
+    e.chargeWork(x6, slow)
+    let differ = e.label()
+    let same = e.label()
+    let done = e.label()
+    e.code.compareRegister(Word32, x2, x5)
+    e.code.branchIf(NotEqualCondition, differ)
+    e.arenaBase(x6)
+    e.code.addRegister(Word64, x1, x6, x1)
+    e.code.addRegister(Word64, x4, x6, x4)
+    e.code.branchIfZero(Word32, x2, same)
+    let again = e.label()
+    e.place(again)
+    e.code.loadByte(x7, x1, 0)
+    e.code.loadByte(x8, x4, 0)
+    e.code.compareRegister(Word32, x7, x8)
+    e.code.branchIf(NotEqualCondition, differ)
+    e.code.addImmediate(Word64, x1, x1, 1)
+    e.code.addImmediate(Word64, x4, x4, 1)
+    e.code.subtractImmediate(Word32, x2, x2, 1)
+    e.code.branchIfNotZero(Word32, x2, again)
+    e.place(same)
+    e.code.loadImmediate(Word32, temp(0), if equal: -1 else: 0)
+    e.jump(done)
+    e.place(differ)
+    e.code.loadImmediate(Word32, temp(0), if equal: 0 else: -1)
+    e.place(done)
+
+  proc jumpUnlessTag(e: var Emitter, tag: int, value: int, target: Label)
+      {.raises: [BasicError].} =
+    ## Jumps unless a working register holds one particular tag.
+    e.code.compareImmediate(Word32, temp(tag), value)
+    e.jumpWhen(NotEqualCondition, target)
+
   proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
     ## Publishes the budgets and where the program stopped, then returns.
     e.code.storeDouble(Instructions, Context, ContextInstructions)
@@ -2049,6 +2163,117 @@ elif NativeAmd64:
     e.contextField(Cell, ContextMemory)
     e.code.addRegister(Word64, Cell, FastScratch)
 
+  ## Strings read in place
+  ##
+  ## A string value is its storage's owner in the high half and a handle
+  ## into the span table in the low half. Everything is checked just as
+  ## the interpreter checks it, and anything amiss takes the slow path,
+  ## which raises the interpreter's own error.
+
+  proc stringSpan(e: var Emitter, place: Place, reference, start,
+      length: Register, slow: Label) {.raises: [BasicError].} =
+    ## Reads a string's start and length, or takes the slow path unless
+    ## the value is a string of this storage's current generation.
+    let (base, offset) = e.reach(place)
+    e.code.loadByteZeroed(start, base, offset)
+    e.code.compareImmediate(Word32, start, StringTag)
+    e.jumpWhen(NotEqualCondition, slow)
+    e.code.loadDouble(reference, base, offset + ValuePayload)
+    e.contextField(length, ContextStringOwner)
+    e.code.loadWord(length, length, 0)
+    e.code.testRegister(Word32, length, length)
+    e.jumpWhen(EqualCondition, slow)
+    e.code.moveRegister(Word64, start, reference)
+    e.code.shiftRightImmediate(Word64, start, 32)
+    e.code.compareRegister(Word32, start, length)
+    e.jumpWhen(NotEqualCondition, slow)
+    e.contextField(length, ContextStringSpans)
+    e.code.loadDouble(start, length, 0)
+    e.code.moveRegister(Word32, reference, reference)
+    e.code.compareRegister(Word64, reference, start)
+    e.jumpWhen(AboveEqualCondition, slow)
+    e.code.loadDouble(length, length, 8)
+    e.code.moveRegister(Word64, start, reference)
+    e.code.shiftLeftImmediate(Word64, start, 3)
+    e.code.addRegister(Word64, length, start)
+    e.code.loadWord(start, length, 8)
+    e.code.loadWord(length, length, 12)
+
+  proc chargeWork(e: var Emitter, cost: Register, slow: Label)
+      {.raises: [].} =
+    ## Charges work worked out at run time, or takes the slow path when it
+    ## cannot be afforded, where the interpreter raises.
+    e.code.compareRegister(Word64, Work, cost)
+    e.jumpWhen(LessCondition, slow)
+    e.code.subtractRegister(Word64, Work, cost)
+
+  proc arenaBase(e: var Emitter, destination: Register)
+      {.raises: [BasicError].} =
+    ## Points at the first byte of the string arena.
+    e.contextField(destination, ContextStringArena)
+    e.code.loadDouble(destination, destination, 8)
+    e.code.addImmediate(Word64, destination, 8)
+
+  proc stringFunction(e: var Emitter, function: TextFunction, slow: Label)
+      {.raises: [BasicError].} =
+    ## Answers LEN or ASC of the first argument into the first working
+    ## register, charging what the interpreter charges.
+    e.stringSpan(argument(0), r8, rsi, rdi, slow)
+    if function == CodeFunction:
+      e.code.testRegister(Word32, rdi, rdi)
+      e.jumpWhen(EqualCondition, slow)
+    e.code.moveRegister(Word32, Spare, rdi)
+    e.code.addImmediate(Word64, Spare, 1)
+    e.chargeWork(Spare, slow)
+    if function == LengthFunction:
+      e.code.moveRegister(Word32, temp(0), rdi)
+    else:
+      e.arenaBase(Cell)
+      e.code.addRegister(Word64, Cell, rsi)
+      e.code.loadByteZeroed(temp(0), Cell, 0)
+
+  proc stringEquality(e: var Emitter, left, right: Place, equal: bool,
+      slow: Label) {.raises: [BasicError].} =
+    ## Answers whether two strings hold the same bytes, into the first
+    ## working register, charging both lengths as the interpreter does.
+    e.stringSpan(left, r8, rsi, rdi, slow)
+    e.stringSpan(right, r9, r10, r14, slow)
+    e.code.moveRegister(Word32, Spare, rdi)
+    e.code.addRegister(Word64, Spare, r14)
+    e.chargeWork(Spare, slow)
+    let differ = e.label()
+    let same = e.label()
+    let done = e.label()
+    e.code.compareRegister(Word32, rdi, r14)
+    e.jumpWhen(NotEqualCondition, differ)
+    e.arenaBase(Cell)
+    e.code.addRegister(Word64, rsi, Cell)
+    e.code.addRegister(Word64, r10, Cell)
+    e.code.testRegister(Word32, rdi, rdi)
+    e.jumpWhen(EqualCondition, same)
+    let again = e.label()
+    e.place(again)
+    e.code.loadByteZeroed(rax, rsi, 0)
+    e.code.loadByteZeroed(Spare, r10, 0)
+    e.code.compareRegister(Word32, rax, Spare)
+    e.jumpWhen(NotEqualCondition, differ)
+    e.code.addImmediate(Word64, rsi, 1)
+    e.code.addImmediate(Word64, r10, 1)
+    e.code.subtractImmediate(Word32, rdi, 1)
+    e.jumpWhen(NotEqualCondition, again)
+    e.place(same)
+    e.code.loadImmediate(Word32, temp(0), if equal: -1 else: 0)
+    e.jump(done)
+    e.place(differ)
+    e.code.loadImmediate(Word32, temp(0), if equal: 0 else: -1)
+    e.place(done)
+
+  proc jumpUnlessTag(e: var Emitter, tag: int, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps unless a working register holds one particular tag.
+    e.code.compareImmediate(Word32, temp(tag), int32(value))
+    e.jumpWhen(NotEqualCondition, target)
+
   proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
     ## Publishes the budgets and where the program stopped, then returns.
     e.code.storeDouble(Instructions, Context, ContextInstructions)
@@ -2227,7 +2452,7 @@ proc findLoops(code: seq[Instruction], capacity: int): seq[Loop]
 
 proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     ownerOf: seq[int32], extents: seq[ArrayExtent], constants: seq[int32],
-    limits: CallLimits, far: bool): (seq[byte], seq[int])
+    limits: CallLimits, far, strings: bool): (seq[byte], seq[int])
     {.raises: [BasicError].} =
   ## Emits the whole program and returns its bytes along with where each
   ## offset's block starts.
@@ -2536,8 +2761,21 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         # The same kind on both sides orders the same on the stored bits,
         # and the answer is always a whole number.
         let slow = slowFor(ToNext)
+        let answered = e.label()
         e.readValue(0, 2, slot(item.b))
         e.readValue(1, 3, slot(item.c))
+        when not specialised:
+          if strings and item.op in {EqualOp, NotEqualOp}:
+            # Two strings compare byte by byte where they are kept. Inside
+            # a specialised loop this would need registers its globals
+            # hold, so there it leaves the loop instead.
+            let numbers = e.label()
+            e.jumpUnlessTag(2, StringTag, numbers)
+            e.jumpUnlessTag(3, StringTag, numbers)
+            e.stringEquality(slot(item.b), slot(item.c),
+              item.op == EqualOp, slow)
+            e.jump(answered)
+            e.place(numbers)
         e.unlessNumeric(2, slow)
         e.unlessNumeric(3, slow)
         let sameKind = e.label()
@@ -2553,6 +2791,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         e.compare(0, 1)
         e.place(decided)
         e.answer(0, comparisonCheck(item.op))
+        e.place(answered)
         e.writeWhole(slot(item.a), 0)
       of AndOp, OrOp, XorOp, EqvOp, ImpOp:
         let slow = slowFor(ToNext)
@@ -2680,8 +2919,17 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         # Host calls have a helper of their own, which goes straight to
         # the host call's code instead of through the general dispatch.
         e.callSlow(offset, hostLabel)
-      of LoadStringOp, TextCallOp, PrintTextOp, PrintValueOp,
-          PrintNewlineOp:
+      of TextCallOp:
+        let function = TextFunction(item.b)
+        if strings and item.c == 1 and
+            function in {LengthFunction, CodeFunction}:
+          # LEN and ASC read the string where it is kept.
+          let slow = slowFor(ToNext)
+          e.stringFunction(function, slow)
+          e.writeWhole(slot(item.a), 0)
+        else:
+          runSlow()
+      of LoadStringOp, PrintTextOp, PrintValueOp, PrintNewlineOp:
         runSlow()
 
       when not specialised:
@@ -3354,7 +3602,8 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
 
 proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
     extents: seq[ArrayExtent], constants: seq[int32], globals, hostData,
-    arguments: int, limits: CallLimits): Machine {.raises: [BasicError].} =
+    arguments: int, limits: CallLimits, strings = false): Machine
+    {.raises: [BasicError].} =
   ## Compiles every offset of a program to machine code, or returns nil
   ## when this target has no backend or the program is outside what the
   ## generator is sure of. Generated code indexes storage without
@@ -3428,6 +3677,10 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
       case item.op
       of MeterOp:
         if item.a < 0 or item.b < 0:
+          return nil
+      of TextCallOp:
+        requireSlot(item.a)
+        if item.c < 1 or int(item.c) > arguments:
           return nil
       of LoadImmediateOp:
         requireSlot(item.a)
@@ -3513,13 +3766,13 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
     var emitted: (seq[byte], seq[int])
     try:
       emitted = emitProgram(code, routines, ownerOf, extents, constants,
-        limits, false)
+        limits, false, strings)
     except BasicError:
       # Some branch could not reach; every branch then goes the long way.
       # Should that fail too, the program is left to the interpreter.
       try:
         emitted = emitProgram(code, routines, ownerOf, extents, constants,
-          limits, true)
+          limits, true, strings)
       except BasicError:
         return nil
     let (bytes, starts) = emitted

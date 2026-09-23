@@ -443,6 +443,8 @@ proc whole(g: var Generator): string =
   of 10: "twice(" & g.whole() & ")"
   else: "pick(" & g.whole() & ", " & g.whole() & ")"
 
+proc text(g: var Generator): string
+
 proc numeric(g: var Generator): string
 
 proc cellIndex(g: var Generator): string =
@@ -484,7 +486,12 @@ proc numeric(g: var Generator): string =
   of 11: "(not " & g.numeric() & ")"
   of 12: "-" & g.numeric()
   of 13: "halve(" & g.numeric() & ")"
-  of 14: "len(" & g.pick(Texts) & ")"
+  of 14:
+    case g.random.rand(0 .. 3)
+    of 0: "len(" & g.text() & ")"
+    of 1: "asc(" & g.text() & ")"
+    of 2: "(" & g.text() & " = " & g.text() & ")"
+    else: "(" & g.text() & " <> " & g.text() & ")"
   of 15: g.whole()
   else: "twice(" & g.whole() & ")"
 
