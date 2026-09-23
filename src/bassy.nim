@@ -3796,7 +3796,9 @@ template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
       count = int(
         runtime.program.hostFunctions[functionId].parameters
       )
-      callback = runtime.hostCallbacks[functionId]
+    # Read in place: copying the closures would count references and ask
+    # the cycle collector about them on every single call.
+    template callback(): untyped = runtime.hostCallbacks[functionId]
     var value: Value
     if callback.numeric != nil:
       if count == 0:
