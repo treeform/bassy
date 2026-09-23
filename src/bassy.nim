@@ -5,7 +5,7 @@
 
 import
   std/[strutils, tables],
-  bassy/[bytecode, jit, numbers, programs, texts]
+  bassy/[bytecode, jit, numbers, texts]
 
 export bytecode, jit, numbers
 
@@ -214,9 +214,6 @@ type
     printedEvents: int64
     allocatedBytes: int64
     finished: bool
-    regionAt: seq[Region]
-    bypass: int32
-    hostFailure: string
     machine: Machine
     printer: PrintProc
     nativeError: ref Exception
@@ -3146,11 +3143,6 @@ proc routineExtents*(program: Program): seq[RoutineExtent] =
       parameters: routine.parameterCount
     ))
 
-proc runHostCall(context: ptr NativeContext, functionId,
-    destination: int32): int32 {.cdecl.}
-  ## Runs one host function on behalf of compiled code. The body sits
-  ## further down, beside the checks it needs.
-
 proc frameLayoutMatches*(): bool =
   ## Confirms the frame layout compiled code would write by hand. These
   ## offsets were read off this Nim version, and compiled code pushes and
@@ -3181,20 +3173,12 @@ proc handedBack*(runtime: Runtime): int64 {.inline.} =
   ## host calls, or about to fail. Everything else ran as machine code.
   runtime.handedBack
 
-proc nativeRegions*(runtime: Runtime): int =
-  ## Returns how many compiled loops are still active.
-  for region in runtime.regionAt:
-    if region != nil:
-      inc result
-
 proc compileNative*(runtime: var Runtime): int =
   ## Compiles this program to machine code and returns how many bytecode
-  ## offsets now run natively. The whole program is compiled where the
-  ## target has a backend for it, and otherwise only its hot loops.
-  ## Whatever is not compiled is left to the interpreter, so behavior
-  ## never depends on the result.
-  runtime.bypass = -1
-  runtime.regionAt = @[]
+  ## offsets now run natively: all of them, or none where the target has
+  ## no backend or the compiler is not sure of the program. The
+  ## interpreter runs whatever is not compiled, and the two cannot be told
+  ## apart, so behavior never depends on the result.
   runtime.machine = nil
   if not jitSupported():
     return 0
@@ -3221,20 +3205,6 @@ proc compileNative*(runtime: var Runtime): int =
   )
   if runtime.machine != nil:
     return runtime.program.code.len
-  runtime.regionAt = compileLoops(
-    runtime.program.code,
-    runtime.globals.len,
-    int(runtime.program.maxRegisters),
-    extents,
-    runtime.program.fixedConstants,
-    runtime.hostData.len,
-    runtime.program.routineExtents,
-    CallLimits(
-      frames: int32(runtime.frames.len),
-      slots: int32(runtime.registers.len)
-    )
-  )
-  runtime.nativeRegions
 
 proc arrayExtent*(program: Program, id: int32): (int32, int32) {.inline.} =
   ## Returns where one array starts and how many cells it has.
@@ -3613,46 +3583,6 @@ proc leaveFrame(runtime: var Runtime) =
   runtime.routine = frame.routine
   runtime.pc = frame.returnPc
 
-proc runHostCall(context: ptr NativeContext, functionId,
-    destination: int32): int32 {.cdecl.} =
-  ## Runs one host function on behalf of compiled code.
-  ##
-  ## Compiled code cannot let a refusal travel back through a frame that
-  ## nothing described, so whatever the host raises is caught here and
-  ## reported as an answer instead. The offset then goes back to the
-  ## interpreter with the refusal already made, so the function is not
-  ## called a second time on the way out.
-  let runtime = cast[Runtime](context.runtime)
-  try:
-    let
-      id = int(functionId)
-      count = int(runtime.program.hostFunctions[id].parameters)
-      callback = runtime.hostCallbacks[id]
-    var value: Value
-    if callback.numeric != nil:
-      if count == 0:
-        value = callback.numeric([])
-      else:
-        value = callback.numeric(runtime.arguments.toOpenArray(0, count - 1))
-    else:
-      for i in 0 ..< count:
-        runtime.integerArguments[i] = runtime.arguments[i].asInt
-      if count == 0:
-        value = callback.integer(EmptyArguments)
-      else:
-        value = callback.integer(
-          runtime.integerArguments.toOpenArray(0, count - 1)
-        )
-    runtime.requireValue(value)
-    requireType(runtime.program.hostFunctions[id].name, value)
-    if destination >= 0:
-      let slots = cast[ptr UncheckedArray[Value]](context.registerFile)
-      slots[int(context.base) + int(destination)] = value
-    0'i32
-  except CatchableError as error:
-    runtime.hostFailure = error.msg
-    1'i32
-
 template chargeMeter(runtime: Runtime, item: Instruction) =
   ## Charges one block's budgets, refusing before charging either.
   let
@@ -4030,9 +3960,6 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     globals:
       if runtime.globals.len == 0: nil
       else: runtime.globals[0].addr,
-    registers:
-      if runtime.registers.len == 0: nil
-      else: runtime.registers[int(runtime.base)].addr,
     memory:
       if runtime.memory.len == 0: nil
       else: runtime.memory[0].addr,
@@ -4048,7 +3975,7 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     registerFile:
       if runtime.registers.len == 0: nil
       else: runtime.registers[0].addr,
-    returnTable: runtime.machine.tableAddress,
+    table: runtime.machine.tableAddress,
     base: runtime.base,
     depth: runtime.depth,
     routine: runtime.routine,
@@ -4090,61 +4017,6 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
   while not runtime.finished:
     var item = fetch()
     if item.op == MeterOp:
-      if runtime.regionAt.len > 0 and runtime.pc != runtime.bypass:
-        let region = runtime.regionAt[int(runtime.pc)]
-        if region != nil:
-          var context = NativeContext(
-            globals: runtime.globals[0].addr,
-            registers:
-              if runtime.registers.len == 0: nil
-              else: runtime.registers[int(runtime.base)].addr,
-            memory:
-              if runtime.memory.len == 0: nil
-              else: runtime.memory[0].addr,
-            hostData:
-              if runtime.hostData.len == 0: nil
-              else: runtime.hostData[0].addr,
-            frames:
-              if runtime.frames.len == 0: nil
-              else: runtime.frames[0].addr,
-            arguments:
-              if runtime.arguments.len == 0: nil
-              else: runtime.arguments[0].addr,
-            registerFile:
-              if runtime.registers.len == 0: nil
-              else: runtime.registers[0].addr,
-            returnTable: region.returnTable,
-            base: runtime.base,
-            depth: runtime.depth,
-            routine: runtime.routine,
-            runtime: cast[pointer](runtime),
-            hostCall: cast[pointer](runHostCall),
-            remainingInstructions: runtime.remainingInstructions,
-            remainingWork: runtime.remainingWork,
-            pc: runtime.pc
-          )
-          let status = region.invoke(context)
-          runtime.remainingInstructions = context.remainingInstructions
-          runtime.remainingWork = context.remainingWork
-          runtime.pc = context.pc
-          runtime.base = context.base
-          runtime.depth = context.depth
-          runtime.routine = context.routine
-          case status
-          of NativeCompleted:
-            runtime.bypass = -1
-          of NativeExhausted:
-            # Let the interpreter re-run the meter and raise the real error.
-            runtime.bypass = context.pc
-          of NativeFailed:
-            # Host code already refused, and saying so again would call it
-            # a second time, so the refusal is repeated rather than remade.
-            raise newException(BasicError, runtime.hostFailure)
-          of NativeGuardFailed:
-            # A value stopped being an integer, so retire the compiled form.
-            runtime.regionAt[int(region.start)] = nil
-            runtime.bypass = -1
-          continue
       runtime.chargeMeter(item)
       inc runtime.pc
       item = fetch()

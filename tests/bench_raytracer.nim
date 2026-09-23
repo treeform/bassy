@@ -1,10 +1,10 @@
 ## Runs the BASIC raytracer on both execution paths.
 ##
 ## This is the realistic end of the workload range. Almost all of its time
-## goes to fixed-point arithmetic, arrays, and subroutine calls, none of
-## which the native compiler models, so it compiles no loops at all. It is
-## here to show where the speedup does not yet reach, and to check that a
-## script this large still agrees on both paths.
+## goes to fixed-point arithmetic, arrays, subroutine calls and host
+## functions, and there is no single hot loop to speak of. It shows what
+## compiling the whole program buys on real work, and checks that a script
+## this large still agrees on both paths.
 
 import
   std/[monotimes, strformat, times],
@@ -135,15 +135,15 @@ echo &"image: {Size} by {Size}, bytecode {program.instructions} instructions"
 
 var plain = initRuntime(program, host, limits)
 var fast = initRuntime(program, host, limits)
-let regions = fast.compileNative()
+let compiled = fast.compileNative()
 
 let (plainTime, plainSum) = plain.render()
 let (fastTime, fastSum) = fast.render()
 
 echo &"  interpreted  {plainTime:9.2f} ms   checksum {plainSum}"
 echo &"  native       {fastTime:9.2f} ms   checksum {fastSum}   " &
-  &"compiled loops {regions}"
-if regions > 0 and fastTime > 0.0:
+  &"compiled offsets {compiled}"
+if compiled > 0 and fastTime > 0.0:
   echo &"  ratio        {plainTime / fastTime:9.2f}x"
 echo &"  instructions charged: {plain.instructionsUsed} vs " &
   &"{fast.instructionsUsed}"

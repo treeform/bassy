@@ -1,4 +1,4 @@
-## Reports how much faster compiled loops run than the interpreter.
+## Reports how much faster compiled programs run than the interpreter.
 ## Times its own runs so it can execute on any CI machine without pulling
 ## in a benchmarking dependency.
 
@@ -83,7 +83,7 @@ proc measure(name, source: string, expected: int32) =
 
   var plain = initRuntime(program, limits)
   var fast = initRuntime(program, limits)
-  let regions = fast.compileNative()
+  let compiled = fast.compileNative()
 
   let plainTime = plain.fastest()
   let fastTime = fast.fastest()
@@ -94,11 +94,11 @@ proc measure(name, source: string, expected: int32) =
   let charged = plain.instructionsUsed == fast.instructionsUsed
 
   let ratio =
-    if fastTime > 0.0 and regions > 0: &"{plainTime / fastTime:6.1f}x"
+    if fastTime > 0.0 and compiled > 0: &"{plainTime / fastTime:6.1f}x"
     else: "     --"
   echo &"  {name:<12} interpreted {plainTime:8.3f} ms   " &
     &"native {fastTime:8.3f} ms   {ratio}   " &
-    &"loops {regions}  results {agree}  budget {charged}"
+    &"offsets {compiled}  results {agree}  budget {charged}"
   if not agree:
     quit(&"{name}: interpreted {plainSum} but native {fastSum}")
   if not charged:

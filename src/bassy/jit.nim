@@ -1,15 +1,21 @@
-## Compiles hot integer loops from the register bytecode to machine code.
+## Compiles a whole program from the register bytecode to machine code.
 ##
-## A region is one backward-branching loop whose every operation is an
-## integer operation on global variables. On entry the compiled code proves
-## each participating global still holds an integer, hoists it into a
-## machine register, and from then on runs without tags, without memory
-## traffic, and without dispatch. Any operation the compiler does not
-## model, and any value that is not an integer, leaves the loop to the
-## interpreter, so the two always agree on results and on budgets.
+## Every bytecode offset becomes a native block, so jumps, calls and
+## returns go straight from one block to the next and the interpreter
+## loop never runs. Values stay exactly where the interpreter keeps them,
+## in the globals, the register file, the arguments and the array cells,
+## which is what lets the two agree on every result, every budget and
+## every failure.
 ##
-## The region walker below is written once. Each architecture supplies the
-## same small set of emitters, so AArch64 and x86-64 stay in step.
+## The common cases run inline: whole-number and fixed-point arithmetic,
+## comparisons, branches, moves, array cells, calls, returns and budget
+## meters. Everything else, such as strings, printing and host functions,
+## and every operation about to fail, calls the one routine the
+## interpreter itself runs for that instruction. Nothing is written
+## before such a call, so the instruction is simply run there instead.
+##
+## The walker below is written once. Each architecture supplies the same
+## small set of emitters, so AArch64 and x86-64 stay in step.
 
 import
   bytecode, machine, numbers
@@ -20,17 +26,6 @@ const
   NativeArm64* = NativeCode and defined(arm64)
   NativeAmd64* = NativeCode and defined(amd64)
 
-  ## Calls are written for AArch64 so far. Everywhere else a region
-  ## containing one is simply not compiled, which is what happened before
-  ## they were written anywhere.
-  ModelsCalls* = NativeArm64
-
-  ## Dividing to a fixed-point answer is written for AArch64 so far.
-  ModelsDivide* = NativeArm64
-
-  ## Reaching globals where they sit is written for AArch64 so far.
-  ModelsMemoryGlobals* = NativeArm64
-
 when NativeArm64:
   import arm64
 elif NativeAmd64:
@@ -38,32 +33,28 @@ elif NativeAmd64:
 
 type
   NativeStatus* = enum
-    ## Why compiled code returned control to the interpreter.
+    ## Why compiled code returned to its caller.
     NativeCompleted,
-    NativeGuardFailed,
-    NativeExhausted,
     NativeFailed
 
   NativeContext* = object
-    ## The mutable interpreter state compiled code is allowed to touch.
-    ## The register field points at the current frame's first slot, which
-    ## cannot move while a region runs because a region contains no call.
+    ## The interpreter state compiled code reads and writes. The frame and
+    ## the budgets live here whenever the interpreter's own code may need
+    ## them, and go back into the runtime once compiled code returns.
     globals*: pointer
     remainingInstructions*: int64
     remainingWork*: int64
     pc*: int32
-    registers*: pointer
     memory*: pointer
     hostData*: pointer
     frames*: pointer
     arguments*: pointer
     registerFile*: pointer
-    returnTable*: pointer
+    table*: pointer
     base*: int32
     depth*: int32
     routine*: int32
     runtime*: pointer
-    hostCall*: pointer
     step*: pointer
 
   NativeCall* = proc(context: ptr NativeContext): int32
@@ -87,46 +78,23 @@ type
     base*: int32
     length*: int32
 
-  Region* = ref object
-    ## One compiled loop, addressed by the bytecode offset that enters it.
-    start*: int32
-    stop*: int32
-    hoisted*: seq[int32]
-    size*: int
-    listing*: seq[byte]
-    returns: seq[pointer]
-    returnTable*: pointer
-    buffer: CodeBuffer
-    call: NativeCall
-
-  Test = enum
-    ## An architecture-neutral branch condition.
-    EqualTest,
-    NotEqualTest,
-    LessTest,
-    LessEqualTest,
-    GreaterTest,
-    GreaterEqualTest
-
 const
-  ValueStride* = 16
-  ValuePayload* = 8
-  ContextInstructions* = 8
-  ContextWork* = 16
-  ContextOffset* = 24
-  ContextRegisters* = 32
-  ContextMemory* = 40
-  ContextHostData* = 48
-  ContextFrames* = 56
-  ContextArguments* = 64
-  ContextRegisterFile* = 72
-  ContextReturnTable* = 80
-  ContextBase* = 88
-  ContextDepth* = 92
-  ContextRoutine* = 96
-  ContextRuntime* = 104
-  ContextHostCall* = 112
-  ContextStep* = 120
+  ValueStride = 16
+  ValuePayload = 8
+  ContextInstructions = 8
+  ContextWork = 16
+  ContextOffset = 24
+  ContextMemory = 32
+  ContextHostData = 40
+  ContextFrames = 48
+  ContextArguments = 56
+  ContextRegisterFile = 64
+  ContextTable = 72
+  ContextBase = 80
+  ContextDepth = 84
+  ContextRoutine = 88
+  ContextRuntime = 96
+  ContextStep = 104
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -137,25 +105,20 @@ const
   FrameRoutine* = 4
   FrameReturn* = 8
   FrameTag* = 12
-  MaxHoistedGlobals* = 7
-  MaxRegionBytes = 32 * 1024
-  MaxChargeImmediate = 4095
-  ## A call clears the callee's slots one at a time, so a routine wanting
-  ## more than this keeps to the interpreter rather than growing the code.
-  MaxClearedSlots = 64
-  FixedTag* = 1
-  FixedShift* = 16
-  FixedRounding* = 1'i64 shl (FixedShift - 1)
 
-  ## Fixed-point values are only modelled when overflow is allowed to
-  ## wrap. Under fixedChecks the interpreter asserts instead, and nothing
-  ## here would assert with it.
+  FixedTag = 1
+  FixedShift = 16
+  FixedRounding = 1'i64 shl (FixedShift - 1)
+
+  ## Fixed-point values are only modelled inline when overflow is allowed
+  ## to wrap. Under fixedChecks the interpreter asserts instead, so that
+  ## build hands every fixed-point operation to the interpreter's code.
   ModelsFixed* = not defined(fixedChecks)
-  MaxDisplacementBytes = int(high(int32))
 
-proc fail(message: string) {.noreturn, raises: [BasicError].} =
-  ## Reports a controlled native compilation failure.
-  raise newException(BasicError, "BASIC " & message)
+  MaxProgramBytes = 64 * 1024 * 1024
+  ## Leaving a routine without one of these would run on into the next
+  ## routine's code, which no call set up.
+  Terminators = {JumpOp, ReturnOp, ReturnLabelOp, ExitSubOp, HaltOp}
 
 proc layoutMatches*(): bool {.raises: [].} =
   ## Confirms the memory layout the code generator writes by hand.
@@ -175,2311 +138,1799 @@ proc layoutMatches*(): bool {.raises: [].} =
   probe[1] = toValue(fixed(1'i32))
   var image: array[ValueStride * 2, byte]
   copyMem(image[0].addr, probe[0].addr, ValueStride * 2)
-  # An integer must be tagged zero, because the guard tests for zero, and
-  # a fixed-point number must not be, or the guard would let one through.
-  if image[0] != byte(ord(IntegerValue)):
+  # A whole number must be tagged zero and a fixed-point one tagged one,
+  # because the generated code tests the tag byte for exactly those.
+  if image[0] != byte(ord(IntegerValue)) or ord(IntegerValue) != 0:
     return false
-  if image[ValueStride] == byte(ord(IntegerValue)):
+  if image[ValueStride] != byte(FixedTag) or ord(FixedValue) != FixedTag:
     return false
   var payload = 0'i32
   copyMem(payload.addr, image[ValuePayload].addr, sizeof(int32))
   if payload != 0x5A6B7C0D'i32:
     return false
+  copyMem(payload.addr, image[ValueStride + ValuePayload].addr,
+    sizeof(int32))
+  if payload != int32(fixed(1'i32)):
+    return false
   var context: NativeContext
   let origin = cast[int](context.addr)
-  if cast[int](context.remainingInstructions.addr) - origin !=
-      ContextInstructions:
-    return false
-  if cast[int](context.remainingWork.addr) - origin != ContextWork:
-    return false
-  if cast[int](context.pc.addr) - origin != ContextOffset:
-    return false
-  if cast[int](context.registers.addr) - origin != ContextRegisters:
-    return false
-  if cast[int](context.memory.addr) - origin != ContextMemory:
-    return false
-  if cast[int](context.hostData.addr) - origin != ContextHostData:
-    return false
-  if cast[int](context.frames.addr) - origin != ContextFrames:
-    return false
-  if cast[int](context.arguments.addr) - origin != ContextArguments:
-    return false
-  if cast[int](context.registerFile.addr) - origin != ContextRegisterFile:
-    return false
-  if cast[int](context.returnTable.addr) - origin != ContextReturnTable:
-    return false
-  if cast[int](context.base.addr) - origin != ContextBase:
-    return false
-  if cast[int](context.depth.addr) - origin != ContextDepth:
-    return false
-  if cast[int](context.routine.addr) - origin != ContextRoutine:
-    return false
-  if cast[int](context.runtime.addr) - origin != ContextRuntime:
-    return false
-  if cast[int](context.hostCall.addr) - origin != ContextHostCall:
-    return false
-  if cast[int](context.step.addr) - origin != ContextStep:
-    return false
-  true
-
-## Region discovery
-
-proc isCompilable(item: Instruction): bool {.raises: [].} =
-  ## Reports whether one operation has a modelled integer translation.
-  case item.op
-  of MeterOp, JumpOp, StoreGlobalImmediateOp, MoveGlobalOp,
-      AddGlobalImmediateOp, AddGlobalOp,
-      LoadImmediateOp, MoveOp, LoadGlobalOp, StoreGlobalOp,
-      AddOp, SubtractOp, MultiplyOp, NegateOp,
-      EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp,
-      JumpIfZeroOp,
-      IntegerDivideOp,
-      LoadFixedOp, LoadHostDataOp, AddGlobalHostDataOp,
-      AddGlobalRegisterOp, ModuloGlobalImmediateOp,
-      ArrayGetOp, ArraySetOp, ArrayAddGlobalsOp,
-      AddGlobalArrayGlobalIndexOp,
-      JumpUnlessGlobalEqualImmediateOp,
-      JumpUnlessGlobalNotEqualImmediateOp,
-      JumpUnlessGlobalLessImmediateOp,
-      JumpUnlessGlobalLessEqualImmediateOp,
-      JumpUnlessGlobalGreaterImmediateOp,
-      JumpUnlessGlobalGreaterEqualImmediateOp:
-    true
-  of ModuloOp:
-    true
-  of DivideOp:
-    # Dividing wraps here and asserts under fixedChecks, so that build
-    # leaves it alone, as it leaves the rest of fixed point alone.
-    ModelsFixed and ModelsDivide
-  of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp,
-      CallOp, ReturnOp, ExitSubOp, HostCallOp:
-    ModelsCalls
-  of JumpUnlessGlobalModuloEqualZeroOp:
-    # The interpreter raises on a zero divisor; refuse rather than model it.
-    item.b != 0
-  else:
-    false
-
-proc suitsMemoryGlobals(item: Instruction): bool {.raises: [].} =
-  ## Reports whether an operation has a form that reaches globals where
-  ## they sit. Anything touching a global without one keeps the loop out.
-  case item.op
-  of LoadGlobalOp, StoreGlobalOp, MoveGlobalOp, SetArgumentGlobalOp,
-      StoreGlobalImmediateOp, AddGlobalImmediateOp,
-      JumpUnlessGlobalEqualImmediateOp,
-      JumpUnlessGlobalNotEqualImmediateOp,
-      JumpUnlessGlobalLessImmediateOp,
-      JumpUnlessGlobalLessEqualImmediateOp,
-      JumpUnlessGlobalGreaterImmediateOp,
-      JumpUnlessGlobalGreaterEqualImmediateOp:
-    true
-  of AddGlobalOp, AddGlobalHostDataOp, AddGlobalRegisterOp,
-      ModuloGlobalImmediateOp, ArrayAddGlobalsOp,
-      AddGlobalArrayGlobalIndexOp, JumpUnlessGlobalModuloEqualZeroOp:
-    false
-  else:
-    true
-
-proc touchedGlobals(item: Instruction, globals: var seq[int32])
-    {.raises: [].} =
-  ## Records every global one operation reads or writes.
-  template note(index: int32) =
-    if index notin globals:
-      globals.add(index)
-  case item.op
-  of StoreGlobalImmediateOp, AddGlobalImmediateOp,
-      JumpUnlessGlobalEqualImmediateOp,
-      JumpUnlessGlobalNotEqualImmediateOp,
-      JumpUnlessGlobalLessImmediateOp,
-      JumpUnlessGlobalLessEqualImmediateOp,
-      JumpUnlessGlobalGreaterImmediateOp,
-      JumpUnlessGlobalGreaterEqualImmediateOp,
-      JumpUnlessGlobalModuloEqualZeroOp:
-    note(item.a)
-  of MoveGlobalOp, AddGlobalOp:
-    note(item.a)
-    note(item.b)
-  of LoadGlobalOp:
-    note(item.b)
-  of StoreGlobalOp:
-    note(item.a)
-  of SetArgumentGlobalOp:
-    note(item.b)
-  of AddGlobalHostDataOp, AddGlobalRegisterOp:
-    note(item.a)
-  of ModuloGlobalImmediateOp:
-    note(item.a)
-    note(item.b)
-  of ArrayAddGlobalsOp:
-    note(item.b)
-    note(item.c)
-  of AddGlobalArrayGlobalIndexOp:
-    note(item.a)
-    note(item.c)
-  else:
-    discard
-
-proc branchTarget(item: Instruction, target: var int32): bool
-    {.raises: [].} =
-  ## Reports whether an operation branches, and to where.
-  case item.op
-  of JumpOp:
-    target = item.a
-    true
-  of JumpIfZeroOp:
-    target = item.b
-    true
-  of JumpUnlessGlobalEqualImmediateOp,
-      JumpUnlessGlobalNotEqualImmediateOp,
-      JumpUnlessGlobalLessImmediateOp,
-      JumpUnlessGlobalLessEqualImmediateOp,
-      JumpUnlessGlobalGreaterImmediateOp,
-      JumpUnlessGlobalGreaterEqualImmediateOp,
-      JumpUnlessGlobalModuloEqualZeroOp:
-    target = item.c
-    true
-  else:
-    false
-
-proc touchedSlots(item: Instruction, slots: var seq[int32])
-    {.raises: [].} =
-  ## Records every register slot one operation reads or writes.
-  template note(index: int32) =
-    slots.add(index)
-  case item.op
-  of LoadImmediateOp, LoadGlobalOp:
-    note(item.a)
-  of JumpIfZeroOp:
-    # The slot tested is the first operand; the second is where to go.
-    note(item.a)
-  of StoreGlobalOp, NegateOp:
-    note(item.b)
-  of MoveOp:
-    note(item.a)
-    note(item.b)
-  of AddOp, SubtractOp, MultiplyOp, ModuloOp, IntegerDivideOp, DivideOp,
-      EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp, GreaterEqualOp:
-    note(item.a)
-    note(item.b)
-    note(item.c)
-  of LoadFixedOp, LoadHostDataOp:
-    note(item.a)
-  of HostCallOp:
-    if item.a >= 0:
-      note(item.a)
-  of AddGlobalRegisterOp, SetArgumentOp:
-    note(item.b)
-  of ArrayGetOp:
-    note(item.a)
-    note(item.c)
-  of ArraySetOp:
-    note(item.b)
-    note(item.c)
-  else:
-    discard
-  if item.op == NegateOp:
-    note(item.a)
-
-proc namedArray(item: Instruction, id: var int32): bool {.raises: [].} =
-  ## Reports whether an operation reaches into an array, and which one.
-  case item.op
-  of ArrayGetOp, AddGlobalArrayGlobalIndexOp:
-    id = item.b
-    true
-  of ArraySetOp, ArrayAddGlobalsOp:
-    id = item.a
-    true
-  else:
-    false
-
-proc usesRegisterFile(item: Instruction): bool {.raises: [].} =
-  ## Reports whether an operation reaches into the frame's slots.
-  var slots: seq[int32]
-  item.touchedSlots(slots)
-  slots.len > 0
-
-proc comparisonTest(op: Op): Test {.raises: [].} =
-  ## Returns the condition a comparison answers true on.
-  case op
-  of EqualOp: EqualTest
-  of NotEqualOp: NotEqualTest
-  of LessOp: LessTest
-  of LessEqualOp: LessEqualTest
-  of GreaterOp: GreaterTest
-  else: GreaterEqualTest
-
-proc takenOn(op: Op): Test {.raises: [].} =
-  ## Returns the condition on which a fused test takes its branch.
-  case op
-  of JumpUnlessGlobalEqualImmediateOp: NotEqualTest
-  of JumpUnlessGlobalNotEqualImmediateOp: EqualTest
-  of JumpUnlessGlobalLessImmediateOp: GreaterEqualTest
-  of JumpUnlessGlobalLessEqualImmediateOp: GreaterTest
-  of JumpUnlessGlobalGreaterImmediateOp: LessEqualTest
-  of JumpUnlessGlobalGreaterEqualImmediateOp: LessTest
-  else: NotEqualTest
+  template at(field: untyped): int =
+    cast[int](context.field.addr) - origin
+  at(remainingInstructions) == ContextInstructions and
+    at(remainingWork) == ContextWork and
+    at(pc) == ContextOffset and
+    at(memory) == ContextMemory and
+    at(hostData) == ContextHostData and
+    at(frames) == ContextFrames and
+    at(arguments) == ContextArguments and
+    at(registerFile) == ContextRegisterFile and
+    at(table) == ContextTable and
+    at(base) == ContextBase and
+    at(depth) == ContextDepth and
+    at(routine) == ContextRoutine and
+    at(runtime) == ContextRuntime and
+    at(step) == ContextStep
 
 type
-  LoopPlan = object
-    ## What one pass through a loop costs, when that is knowable.
-    ##
-    ## A loop whose body has no internal branch runs the same operations
-    ## every time around, so its budget can be settled once on entry
-    ## instead of at every block. The counter below then replaces both
-    ## budget checks, and the interpreter is handed back a count to charge.
-    counted: bool
-    spending: bool
-    instructions: int64
-    work: int64
-    passInstructions: int64
-    passWork: int64
-    partialInstructions: seq[int64]
-    partialWork: seq[int64]
-    checkpoints: seq[bool]
+  Machine* = ref object
+    ## One whole program compiled to machine code.
+    size*: int
+    listing*: seq[byte]
+    table: seq[pointer]
+    buffer: CodeBuffer
+    call: NativeCall
 
-proc planLoop(code: seq[Instruction], start, stop: int): LoopPlan
-    {.raises: [].} =
-  ## Measures one pass through a loop and reports whether it is countable.
-  result.partialInstructions = newSeq[int64](stop - start)
-  result.partialWork = newSeq[int64](stop - start)
-  result.checkpoints = newSeq[bool](stop - start)
-  if stop - start < 2:
-    return
-  let last = code[stop - 1]
-  if last.op != JumpOp or int(last.a) != start:
-    return
-  if code[start].op != MeterOp:
-    return
-  # Every meter in the region bounds what a single pass can cost, however
-  # the branches inside it fall.
-  for index in start ..< stop:
-    if code[index].op == MeterOp:
-      result.passInstructions += int64(code[index].b)
-      result.passWork += int64(code[index].a)
+  Home = enum
+    ## Where a value lives.
+    SlotHome,
+    GlobalHome,
+    ArgumentHome,
+    HostHome,
+    CellHome
 
-  # Every backward branch is a place the spending must be looked at. An
-  # inner loop turning under an outer one would otherwise run as long as
-  # it liked between two looks, because the outer header is only reached
-  # once for however many times the inner one goes round. What runs
-  # between two checks then contains no backward branch, so it can charge
-  # no more than one pass, which is what the limit is set against.
-  result.checkpoints[0] = true
-  for index in start ..< stop:
-    var target = 0'i32
-    if code[index].branchTarget(target):
-      if int(target) >= start and int(target) <= index:
-        result.checkpoints[int(target) - start] = true
-  for offset, wanted in result.checkpoints:
-    if wanted and code[start + offset].op != MeterOp:
-      # Nowhere to put the look, so this loop keeps the per-block check.
-      return
-  # Every pass runs the meter at the loop head, so charging at least one
-  # instruction there is what stops a pass from spending nothing and
-  # looping for ever against an unmoving total.
-  result.spending = result.passInstructions > 0 and result.passWork > 0 and
-    code[start].b > 0
-  for index in start ..< stop:
-    if code[index].op == MeterOp:
-      if code[index].b < 0 or code[index].b > MaxChargeImmediate or
-          code[index].a < 0 or code[index].a > MaxChargeImmediate:
-        result.spending = false
-  var
-    instructions = 0'i64
-    work = 0'i64
-  for index in start ..< stop:
-    let item = code[index]
-    result.partialInstructions[index - start] = instructions
-    result.partialWork[index - start] = work
-    if item.op == MeterOp:
-      instructions += int64(item.b)
-      work += int64(item.a)
-    var target = 0'i32
-    if item.branchTarget(target):
-      if index == stop - 1:
-        continue
-      # Any branch back into the loop means the cost of a pass depends on
-      # which way it went, so the count would not be a count.
-      if int(target) >= start and int(target) < stop:
-        return
-  if instructions <= 0 or work <= 0:
-    return
-  result.instructions = instructions
-  result.work = work
-  result.counted = true
+  Place = object
+    ## One value's address, as a home and an index into it.
+    home: Home
+    index: int32
 
-proc pooledConstants(code: seq[Instruction], start, stop, room: int):
-    seq[int64] {.raises: [].} =
-  ## Collects the compare constants worth holding in a register, which are
-  ## the ones too wide for an immediate and so rebuilt on every pass.
-  for index in start ..< stop:
-    let item = code[index]
-    case item.op
-    of JumpUnlessGlobalEqualImmediateOp,
-        JumpUnlessGlobalNotEqualImmediateOp,
-        JumpUnlessGlobalLessImmediateOp,
-        JumpUnlessGlobalLessEqualImmediateOp,
-        JumpUnlessGlobalGreaterImmediateOp,
-        JumpUnlessGlobalGreaterEqualImmediateOp:
-      if item.b >= 0 and item.b <= 4095:
-        continue
-      let value = int64(item.b)
-      if value notin result and result.len < room:
-        result.add(value)
-    else:
-      discard
+  Branching = enum
+    ## Where a slow path carries on once the interpreter's code has run.
+    ToNext,
+    ToOffset
 
-proc anyTarget(item: Instruction, target: var int32): bool {.raises: [].} =
-  ## Reports where an operation can send control, for every operation that
-  ## can send it anywhere. This is wider than the set the code generator
-  ## models: a subroutine call or a register test the generator refuses to
-  ## compile can still name an offset inside a loop it did compile.
-  case item.op
-  of JumpOp, GosubOp, ReturnLabelOp:
-    target = item.a
-    true
-  of JumpIfZeroOp:
-    target = item.b
-    true
-  else:
-    item.branchTarget(target)
+  Check = enum
+    ## An architecture-neutral comparison outcome.
+    EqualCheck,
+    NotEqualCheck,
+    LessCheck,
+    LessEqualCheck,
+    GreaterCheck,
+    GreaterEqualCheck
 
-proc calledRoutine(item: Instruction, id: var int32): bool {.raises: [].} =
-  ## Reports whether an operation calls a routine, and which one.
-  if item.op == CallOp:
-    id = item.a
-    true
-  else:
-    false
+when NativeArm64 or NativeAmd64:
+  type
+    Stub = object
+      ## A slow path, placed after the block its operation sits in.
+      label: Label
+      offset: int32
+      carry: Branching
 
-proc gatherCalled(code: seq[Instruction], members: var seq[int32],
-    covered: var seq[bool], routines: seq[RoutineExtent]): bool
-    {.raises: [].} =
-  ## Grows a region to take in the body of everything it calls, and the
-  ## bodies of everything those call in turn. Returns false if any of it
-  ## cannot be reached or would not fit.
-  var pending = 0
-  while pending < members.len:
-    let offset = int(members[pending])
-    inc pending
-    var id = 0'i32
-    if not code[offset].calledRoutine(id):
-      continue
-    if id < 0 or int(id) >= routines.len:
-      return false
-    let routine = routines[int(id)]
-    if routine.length <= 0 or routine.entry < 0:
-      return false
-    if int(routine.entry) + int(routine.length) > code.len:
-      return false
-    if covered[int(routine.entry)]:
-      continue
-    for step in 0 ..< int(routine.length):
-      let inside = int(routine.entry) + step
-      if covered[inside]:
-        # Two routines cannot share code, so an overlap means the table
-        # says something this does not understand.
-        return false
-      covered[inside] = true
-      members.add(int32(inside))
-  true
+proc slot(index: int32): Place {.inline, raises: [].} =
+  ## Names a register slot in the current frame.
+  Place(home: SlotHome, index: index)
 
-proc reachesOutside(code: seq[Instruction], start, stop: int): bool
-    {.raises: [].} =
-  ## Reports whether the loop can be entered anywhere but its first offset.
-  ## Compiled code proves its globals are integers and loads them into
-  ## registers on the way in, so arriving anywhere else would skip the
-  ## proof and read registers that were never filled.
-  for index in 0 ..< code.len:
-    if index >= start and index < stop:
-      continue
-    var target = 0'i32
-    if code[index].anyTarget(target):
-      if int(target) > start and int(target) < stop:
-        return true
-  false
+proc global(index: int32): Place {.inline, raises: [].} =
+  ## Names a scalar global.
+  Place(home: GlobalHome, index: index)
+
+proc argument(index: int32): Place {.inline, raises: [].} =
+  ## Names a staged call argument.
+  Place(home: ArgumentHome, index: index)
+
+proc host(index: int32): Place {.inline, raises: [].} =
+  ## Names a host data value.
+  Place(home: HostHome, index: index)
+
+proc cell(): Place {.inline, raises: [].} =
+  ## Names the array cell whose address was just worked out.
+  Place(home: CellHome)
+
+proc comparisonCheck(op: Op): Check {.raises: [].} =
+  ## Returns the outcome a comparison answers true on.
+  case op
+  of EqualOp: EqualCheck
+  of NotEqualOp: NotEqualCheck
+  of LessOp: LessCheck
+  of LessEqualOp: LessEqualCheck
+  of GreaterOp: GreaterCheck
+  else: GreaterEqualCheck
+
+proc takenOn(op: Op): Check {.raises: [].} =
+  ## Returns the outcome on which a fused test takes its branch.
+  case op
+  of JumpUnlessGlobalEqualImmediateOp: NotEqualCheck
+  of JumpUnlessGlobalNotEqualImmediateOp: EqualCheck
+  of JumpUnlessGlobalLessImmediateOp: GreaterEqualCheck
+  of JumpUnlessGlobalLessEqualImmediateOp: GreaterCheck
+  of JumpUnlessGlobalGreaterImmediateOp: LessEqualCheck
+  else: LessCheck
 
 when NativeArm64:
   ## AArch64 code generation
   ##
-  ## x0   context pointer, live for the whole region
-  ## x19  base of the globals array
-  ## x20  remaining instruction budget
-  ## x21  remaining work budget
-  ## x22+ hoisted globals, one per entry in the region's list
-  ## x9, x10  scratch;  x11, x12  resume offset and status
+  ## x19  context            x20  instruction budget   x21  work budget
+  ## x22  globals            x23  current frame        x24  offset table
+  ## x25  array cells        x26  arguments            x27  frames
+  ## x28  register file
+  ## x9 .. x15  working registers;  x16  far addresses;  x17  one cell
+  ##
+  ## Everything long lived sits in a register the platform's convention
+  ## keeps across a call, so calling back into the interpreter's code
+  ## costs no saving beyond the two budgets it may charge.
 
   const
-    Context = x0
-    GlobalsBase = x19
+    Context = x19
     Instructions = x20
     Work = x21
-    FirstHoisted = 22
-    Scratch = x9
-    OtherScratch = x10
-    ResumeOffset = x11
-    ResumeStatus = x12
-    Counter = x13
-    Allowance = x14
-    RegistersBase = x15
-    ValueScratch = [x16, x17]
-    SpentInstructions = x5
-    SpentWork = x6
-    LimitInstructions = x7
-    LimitWork = x8
-    FirstPooled = 1
-    FrameBytes = 112
-    ## Where the context and the frame base are kept while host code runs,
-    ## both of them being registers a callee is free to use.
-    AcrossHostCall = 96
-    MaxDisplacement = 4095
+    GlobalsBase = x22
+    RegistersBase = x23
+    TableBase = x24
+    MemoryBase = x25
+    ArgumentsBase = x26
+    FramesBase = x27
+    FileBase = x28
+    Temps = [x9, x10, x11, x12, x13, x14, x15]
+    Far = x16
+    Cell = x17
+    FrameBytes = 96
+    NearBytes = 4095 - ValuePayload
 
-  const MaxPooled* = 4
+  proc temp(index: int): Register {.inline, raises: [].} =
+    ## Returns one working register.
+    Temps[index]
 
-  proc pooledRegister(slot: int): Register {.raises: [].} =
-    ## Returns the caller-saved register holding one hoisted constant.
-    Register(uint32(FirstPooled + slot))
+  proc nativeCondition(check: Check): Condition {.raises: [].} =
+    ## Maps a neutral outcome onto the architecture's encoding.
+    case check
+    of EqualCheck: EqualCondition
+    of NotEqualCheck: NotEqualCondition
+    of LessCheck: LessCondition
+    of LessEqualCheck: LessEqualCondition
+    of GreaterCheck: GreaterCondition
+    of GreaterEqualCheck: GreaterEqualCondition
 
-  proc loadPooled(emitter: var Assembler, slot: int, value: int64)
-      {.raises: [BasicError].} =
-    ## Materializes a loop-invariant constant once, before the loop.
-    emitter.loadImmediate(Word32, pooledRegister(slot), value)
+  proc inverse(condition: Condition): Condition {.raises: [].} =
+    ## Returns the condition that holds exactly when this one does not.
+    Condition(ord(condition) xor 1)
 
-  proc slotRegister(slot: int): Register {.raises: [].} =
-    ## Returns the callee-saved register holding one hoisted global.
-    Register(uint32(FirstHoisted + slot))
+  type
+    Emitter = object
+      ## The assembler plus whether branches must reach anywhere at all.
+      code: Assembler
+      far: bool
 
-  proc nativeCondition(test: Test): Condition {.raises: [].} =
-    ## Maps a neutral condition onto the architecture's encoding.
-    case test
-    of EqualTest: EqualCondition
-    of NotEqualTest: NotEqualCondition
-    of LessTest: LessCondition
-    of LessEqualTest: LessEqualCondition
-    of GreaterTest: GreaterCondition
-    of GreaterEqualTest: GreaterEqualCondition
+  proc label(e: var Emitter): Label {.inline, raises: [].} =
+    ## Reserves a label.
+    e.code.label()
 
-  proc branchWhen(emitter: var Assembler, test: Test, target: Label)
+  proc place(e: var Emitter, target: Label) {.inline, raises: [].} =
+    ## Places a label here.
+    e.code.place(target)
+
+  proc jump(e: var Emitter, target: Label) {.raises: [].} =
+    ## Jumps unconditionally.
+    e.code.branch(target)
+
+  proc jumpWhen(e: var Emitter, condition: Condition, target: Label)
       {.raises: [].} =
-    ## Branches when the neutral condition holds.
-    emitter.branchIf(nativeCondition(test), target)
-
-  proc startRegion(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Saves callee-saved registers and loads the interpreter state.
-    emitter.storePair(
-      framePointer, linkRegister, stackPointer, -FrameBytes, true
-    )
-    emitter.storePair(x19, x20, stackPointer, 16)
-    emitter.storePair(x21, x22, stackPointer, 32)
-    emitter.storePair(x23, x24, stackPointer, 48)
-    emitter.storePair(x25, x26, stackPointer, 64)
-    emitter.storePair(x27, x28, stackPointer, 80)
-    emitter.loadDouble(GlobalsBase, Context, 0)
-    emitter.loadDouble(Instructions, Context, ContextInstructions)
-    emitter.loadDouble(Work, Context, ContextWork)
-
-  proc endRegion(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Restores callee-saved registers and returns to the interpreter.
-    emitter.loadPair(x19, x20, stackPointer, 16)
-    emitter.loadPair(x21, x22, stackPointer, 32)
-    emitter.loadPair(x23, x24, stackPointer, 48)
-    emitter.loadPair(x25, x26, stackPointer, 64)
-    emitter.loadPair(x27, x28, stackPointer, 80)
-    emitter.loadPair(
-      framePointer, linkRegister, stackPointer, FrameBytes, true
-    )
-    emitter.returnToCaller()
-
-  proc guardInteger(emitter: var Assembler, base: int, failed: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the region unless the global at this offset holds an integer.
-    emitter.loadByte(Scratch, GlobalsBase, base)
-    emitter.branchIfNotZero(Word32, Scratch, failed)
-
-  proc loadHoisted(emitter: var Assembler, slot: int, base: int)
-      {.raises: [BasicError].} =
-    ## Reads one global into its register.
-    emitter.loadWord(slotRegister(slot), GlobalsBase, base + ValuePayload)
-
-  proc storeHoisted(emitter: var Assembler, slot: int, base: int)
-      {.raises: [BasicError].} =
-    ## Publishes one register back as an integer value.
-    emitter.storeByte(zeroRegister, GlobalsBase, base)
-    emitter.storeWord(slotRegister(slot), GlobalsBase, base + ValuePayload)
-
-  proc setSlot(emitter: var Assembler, slot: int, value: int32)
-      {.raises: [BasicError].} =
-    ## Loads a constant into a hoisted register.
-    emitter.loadImmediate(Word32, slotRegister(slot), int64(value))
-
-  proc copySlot(emitter: var Assembler, destination, source: int)
-      {.raises: [BasicError].} =
-    ## Copies one hoisted register into another.
-    emitter.moveRegister(
-      Word32, slotRegister(destination), slotRegister(source)
-    )
-
-  proc addSlots(emitter: var Assembler, destination, source: int)
-      {.raises: [BasicError].} =
-    ## Adds one hoisted register into another, wrapping on overflow.
-    let target = slotRegister(destination)
-    emitter.addRegister(Word32, target, target, slotRegister(source))
-
-  proc addToSlot(emitter: var Assembler, slot: int, value: int32)
-      {.raises: [BasicError].} =
-    ## Adds a constant to a hoisted register, wrapping on overflow.
-    let target = slotRegister(slot)
-    if value >= 0 and value <= MaxDisplacement:
-      emitter.addImmediate(Word32, target, target, int(value))
-    elif value < 0 and value >= -MaxDisplacement:
-      emitter.subtractImmediate(Word32, target, target, int(-value))
+    ## Jumps when a condition holds, however far away the target is.
+    if e.far:
+      let skip = e.code.label()
+      e.code.branchIf(condition.inverse, skip)
+      e.code.branch(target)
+      e.code.place(skip)
     else:
-      emitter.loadImmediate(Word32, Scratch, int64(value))
-      emitter.addRegister(Word32, target, target, Scratch)
+      e.code.branchIf(condition, target)
 
-  proc compareSlot(emitter: var Assembler, slot: int, value: int32,
-      pooled = -1) {.raises: [BasicError].} =
-    ## Sets flags from a hoisted register against a constant, using the
-    ## register that already holds it when the loop has one.
-    let target = slotRegister(slot)
-    if pooled >= 0:
-      emitter.compareRegister(Word32, target, pooledRegister(pooled))
-    elif value >= 0 and value <= MaxDisplacement:
-      emitter.compareImmediate(Word32, target, int(value))
+  proc jumpIfZero(e: var Emitter, register: Register, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds zero.
+    if e.far:
+      let skip = e.code.label()
+      e.code.branchIfNotZero(Word32, register, skip)
+      e.code.branch(target)
+      e.code.place(skip)
     else:
-      emitter.loadImmediate(Word32, Scratch, int64(value))
-      emitter.compareRegister(Word32, target, Scratch)
+      e.code.branchIfZero(Word32, register, target)
 
-  proc loadRegistersBase(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Points at the first slot of the frame the region runs in.
-    emitter.loadDouble(RegistersBase, Context, ContextRegisters)
+  proc jumpIfNotZero(e: var Emitter, register: Register, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds anything but zero.
+    if e.far:
+      let skip = e.code.label()
+      e.code.branchIfZero(Word32, register, skip)
+      e.code.branch(target)
+      e.code.place(skip)
+    else:
+      e.code.branchIfNotZero(Word32, register, target)
 
-  proc readSlot(emitter: var Assembler, scratch: int, slot: int32,
-      leave: Label) {.raises: [BasicError].} =
-    ## Reads one register slot as an integer, leaving the region if it
-    ## holds anything else. The tag is read into the same register the
-    ## value will land in, so no third register is needed.
-    let target = ValueScratch[scratch]
-    let base = int(slot) * ValueStride
-    emitter.loadByte(target, RegistersBase, base)
-    emitter.branchIfNotZero(Word32, target, leave)
-    emitter.loadWord(target, RegistersBase, base + ValuePayload)
-
-  proc writeSlot(emitter: var Assembler, scratch: int, slot: int32)
+  proc reach(e: var Emitter, place: Place): (Register, int)
       {.raises: [BasicError].} =
-    ## Writes one register slot as an integer.
-    let base = int(slot) * ValueStride
-    emitter.storeByte(zeroRegister, RegistersBase, base)
-    emitter.storeWord(ValueScratch[scratch], RegistersBase,
-      base + ValuePayload)
+    ## Returns a base register and byte offset for a value, working the
+    ## address out in full when the offset is too wide to encode.
+    var base = Cell
+    case place.home
+    of SlotHome: base = RegistersBase
+    of GlobalHome: base = GlobalsBase
+    of ArgumentHome: base = ArgumentsBase
+    of HostHome:
+      e.code.loadDouble(Cell, Context, ContextHostData)
+    of CellHome:
+      return (Cell, 0)
+    let offset = int(place.index) * ValueStride
+    if offset <= NearBytes:
+      return (base, offset)
+    e.code.loadImmediate(Word64, Far, int64(offset))
+    e.code.addRegister(Word64, Far, base, Far)
+    (Far, 0)
 
-  proc setScratch(emitter: var Assembler, scratch: int, value: int32)
+  proc readValue(e: var Emitter, value, tag: int, place: Place)
       {.raises: [BasicError].} =
+    ## Reads a value's kind and its 32-bit payload.
+    let (base, offset) = e.reach(place)
+    e.code.loadByte(temp(tag), base, offset)
+    e.code.loadWord(temp(value), base, offset + ValuePayload)
+
+  proc writeWhole(e: var Emitter, place: Place, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a whole number.
+    let (base, offset) = e.reach(place)
+    e.code.storeByte(zeroRegister, base, offset)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeKind(e: var Emitter, place: Place, tag, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a payload under the kind held in a working register.
+    let (base, offset) = e.reach(place)
+    e.code.storeByte(temp(tag), base, offset)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeFixed(e: var Emitter, place: Place, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a fixed-point payload.
+    let (base, offset) = e.reach(place)
+    e.code.loadImmediate(Word32, temp(5), FixedTag)
+    e.code.storeByte(temp(5), base, offset)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeConstant(e: var Emitter, place: Place, tag: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Writes a constant of a known kind.
+    e.code.loadImmediate(Word32, temp(6), int64(bits))
+    let (base, offset) = e.reach(place)
+    if tag == 0:
+      e.code.storeByte(zeroRegister, base, offset)
+    else:
+      e.code.loadImmediate(Word32, temp(5), int64(tag))
+      e.code.storeByte(temp(5), base, offset)
+    e.code.storeWord(temp(6), base, offset + ValuePayload)
+
+  proc copyValue(e: var Emitter, destination, source: Place)
+      {.raises: [BasicError].} =
+    ## Copies a value entire, whatever kind it holds, as the interpreter
+    ## does.
+    let (fromBase, fromOffset) = e.reach(source)
+    e.code.loadDouble(temp(5), fromBase, fromOffset)
+    e.code.loadDouble(temp(6), fromBase, fromOffset + ValuePayload)
+    let (toBase, toOffset) = e.reach(destination)
+    e.code.storeDouble(temp(5), toBase, toOffset)
+    e.code.storeDouble(temp(6), toBase, toOffset + ValuePayload)
+
+  proc unlessWhole(e: var Emitter, tag: int, slow: Label)
+      {.raises: [].} =
+    ## Takes the slow path unless a kind says whole number.
+    e.jumpIfNotZero(temp(tag), slow)
+
+  proc unlessNumeric(e: var Emitter, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless a kind says number of either sort.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(UnsignedGreaterCondition, slow)
+
+  proc unlessSame(e: var Emitter, tag, other: int, slow: Label)
+      {.raises: [].} =
+    ## Takes the slow path unless two kinds agree.
+    e.code.compareRegister(Word32, temp(tag), temp(other))
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc whenFixed(e: var Emitter, tag: int, target: Label)
+      {.raises: [BasicError].} =
+    ## Jumps when a kind says fixed point.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.code.branchIf(EqualCondition, target)
+
+  proc loadConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [].} =
     ## Loads a constant into a working register.
-    emitter.loadImmediate(Word32, ValueScratch[scratch], int64(value))
+    e.code.loadImmediate(Word32, temp(value), int64(bits))
 
-  proc addScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Adds the second working register into the first, wrapping.
-    emitter.addRegister(Word32, ValueScratch[left], ValueScratch[left],
-      ValueScratch[right])
+  proc add(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Adds, wrapping.
+    e.code.addRegister(Word32, temp(left), temp(left), temp(right))
 
-  proc subtractScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Subtracts the second working register from the first, wrapping.
-    emitter.subtractRegister(Word32, ValueScratch[left], ValueScratch[left],
-      ValueScratch[right])
+  proc subtract(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Subtracts, wrapping.
+    e.code.subtractRegister(Word32, temp(left), temp(left), temp(right))
 
-  proc multiplyScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Multiplies the first working register by the second, wrapping.
-    emitter.multiply(Word32, ValueScratch[left], ValueScratch[left],
-      ValueScratch[right])
+  proc multiply(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Multiplies, wrapping.
+    e.code.multiply(Word32, temp(left), temp(left), temp(right))
 
-  proc negateScratch(emitter: var Assembler, scratch: int)
-      {.raises: [BasicError].} =
-    ## Replaces a working register with its negation, wrapping.
-    emitter.negate(Word32, ValueScratch[scratch], ValueScratch[scratch])
+  proc negate(e: var Emitter, value: int) {.raises: [].} =
+    ## Negates, wrapping.
+    e.code.negate(Word32, temp(value), temp(value))
 
-  proc compareScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Sets flags from two working registers.
-    emitter.compareRegister(Word32, ValueScratch[left], ValueScratch[right])
+  proc bitAnd(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits both hold.
+    e.code.andRegister(Word32, temp(left), temp(left), temp(right))
 
-  proc answerCondition(emitter: var Assembler, scratch: int, test: Test)
-      {.raises: [BasicError].} =
-    ## Writes BASIC's -1 for true and zero for false.
-    emitter.setOnCondition(Word32, ValueScratch[scratch],
-      nativeCondition(test))
+  proc bitOr(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits either holds.
+    e.code.orRegister(Word32, temp(left), temp(left), temp(right))
 
-  proc scratchFromHoisted(emitter: var Assembler, scratch, slot: int)
-      {.raises: [BasicError].} =
-    ## Copies a hoisted global into a working register.
-    emitter.moveRegister(Word32, ValueScratch[scratch], slotRegister(slot))
+  proc bitXor(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits exactly one holds.
+    e.code.xorRegister(Word32, temp(left), temp(left), temp(right))
 
-  proc hoistedFromScratch(emitter: var Assembler, slot, scratch: int)
-      {.raises: [BasicError].} =
-    ## Copies a working register into a hoisted global.
-    emitter.moveRegister(Word32, slotRegister(slot), ValueScratch[scratch])
+  proc bitNot(e: var Emitter, value: int) {.raises: [].} =
+    ## Flips every bit.
+    e.code.notRegister(Word32, temp(value), temp(value))
 
-  proc branchIfScratchZero(emitter: var Assembler, scratch: int,
-      target: Label) {.raises: [BasicError].} =
-    ## Branches when a working register holds zero.
-    emitter.branchIfZero(Word32, ValueScratch[scratch], target)
+  proc quotient(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Divides toward zero; the divisor is known not to be zero. The most
+    ## negative number over minus one wraps back to itself here, which is
+    ## the answer the interpreter defines.
+    e.code.signedDivide(Word32, temp(left), temp(left), temp(right))
 
-  proc readNumeric(emitter: var Assembler, scratch: int, slot: int32,
-      leave: Label) {.raises: [BasicError].} =
-    ## Reads a slot's tag into Scratch and its payload into a working
-    ## register, leaving the region for anything that is not a number.
-    let base = int(slot) * ValueStride
-    emitter.loadByte(Scratch, RegistersBase, base)
-    emitter.compareImmediate(Word32, Scratch, FixedTag)
-    emitter.branchIf(UnsignedGreaterCondition, leave)
-    emitter.loadWord(ValueScratch[scratch], RegistersBase,
-      base + ValuePayload)
+  proc remainder(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Leaves what dividing left over, with the sign of the dividend.
+    e.code.signedDivide(Word32, temp(6), temp(left), temp(right))
+    e.code.multiplySubtract(Word32, temp(left), temp(6), temp(right),
+      temp(left))
 
-  proc requireSameKind(emitter: var Assembler, slot: int32, leave: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the region unless a second slot carries the same tag as the
-    ## one already held. Whole numbers and fixed-point ones add, subtract
-    ## and compare through the very same instructions, so a pair that
-    ## agrees needs no further telling apart; a mixed pair would have to
-    ## be promoted, which can fail, so it goes back to the interpreter.
-    emitter.loadByte(OtherScratch, RegistersBase, int(slot) * ValueStride)
-    emitter.compareRegister(Word32, Scratch, OtherScratch)
-    emitter.branchIf(NotEqualCondition, leave)
-
-  proc writeNumeric(emitter: var Assembler, scratch: int, slot: int32)
-      {.raises: [BasicError].} =
-    ## Writes a payload back under the tag the operands carried.
-    let base = int(slot) * ValueStride
-    emitter.storeByte(Scratch, RegistersBase, base)
-    emitter.storeWord(ValueScratch[scratch], RegistersBase,
-      base + ValuePayload)
-
-  proc branchIfFixed(emitter: var Assembler, target: Label)
-      {.raises: [BasicError].} =
-    ## Branches when the held tag says fixed point.
-    emitter.compareImmediate(Word32, Scratch, FixedTag)
-    emitter.branchIf(EqualCondition, target)
-
-  proc requireWholeKind(emitter: var Assembler, leave: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the region unless the held tag says whole number.
-    emitter.compareImmediate(Word32, Scratch, 0)
-    emitter.branchIf(NotEqualCondition, leave)
-
-  proc readSlotValue(emitter: var Assembler, scratch: int, slot: int32)
-      {.raises: [BasicError].} =
-    ## Reads a slot's payload, its tag having already been established.
-    emitter.loadWord(ValueScratch[scratch], RegistersBase,
-      int(slot) * ValueStride + ValuePayload)
-
-  proc guardDivisor(emitter: var Assembler, scratch: int, leave: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the region for the two divisors that are not plain division:
-    ## zero, which the interpreter refuses, and minus one, which the other
-    ## architecture traps on.
-    emitter.compareImmediate(Word32, ValueScratch[scratch], 0)
-    emitter.branchIf(EqualCondition, leave)
-    emitter.loadImmediate(Word32, OtherScratch, -1)
-    emitter.compareRegister(Word32, ValueScratch[scratch], OtherScratch)
-    emitter.branchIf(EqualCondition, leave)
-
-  proc quotientScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Divides the first working register by the second, toward zero.
-    emitter.signedDivide(Word32, ValueScratch[left], ValueScratch[left],
-      ValueScratch[right])
-
-  proc remainderScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Leaves what the division of the two working registers left over.
-    emitter.signedDivide(Word32, OtherScratch, ValueScratch[left],
-      ValueScratch[right])
-    emitter.multiplySubtract(Word32, ValueScratch[left], OtherScratch,
-      ValueScratch[right], ValueScratch[left])
-
-  proc multiplyFixed(emitter: var Assembler, left, right: int)
+  proc multiplyFixed(e: var Emitter, left, right: int)
       {.raises: [BasicError].} =
     ## Multiplies two Q16.16 numbers through a widened intermediate,
     ## rounding to nearest exactly as the fixed-point library does.
-    emitter.signedMultiplyLong(OtherScratch, ValueScratch[left],
-      ValueScratch[right])
-    emitter.loadImmediate(Word64, ValueScratch[right], FixedRounding)
-    emitter.addRegister(Word64, OtherScratch, OtherScratch,
-      ValueScratch[right])
-    emitter.arithmeticShiftRight(Word64, OtherScratch, OtherScratch,
-      FixedShift)
-    emitter.moveRegister(Word32, ValueScratch[left], OtherScratch)
+    e.code.signedMultiplyLong(temp(left), temp(left), temp(right))
+    e.code.loadImmediate(Word64, temp(6), FixedRounding)
+    e.code.addRegister(Word64, temp(left), temp(left), temp(6))
+    e.code.arithmeticShiftRight(Word64, temp(left), temp(left), FixedShift)
+    e.code.moveRegister(Word32, temp(left), temp(left))
 
-  proc elementAddress(emitter: var Assembler, scratch: int,
-      extent: ArrayExtent, leave: Label) {.raises: [BasicError].} =
-    ## Bounds checks an index and leaves the cell's address in Scratch.
-    ## One unsigned comparison covers both ends, exactly as the
-    ## interpreter's does, and a refusal hands the offset back so the
-    ## interpreter can raise with the array's own name.
-    let index = ValueScratch[scratch]
-    emitter.loadImmediate(Word32, OtherScratch, int64(extent.length))
-    emitter.compareRegister(Word32, index, OtherScratch)
-    emitter.branchIf(CarrySetCondition, leave)
-    emitter.loadImmediate(Word32, OtherScratch, int64(extent.base))
-    emitter.addRegister(Word32, OtherScratch, OtherScratch, index)
-    emitter.loadDouble(Scratch, Context, ContextMemory)
-    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch, 4)
-
-  proc copyElementToSlot(emitter: var Assembler, slot: int32)
-      {.raises: [BasicError].} =
-    ## Copies a whole cell into a register slot, whatever it holds. The
-    ## interpreter copies the value entire, so this does too, and neither
-    ## needs to know what kind it is.
-    let base = int(slot) * ValueStride
-    emitter.loadDouble(ValueScratch[0], Scratch, 0)
-    emitter.loadDouble(ValueScratch[1], Scratch, ValuePayload)
-    emitter.storeDouble(ValueScratch[0], RegistersBase, base)
-    emitter.storeDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
-
-  proc copySlotToElement(emitter: var Assembler, slot: int32)
-      {.raises: [BasicError].} =
-    ## Copies a whole register slot into a cell, whatever it holds.
-    let base = int(slot) * ValueStride
-    emitter.loadDouble(ValueScratch[0], RegistersBase, base)
-    emitter.loadDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
-    emitter.storeDouble(ValueScratch[0], Scratch, 0)
-    emitter.storeDouble(ValueScratch[1], Scratch, ValuePayload)
-
-  proc readElement(emitter: var Assembler, scratch: int, leave: Label)
-      {.raises: [BasicError].} =
-    ## Reads a cell as an integer, leaving the region if it holds else.
-    let target = ValueScratch[scratch]
-    emitter.loadByte(target, Scratch, 0)
-    emitter.branchIfNotZero(Word32, target, leave)
-    emitter.loadWord(target, Scratch, ValuePayload)
-
-  proc writeElement(emitter: var Assembler, scratch: int)
-      {.raises: [BasicError].} =
-    ## Writes a cell as an integer.
-    emitter.storeByte(zeroRegister, Scratch, 0)
-    emitter.storeWord(ValueScratch[scratch], Scratch, ValuePayload)
-
-  proc beginCountedLoop(emitter: var Assembler, instructions, work: int64,
-      refused: Label) {.raises: [BasicError].} =
-    ## Settles the whole loop's budget once: how many passes both budgets
-    ## can certainly afford. One pass is held back so that the pass which
-    ## finally leaves the loop, charging up to a full pass on the way out,
-    ## still cannot overrun.
-    emitter.loadImmediate(Word64, Scratch, instructions)
-    emitter.signedDivide(Word64, Allowance, Instructions, Scratch)
-    emitter.loadImmediate(Word64, Scratch, work)
-    emitter.signedDivide(Word64, OtherScratch, Work, Scratch)
-    let smaller = emitter.label()
-    emitter.compareRegister(Word64, Allowance, OtherScratch)
-    emitter.branchIf(LessEqualCondition, smaller)
-    emitter.moveRegister(Word64, Allowance, OtherScratch)
-    emitter.place(smaller)
-    emitter.subtractImmediate(Word64, Allowance, Allowance, 1)
-    # Fewer than one affordable pass means the loop must go back to the
-    # interpreter, which alone can refuse the budget at the right place.
-    # Accepting zero here would hand the same offset back for ever.
-    emitter.compareImmediate(Word64, Allowance, 1)
-    emitter.branchIf(LessCondition, refused)
-    emitter.loadImmediate(Word64, Counter, 0)
-
-  proc checkCounter(emitter: var Assembler, handBack: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the loop once the settled number of passes is used up.
-    emitter.compareRegister(Word64, Counter, Allowance)
-    emitter.branchIf(GreaterEqualCondition, handBack)
-
-  proc advanceCounter(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Records that one more pass finished.
-    emitter.addImmediate(Word64, Counter, Counter, 1)
-
-  proc beginSpendingLoop(emitter: var Assembler,
-      passInstructions, passWork: int64, refused: Label)
-      {.raises: [BasicError].} =
-    ## Prepares a loop whose passes differ in cost. Rather than refusing
-    ## the budget block by block, the loop adds up what it spends and asks
-    ## once a pass whether another pass could still be afforded outright.
-    emitter.loadImmediate(Word64, SpentInstructions, 0)
-    emitter.loadImmediate(Word64, SpentWork, 0)
-    emitter.loadImmediate(Word64, Scratch, passInstructions)
-    emitter.subtractRegister(
-      Word64, LimitInstructions, Instructions, Scratch
-    )
-    emitter.loadImmediate(Word64, Scratch, passWork)
-    emitter.subtractRegister(Word64, LimitWork, Work, Scratch)
-    emitter.compareImmediate(Word64, LimitInstructions, 0)
-    emitter.branchIf(LessCondition, refused)
-    emitter.compareImmediate(Word64, LimitWork, 0)
-    emitter.branchIf(LessCondition, refused)
-
-  proc checkSpending(emitter: var Assembler, handBack: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the loop while another whole pass is still certainly afforded.
-    emitter.compareRegister(Word64, SpentInstructions, LimitInstructions)
-    emitter.branchIf(GreaterCondition, handBack)
-    emitter.compareRegister(Word64, SpentWork, LimitWork)
-    emitter.branchIf(GreaterCondition, handBack)
-
-  proc recordSpending(emitter: var Assembler, instructions, work: int64)
-      {.raises: [BasicError].} =
-    ## Adds one block's charge, with nothing to test and nowhere to branch.
-    emitter.addImmediate(
-      Word64, SpentInstructions, SpentInstructions, int(instructions)
-    )
-    emitter.addImmediate(Word64, SpentWork, SpentWork, int(work))
-
-  proc chargeSpending(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Hands back exactly what the passes added up to.
-    emitter.subtractRegister(
-      Word64, Instructions, Instructions, SpentInstructions
-    )
-    emitter.subtractRegister(Word64, Work, Work, SpentWork)
-
-  proc chargeCounted(emitter: var Assembler, instructions, work: int64,
-      partialInstructions, partialWork: int64) {.raises: [BasicError].} =
-    ## Charges whole passes plus however far the last one got.
-    emitter.loadImmediate(Word64, Scratch, instructions)
-    emitter.loadImmediate(Word64, OtherScratch, partialInstructions)
-    emitter.multiplyAdd(Word64, Scratch, Counter, Scratch, OtherScratch)
-    emitter.subtractRegister(Word64, Instructions, Instructions, Scratch)
-    emitter.loadImmediate(Word64, Scratch, work)
-    emitter.loadImmediate(Word64, OtherScratch, partialWork)
-    emitter.multiplyAdd(Word64, Scratch, Counter, Scratch, OtherScratch)
-    emitter.subtractRegister(Word64, Work, Work, Scratch)
-
-  proc lowBitCount(divisor: int32): int {.raises: [].} =
-    ## Returns how many low bits decide divisibility, when the divisor is
-    ## a power of two and so only those bits matter.
-    var magnitude = int64(divisor)
-    if magnitude < 0:
-      magnitude = -magnitude
-    if magnitude < 2 or (magnitude and (magnitude - 1)) != 0:
-      return 0
-    while magnitude > 1:
-      magnitude = magnitude shr 1
-      inc result
-
-  proc remainderTest(emitter: var Assembler, slot: int, divisor: int32)
-      {.raises: [BasicError].} =
-    ## Sets flags so NotEqualTest means the remainder is not zero.
-    let source = slotRegister(slot)
-    # Truncating division leaves no remainder against a power of two
-    # exactly when the low bits are clear, for negative values as well, so
-    # a bit test stands in for a divide and a multiply.
-    let bits = lowBitCount(divisor)
-    if bits > 0:
-      emitter.testLowBits(Word32, source, bits)
-      return
-    emitter.loadImmediate(Word32, Scratch, int64(divisor))
-    emitter.signedDivide(Word32, OtherScratch, source, Scratch)
-    emitter.multiplySubtract(
-      Word32, OtherScratch, OtherScratch, Scratch, source
-    )
-    emitter.compareImmediate(Word32, OtherScratch, 0)
-
-  proc budgetGate(emitter: var Assembler, instructionCount, workCost: int64,
-      short: Label) {.raises: [BasicError].} =
-    ## Checks both budgets before charging either, as the interpreter does.
-    emitter.loadImmediate(Word64, Scratch, instructionCount)
-    emitter.compareRegister(Word64, Instructions, Scratch)
-    emitter.branchIf(LessCondition, short)
-    emitter.loadImmediate(Word64, OtherScratch, workCost)
-    emitter.compareRegister(Word64, Work, OtherScratch)
-    emitter.branchIf(LessCondition, short)
-    emitter.subtractRegister(Word64, Instructions, Instructions, Scratch)
-    emitter.subtractRegister(Word64, Work, Work, OtherScratch)
-
-  proc exitStub(emitter: var Assembler, offset: int32, status: int32,
-      writeback: Label) {.raises: [BasicError].} =
-    ## Names the resume offset and status, then joins the shared exit.
-    emitter.loadImmediate(Word32, ResumeOffset, int64(offset))
-    emitter.loadImmediate(Word32, ResumeStatus, int64(status))
-    emitter.branch(writeback)
-
-  proc publishState(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Writes the budgets, the resume offset, and the status.
-    emitter.storeDouble(Instructions, Context, ContextInstructions)
-    emitter.storeDouble(Work, Context, ContextWork)
-    emitter.storeWord(ResumeOffset, Context, ContextOffset)
-    emitter.moveRegister(Word32, Context, ResumeStatus)
-
-  proc guardExit(emitter: var Assembler, start: int32)
-      {.raises: [BasicError].} =
-    ## Hands the loop back untouched after a failed guard.
-    emitter.loadImmediate(Word32, ResumeOffset, int64(start))
-    emitter.storeWord(ResumeOffset, Context, ContextOffset)
-    emitter.loadImmediate(Word32, Context, int64(ord(NativeGuardFailed)))
-    emitter.endRegion()
-  proc setSlotConstant(emitter: var Assembler, slot: int32, tag: int,
-      bits: int32) {.raises: [BasicError].} =
-    ## Writes a constant of a known kind straight into a slot.
-    let base = int(slot) * ValueStride
-    emitter.loadImmediate(Word32, Scratch, int64(tag))
-    emitter.storeByte(Scratch, RegistersBase, base)
-    emitter.loadImmediate(Word32, ValueScratch[0], int64(bits))
-    emitter.storeWord(ValueScratch[0], RegistersBase, base + ValuePayload)
-  ## Calls
-  ##
-  ## Nothing is called in the machine's sense: the frame goes into the
-  ## interpreter's own array, the base and depth into its own fields, and
-  ## control simply jumps to the callee's compiled code. Every piece of
-  ## state a call moves therefore stays where the interpreter looks for
-  ## it, so leaving part way through a call costs nothing to arrange.
-
-  proc stageArgumentFromSlot(emitter: var Assembler, index: int32,
-      slot: int32) {.raises: [BasicError].} =
-    ## Copies a slot into an argument, entire, whatever kind it holds.
-    emitter.loadDouble(Scratch, Context, ContextArguments)
-    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
-    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
-    emitter.copySlotToElement(slot)
-
-  proc stageArgumentWhole(emitter: var Assembler, index: int32,
-      value: int32) {.raises: [BasicError].} =
-    ## Writes a whole number straight into an argument.
-    emitter.loadDouble(Scratch, Context, ContextArguments)
-    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
-    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
-    emitter.storeByte(zeroRegister, Scratch, 0)
-    emitter.loadImmediate(Word32, ValueScratch[0], int64(value))
-    emitter.storeWord(ValueScratch[0], Scratch, ValuePayload)
-
-  proc stageArgumentFromHoisted(emitter: var Assembler, index: int32,
-      slot: int) {.raises: [BasicError].} =
-    ## Writes a hoisted global into an argument, always a whole number
-    ## because every hoisted global was proved to be one on the way in.
-    emitter.loadDouble(Scratch, Context, ContextArguments)
-    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
-    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
-    emitter.storeByte(zeroRegister, Scratch, 0)
-    emitter.storeWord(slotRegister(slot), Scratch, ValuePayload)
-
-  proc enterRoutine(emitter: var Assembler, callee: RoutineExtent,
-      calleeId, callerRegisters, resumeAt: int32, limits: CallLimits,
-      leave: Label) {.raises: [BasicError].} =
-    ## Pushes a frame and moves to the callee, refusing the same two
-    ## ceilings the interpreter refuses.
-    emitter.loadWord(Scratch, Context, ContextDepth)
-    emitter.loadImmediate(Word32, OtherScratch, int64(limits.frames) - 1)
-    emitter.compareRegister(Word32, Scratch, OtherScratch)
-    emitter.branchIf(GreaterEqualCondition, leave)
-
-    emitter.loadWord(OtherScratch, Context, ContextBase)
-    emitter.moveRegister(Word32, ValueScratch[0], OtherScratch)
-    if callerRegisters > 0:
-      emitter.addImmediate(Word32, ValueScratch[0], ValueScratch[0],
-        int(callerRegisters))
-    emitter.loadImmediate(Word32, ValueScratch[1],
-      int64(limits.slots) - int64(callee.registers))
-    emitter.compareRegister(Word32, ValueScratch[0], ValueScratch[1])
-    emitter.branchIf(GreaterCondition, leave)
-
-    # frames[depth] = { base, routine, resumeAt, SubFrame }
-    emitter.loadDouble(ValueScratch[1], Context, ContextFrames)
-    emitter.addRegister(Word64, ValueScratch[1], ValueScratch[1], Scratch, 4)
-    emitter.storeWord(OtherScratch, ValueScratch[1], FrameBase)
-    emitter.loadWord(OtherScratch, Context, ContextRoutine)
-    emitter.storeWord(OtherScratch, ValueScratch[1], FrameRoutine)
-    emitter.loadImmediate(Word32, OtherScratch, int64(resumeAt))
-    emitter.storeWord(OtherScratch, ValueScratch[1], FrameReturn)
-    emitter.storeWord(zeroRegister, ValueScratch[1], FrameTag)
-
-    emitter.addImmediate(Word32, Scratch, Scratch, 1)
-    emitter.storeWord(Scratch, Context, ContextDepth)
-    emitter.storeWord(ValueScratch[0], Context, ContextBase)
-    emitter.loadImmediate(Word32, OtherScratch, int64(calleeId))
-    emitter.storeWord(OtherScratch, Context, ContextRoutine)
-
-    emitter.loadDouble(OtherScratch, Context, ContextRegisterFile)
-    emitter.addRegister(Word64, RegistersBase, OtherScratch,
-      ValueScratch[0], 4)
-
-    # The interpreter clears the callee's slots and then lays the
-    # arguments over the first few, so this does the same in that order.
-    for slot in 0 ..< int(callee.registers):
-      emitter.storeDouble(zeroRegister, RegistersBase, slot * ValueStride)
-      emitter.storeDouble(zeroRegister, RegistersBase,
-        slot * ValueStride + ValuePayload)
-    if callee.parameters > 0:
-      emitter.loadDouble(Scratch, Context, ContextArguments)
-      for slot in 0 ..< int(callee.parameters):
-        emitter.loadDouble(ValueScratch[0], Scratch, slot * ValueStride)
-        emitter.loadDouble(ValueScratch[1], Scratch,
-          slot * ValueStride + ValuePayload)
-        emitter.storeDouble(ValueScratch[0], RegistersBase,
-          slot * ValueStride)
-        emitter.storeDouble(ValueScratch[1], RegistersBase,
-          slot * ValueStride + ValuePayload)
-
-  proc resumeAtStoredOffset(emitter: var Assembler,
-      hoistedFor: seq[int32]) {.raises: [BasicError].} =
-    ## The list is empty when globals were left in memory, so nothing is
-    ## written back; the registers it would name were never filled.
-    ## Hands control back at the offset already written to the context,
-    ## which is where a return lands when this region did not compile it.
-    for slot, index in hoistedFor:
-      let base = int(index) * ValueStride
-      emitter.storeByte(zeroRegister, GlobalsBase, base)
-      emitter.storeWord(slotRegister(slot), GlobalsBase,
-        base + ValuePayload)
-    emitter.storeDouble(Instructions, Context, ContextInstructions)
-    emitter.storeDouble(Work, Context, ContextWork)
-    emitter.loadImmediate(Word32, Context, int64(ord(NativeCompleted)))
-    emitter.endRegion()
-
-  ## Globals left where they are
-  ##
-  ## A loop touching more globals than there are registers to hold them
-  ## keeps them all in memory instead. Every access then costs a load or
-  ## a store, but the loop compiles at all, which the alternative did not.
-
-  proc copyValue(emitter: var Assembler, fromBase: Register, fromOffset: int,
-      toBase: Register, toOffset: int) {.raises: [BasicError].} =
-    ## Moves one value entire, whatever kind it holds.
-    emitter.loadDouble(ValueScratch[0], fromBase, fromOffset)
-    emitter.loadDouble(ValueScratch[1], fromBase, fromOffset + ValuePayload)
-    emitter.storeDouble(ValueScratch[0], toBase, toOffset)
-    emitter.storeDouble(ValueScratch[1], toBase, toOffset + ValuePayload)
-
-  proc copyGlobalToSlot(emitter: var Assembler, index, slot: int32)
-      {.raises: [BasicError].} =
-    ## Reads a global into a frame slot.
-    emitter.copyValue(GlobalsBase, int(index) * ValueStride,
-      RegistersBase, int(slot) * ValueStride)
-
-  proc copySlotToGlobal(emitter: var Assembler, slot, index: int32)
-      {.raises: [BasicError].} =
-    ## Writes a frame slot into a global.
-    emitter.copyValue(RegistersBase, int(slot) * ValueStride,
-      GlobalsBase, int(index) * ValueStride)
-
-  proc copyGlobalToGlobal(emitter: var Assembler, destination, source: int32)
-      {.raises: [BasicError].} =
-    ## Copies one global into another.
-    emitter.copyValue(GlobalsBase, int(source) * ValueStride,
-      GlobalsBase, int(destination) * ValueStride)
-
-  proc copyGlobalToArgument(emitter: var Assembler, argument, index: int32)
-      {.raises: [BasicError].} =
-    ## Stages a global as an argument.
-    emitter.loadDouble(Scratch, Context, ContextArguments)
-    emitter.copyValue(GlobalsBase, int(index) * ValueStride,
-      Scratch, int(argument) * ValueStride)
-
-  proc setGlobalWhole(emitter: var Assembler, index: int32, value: int32)
-      {.raises: [BasicError].} =
-    ## Writes a whole number into a global.
-    let base = int(index) * ValueStride
-    emitter.storeByte(zeroRegister, GlobalsBase, base)
-    emitter.loadImmediate(Word32, ValueScratch[0], int64(value))
-    emitter.storeWord(ValueScratch[0], GlobalsBase, base + ValuePayload)
-
-  proc readGlobalWhole(emitter: var Assembler, scratch: int, index: int32,
-      leave: Label) {.raises: [BasicError].} =
-    ## Reads a global as a whole number, leaving the region if it is not.
-    let base = int(index) * ValueStride
-    emitter.loadByte(Scratch, GlobalsBase, base)
-    emitter.branchIfNotZero(Word32, Scratch, leave)
-    emitter.loadWord(ValueScratch[scratch], GlobalsBase, base + ValuePayload)
-
-  proc addToGlobal(emitter: var Assembler, index: int32, value: int32,
-      leave: Label) {.raises: [BasicError].} =
-    ## Adds a constant to a global of either kind. A whole number added to
-    ## a fixed-point one has to become fixed point first, which only works
-    ## inside its range, so outside that only whole numbers are taken.
-    let base = int(index) * ValueStride
-    let widens = value >= -32768 and value <= 32767
-    emitter.loadByte(Scratch, GlobalsBase, base)
-    if widens:
-      emitter.compareImmediate(Word32, Scratch, FixedTag)
-      emitter.branchIf(UnsignedGreaterCondition, leave)
-    else:
-      emitter.branchIfNotZero(Word32, Scratch, leave)
-    emitter.loadWord(ValueScratch[0], GlobalsBase, base + ValuePayload)
-    if widens:
-      let fixedWay = emitter.label()
-      let done = emitter.label()
-      emitter.compareImmediate(Word32, Scratch, FixedTag)
-      emitter.branchIf(EqualCondition, fixedWay)
-      emitter.loadImmediate(Word32, ValueScratch[1], int64(value))
-      emitter.branch(done)
-      emitter.place(fixedWay)
-      emitter.loadImmediate(Word32, ValueScratch[1],
-        int64(value) * 65536)
-      emitter.place(done)
-    else:
-      emitter.loadImmediate(Word32, ValueScratch[1], int64(value))
-    emitter.addRegister(Word32, ValueScratch[0], ValueScratch[0],
-      ValueScratch[1])
-    emitter.storeWord(ValueScratch[0], GlobalsBase, base + ValuePayload)
-
-  proc compareGlobalWhole(emitter: var Assembler, index: int32,
-      value: int32, leave: Label) {.raises: [BasicError].} =
-    ## Sets flags from a global against a whole number, leaving the region
-    ## unless the global is a whole number too.
-    emitter.readGlobalWhole(0, index, leave)
-    emitter.loadImmediate(Word32, ValueScratch[1], int64(value))
-    emitter.compareRegister(Word32, ValueScratch[0], ValueScratch[1])
-
-  proc setSlotKind(emitter: var Assembler, slot: int32, tag: int)
-      {.raises: [BasicError].} =
-    ## Says what kind a slot now holds, leaving its payload alone.
-    emitter.loadImmediate(Word32, OtherScratch, int64(tag))
-    emitter.storeByte(OtherScratch, RegistersBase, int(slot) * ValueStride)
-
-  proc writeSlotPayload(emitter: var Assembler, scratch: int, slot: int32)
-      {.raises: [BasicError].} =
-    ## Writes a slot's payload, its kind having just been said.
-    emitter.storeWord(ValueScratch[scratch], RegistersBase,
-      int(slot) * ValueStride + ValuePayload)
-
-  proc widenToFixed(emitter: var Assembler, scratch: int, leave: Label)
+  proc widenToFixed(e: var Emitter, value, tag: int, slow: Label)
       {.raises: [BasicError].} =
     ## Turns a number of either kind into its Q16.16 bits, widened to
-    ## sixty-four. A whole number outside the fixed-point range cannot be
-    ## turned into one at all, which is what the interpreter refuses, so
-    ## that goes back rather than being approximated.
-    let value = ValueScratch[scratch]
-    let already = emitter.label()
-    let ready = emitter.label()
-    emitter.compareImmediate(Word32, Scratch, FixedTag)
-    emitter.branchIf(EqualCondition, already)
-    emitter.loadImmediate(Word32, OtherScratch, 32767)
-    emitter.compareRegister(Word32, value, OtherScratch)
-    emitter.branchIf(GreaterCondition, leave)
-    emitter.loadImmediate(Word32, OtherScratch, -32768)
-    emitter.compareRegister(Word32, value, OtherScratch)
-    emitter.branchIf(LessCondition, leave)
-    emitter.signExtendWord(value, value)
-    emitter.shiftLeftImmediate(Word64, value, value, FixedShift)
-    emitter.branch(ready)
-    emitter.place(already)
-    emitter.signExtendWord(value, value)
-    emitter.place(ready)
+    ## sixty-four. A whole number outside the fixed-point range cannot
+    ## become one, which the interpreter refuses, so that goes slow.
+    let register = temp(value)
+    let already = e.label()
+    let ready = e.label()
+    e.whenFixed(tag, already)
+    e.code.loadImmediate(Word32, temp(6), 32767)
+    e.code.compareRegister(Word32, register, temp(6))
+    e.jumpWhen(GreaterCondition, slow)
+    e.code.loadImmediate(Word32, temp(6), -32768)
+    e.code.compareRegister(Word32, register, temp(6))
+    e.jumpWhen(LessCondition, slow)
+    e.code.signExtendWord(register, register)
+    e.code.shiftLeftImmediate(Word64, register, register, FixedShift)
+    e.jump(ready)
+    e.place(already)
+    e.code.signExtendWord(register, register)
+    e.place(ready)
 
-  proc divideFixed(emitter: var Assembler, leave: Label)
+  proc divideFixed(e: var Emitter, left, right: int, slow: Label)
       {.raises: [BasicError].} =
-    ## Divides one Q16.16 number by another, rounding to nearest with
-    ## halves going up, for either sign, exactly as the fixed-point
-    ## library does: the signs are put right first, half the divisor is
-    ## added, and the truncating divide is corrected back to a floor.
-    let numerator = ValueScratch[0]
-    let denominator = ValueScratch[1]
-    emitter.compareImmediate(Word64, denominator, 0)
-    emitter.branchIf(EqualCondition, leave)
-
-    let signsSettled = emitter.label()
-    emitter.compareImmediate(Word64, denominator, 0)
-    emitter.branchIf(GreaterCondition, signsSettled)
-    emitter.negate(Word64, numerator, numerator)
-    emitter.negate(Word64, denominator, denominator)
-    emitter.place(signsSettled)
-
-    emitter.shiftLeftImmediate(Word64, numerator, numerator, FixedShift)
-    emitter.shiftRightImmediate(Word64, Scratch, denominator, 1)
-    emitter.addRegister(Word64, numerator, numerator, Scratch)
-
-    emitter.signedDivide(Word64, Scratch, numerator, denominator)
-    emitter.multiplySubtract(Word64, OtherScratch, Scratch, denominator,
+    ## Divides two widened Q16.16 numbers, rounding to nearest with halves
+    ## going up, for either sign, exactly as the fixed-point library
+    ## does: the signs are put right first, half the divisor is added,
+    ## and the truncating divide is corrected back to a floor.
+    let numerator = temp(left)
+    let denominator = temp(right)
+    let answer = temp(5)
+    let leftOver = temp(6)
+    e.code.compareImmediate(Word64, denominator, 0)
+    e.jumpWhen(EqualCondition, slow)
+    let signsSettled = e.label()
+    e.code.branchIf(GreaterCondition, signsSettled)
+    e.code.negate(Word64, numerator, numerator)
+    e.code.negate(Word64, denominator, denominator)
+    e.place(signsSettled)
+    e.code.shiftLeftImmediate(Word64, numerator, numerator, FixedShift)
+    e.code.shiftRightImmediate(Word64, answer, denominator, 1)
+    e.code.addRegister(Word64, numerator, numerator, answer)
+    e.code.signedDivide(Word64, answer, numerator, denominator)
+    e.code.multiplySubtract(Word64, leftOver, answer, denominator,
       numerator)
+    let done = e.label()
+    e.code.compareImmediate(Word64, leftOver, 0)
+    e.code.branchIf(EqualCondition, done)
+    e.code.compareImmediate(Word64, numerator, 0)
+    e.code.branchIf(GreaterEqualCondition, done)
+    e.code.subtractImmediate(Word64, answer, answer, 1)
+    e.place(done)
+    e.code.moveRegister(Word32, numerator, answer)
 
-    let done = emitter.label()
-    emitter.compareImmediate(Word64, OtherScratch, 0)
-    emitter.branchIf(EqualCondition, done)
-    emitter.compareImmediate(Word64, numerator, 0)
-    emitter.branchIf(GreaterEqualCondition, done)
-    emitter.subtractImmediate(Word64, Scratch, Scratch, 1)
-    emitter.place(done)
-    emitter.moveRegister(Word32, numerator, Scratch)
+  proc compare(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two working registers.
+    e.code.compareRegister(Word32, temp(left), temp(right))
 
-  proc callHost(emitter: var Assembler, functionId, destination: int32,
-      failed: Label) {.raises: [BasicError].} =
-    ## Runs one host function through a trampoline.
-    ##
-    ## This is the one place compiled code leaves for code it did not
-    ## write, so it is also the one place that has to keep the calling
-    ## convention. The context and the frame base are registers a callee
-    ## may use, so they go on the stack; the budgets, the globals base and
-    ## the hoisted globals are ones a callee must leave alone.
-    ##
-    ## Host code can refuse. It cannot refuse by raising through a frame
-    ## nothing described, so the trampoline catches whatever it raised and
-    ## says so in its answer, and the offset goes back with the failure
-    ## already made rather than to be made again.
-    emitter.storePair(Context, RegistersBase, stackPointer, AcrossHostCall)
-    emitter.loadDouble(Scratch, Context, ContextHostCall)
-    emitter.loadImmediate(Word32, x1, int64(functionId))
-    emitter.loadImmediate(Word32, x2, int64(destination))
-    emitter.callRegister(Scratch)
-    emitter.moveRegister(Word32, Scratch, x0)
-    emitter.loadPair(Context, RegistersBase, stackPointer, AcrossHostCall)
-    emitter.branchIfNotZero(Word32, Scratch, failed)
-
-  proc leaveRoutine(emitter: var Assembler, leave: Label)
+  proc compareConstant(e: var Emitter, value: int, bits: int32)
       {.raises: [BasicError].} =
-    ## Pops a frame and jumps to wherever it said to carry on. The table
-    ## sends any offset this region did not compile back to the
-    ## interpreter, so returning into interpreted code needs no test.
-    emitter.loadWord(Scratch, Context, ContextDepth)
-    emitter.branchIfZero(Word32, Scratch, leave)
-    emitter.subtractImmediate(Word32, Scratch, Scratch, 1)
-    emitter.storeWord(Scratch, Context, ContextDepth)
+    ## Sets flags from a working register against a constant.
+    if bits >= 0 and bits <= 4095:
+      e.code.compareImmediate(Word32, temp(value), int(bits))
+    else:
+      e.code.loadImmediate(Word32, temp(6), int64(bits))
+      e.code.compareRegister(Word32, temp(value), temp(6))
 
-    emitter.loadDouble(ValueScratch[1], Context, ContextFrames)
-    emitter.addRegister(Word64, ValueScratch[1], ValueScratch[1], Scratch, 4)
-    emitter.loadWord(OtherScratch, ValueScratch[1], FrameBase)
-    emitter.storeWord(OtherScratch, Context, ContextBase)
-    emitter.loadWord(ValueScratch[0], ValueScratch[1], FrameRoutine)
-    emitter.storeWord(ValueScratch[0], Context, ContextRoutine)
-    emitter.loadWord(ValueScratch[0], ValueScratch[1], FrameReturn)
-    emitter.storeWord(ValueScratch[0], Context, ContextOffset)
+  proc answer(e: var Emitter, value: int, check: Check) {.raises: [].} =
+    ## Writes BASIC's -1 for true and zero for false.
+    e.code.setOnCondition(Word32, temp(value), nativeCondition(check))
 
-    emitter.loadDouble(Scratch, Context, ContextRegisterFile)
-    emitter.addRegister(Word64, RegistersBase, Scratch, OtherScratch, 4)
+  proc jumpOn(e: var Emitter, check: Check, target: Label)
+      {.raises: [].} =
+    ## Jumps on a comparison outcome.
+    e.jumpWhen(nativeCondition(check), target)
 
-    emitter.loadDouble(Scratch, Context, ContextReturnTable)
-    emitter.addRegister(Word64, Scratch, Scratch, ValueScratch[0], 3)
-    emitter.loadDouble(Scratch, Scratch, 0)
-    emitter.jumpRegister(Scratch)
+  proc jumpIfZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds zero.
+    e.jumpIfZero(temp(value), target)
 
+  proc jumpIfNotZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds anything but zero.
+    e.jumpIfNotZero(temp(value), target)
 
-  proc hostDataAddress(emitter: var Assembler, index: int32)
+  proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
+      slow: Label) {.raises: [].} =
+    ## Bounds checks an index and leaves the cell's address in Cell. One
+    ## unsigned comparison covers both ends, as the interpreter's does.
+    let position = temp(index)
+    e.code.loadImmediate(Word32, temp(6), int64(extent.length))
+    e.code.compareRegister(Word32, position, temp(6))
+    e.jumpWhen(CarrySetCondition, slow)
+    e.code.loadImmediate(Word32, temp(6), int64(extent.base))
+    e.code.addRegister(Word32, temp(6), temp(6), position)
+    e.code.addRegister(Word64, Cell, MemoryBase, temp(6), 4)
+
+  proc meter(e: var Emitter, instructions, work: int32, slow: Label)
       {.raises: [BasicError].} =
-    ## Leaves one host data value's address in Scratch.
-    emitter.loadDouble(Scratch, Context, ContextHostData)
-    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
-    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
+    ## Checks both budgets before charging either, as the interpreter does.
+    if instructions <= 4095:
+      e.code.compareImmediate(Word64, Instructions, int(instructions))
+    else:
+      e.code.loadImmediate(Word64, temp(5), int64(instructions))
+      e.code.compareRegister(Word64, Instructions, temp(5))
+    e.jumpWhen(LessCondition, slow)
+    if work <= 4095:
+      e.code.compareImmediate(Word64, Work, int(work))
+    else:
+      e.code.loadImmediate(Word64, temp(6), int64(work))
+      e.code.compareRegister(Word64, Work, temp(6))
+    e.jumpWhen(LessCondition, slow)
+    if instructions <= 4095:
+      e.code.subtractImmediate(Word64, Instructions, Instructions,
+        int(instructions))
+    else:
+      e.code.subtractRegister(Word64, Instructions, Instructions, temp(5))
+    if work <= 4095:
+      e.code.subtractImmediate(Word64, Work, Work, int(work))
+    else:
+      e.code.subtractRegister(Word64, Work, Work, temp(6))
 
-  proc copyHostDataToSlot(emitter: var Assembler, index, slot: int32)
+  proc frameOf(e: var Emitter, base: Register, index: Register)
+      {.raises: [].} =
+    ## Points a register at one register-file slot by its absolute index.
+    e.code.addRegister(Word64, base, FileBase, index, 4)
+
+  proc copyValues(e: var Emitter, destination, source: Register,
+      count: int) {.raises: [BasicError].} =
+    ## Copies a run of whole values, in a loop once there are many.
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.loadDouble(temp(5), source, index * ValueStride)
+        e.code.loadDouble(temp(6), source, index * ValueStride + ValuePayload)
+        e.code.storeDouble(temp(5), destination, index * ValueStride)
+        e.code.storeDouble(temp(6), destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, temp(2), source)
+    e.code.moveRegister(Word64, temp(3), destination)
+    e.code.loadImmediate(Word32, temp(4), int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.loadDouble(temp(5), temp(2), 0)
+    e.code.loadDouble(temp(6), temp(2), ValuePayload)
+    e.code.storeDouble(temp(5), temp(3), 0)
+    e.code.storeDouble(temp(6), temp(3), ValuePayload)
+    e.code.addImmediate(Word64, temp(2), temp(2), ValueStride)
+    e.code.addImmediate(Word64, temp(3), temp(3), ValueStride)
+    e.code.subtractImmediate(Word32, temp(4), temp(4), 1)
+    e.code.branchIfNotZero(Word32, temp(4), again)
+
+  proc clearValues(e: var Emitter, destination: Register, count: int)
       {.raises: [BasicError].} =
-    ## Copies a host value entire into a slot, as the interpreter does.
-    emitter.hostDataAddress(index)
-    emitter.copyElementToSlot(slot)
+    ## Zeroes a run of values, in a loop once there are many.
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.storeDouble(zeroRegister, destination, index * ValueStride)
+        e.code.storeDouble(zeroRegister, destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, temp(3), destination)
+    e.code.loadImmediate(Word32, temp(4), int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.storeDouble(zeroRegister, temp(3), 0)
+    e.code.storeDouble(zeroRegister, temp(3), ValuePayload)
+    e.code.addImmediate(Word64, temp(3), temp(3), ValueStride)
+    e.code.subtractImmediate(Word32, temp(4), temp(4), 1)
+    e.code.branchIfNotZero(Word32, temp(4), again)
 
-  proc readHostDataInteger(emitter: var Assembler, scratch: int,
-      index: int32, leave: Label) {.raises: [BasicError].} =
-    ## Reads a host value as an integer, leaving the region if it is not.
-    emitter.hostDataAddress(index)
-    emitter.readElement(scratch, leave)
+  proc enterRoutine(e: var Emitter, gosub: bool, calleeId: int32,
+      calleeRegisters, calleeParameters, callerRegisters: int32,
+      resumeAt: int32, limits: CallLimits, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pushes a frame into the interpreter's own array and moves the
+    ## current frame on, refusing the same two ceilings it refuses.
+    let depth = temp(0)
+    let oldBase = temp(1)
+    let newBase = temp(2)
+    let frame = temp(3)
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.code.loadImmediate(Word32, temp(6), int64(limits.frames) - 1)
+    e.code.compareRegister(Word32, depth, temp(6))
+    e.jumpWhen(GreaterEqualCondition, slow)
+    e.code.loadWord(oldBase, Context, ContextBase)
+    e.code.loadImmediate(Word32, temp(6), int64(callerRegisters))
+    e.code.addRegister(Word32, newBase, oldBase, temp(6))
+    e.code.loadImmediate(Word32, temp(6),
+      int64(limits.slots) - int64(calleeRegisters))
+    e.code.compareRegister(Word32, newBase, temp(6))
+    e.jumpWhen(GreaterCondition, slow)
 
+    e.code.addRegister(Word64, frame, FramesBase, depth, 4)
+    e.code.storeWord(oldBase, frame, FrameBase)
+    e.code.loadWord(temp(4), Context, ContextRoutine)
+    e.code.storeWord(temp(4), frame, FrameRoutine)
+    e.code.loadImmediate(Word32, temp(4), int64(resumeAt))
+    e.code.storeWord(temp(4), frame, FrameReturn)
+    if gosub:
+      e.code.loadImmediate(Word32, temp(4), 1)
+      e.code.storeWord(temp(4), frame, FrameTag)
+    else:
+      e.code.storeWord(zeroRegister, frame, FrameTag)
+
+    e.code.addImmediate(Word32, depth, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.code.storeWord(newBase, Context, ContextBase)
+    e.code.loadImmediate(Word32, temp(4), int64(calleeId))
+    e.code.storeWord(temp(4), Context, ContextRoutine)
+
+    # A GOSUB hands the callee a copy of the caller's slots; a call clears
+    # them and lays the arguments over the first few, in that order.
+    e.code.moveRegister(Word64, frame, RegistersBase)
+    e.frameOf(RegistersBase, newBase)
+    if gosub:
+      e.copyValues(RegistersBase, frame, int(calleeRegisters))
+    else:
+      e.clearValues(RegistersBase, int(calleeRegisters))
+      e.copyValues(RegistersBase, ArgumentsBase, int(calleeParameters))
+
+  proc leaveRoutine(e: var Emitter, parameters: int32, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
+    ## frame first hands the shared parameters back to the caller.
+    let depth = temp(0)
+    let frame = temp(1)
+    let base = temp(2)
+    let resume = temp(3)
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.jumpIfZero(depth, slow)
+    e.code.subtractImmediate(Word32, depth, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.code.addRegister(Word64, frame, FramesBase, depth, 4)
+    e.code.loadWord(base, frame, FrameBase)
+    if parameters > 0:
+      let plain = e.label()
+      e.code.loadByte(temp(4), frame, FrameTag)
+      e.code.compareImmediate(Word32, temp(4), 1)
+      e.code.branchIf(NotEqualCondition, plain)
+      e.frameOf(Far, base)
+      e.copyValues(Far, RegistersBase, int(parameters))
+      e.place(plain)
+    e.code.storeWord(base, Context, ContextBase)
+    e.code.loadWord(temp(4), frame, FrameRoutine)
+    e.code.storeWord(temp(4), Context, ContextRoutine)
+    e.code.loadWord(resume, frame, FrameReturn)
+    e.code.storeWord(resume, Context, ContextOffset)
+    e.frameOf(RegistersBase, base)
+    e.code.addRegister(Word64, temp(4), TableBase, resume, 3)
+    e.code.loadDouble(temp(4), temp(4), 0)
+    e.code.jumpRegister(temp(4))
+
+  proc callSlow(e: var Emitter, offset: int32, routine: Label)
+      {.raises: [].} =
+    ## Runs the interpreter's own code for one instruction.
+    e.code.loadImmediate(Word32, x1, int64(offset))
+    e.code.branchLink(routine)
+
+  proc slowRoutine(e: var Emitter, failed: Label)
+      {.raises: [BasicError].} =
+    ## The one place compiled code calls out. The budgets go into the
+    ## context for the interpreter's code to charge, and come back from it
+    ## along with the frame, since a call or a return may have moved it.
+    e.code.storePair(framePointer, linkRegister, stackPointer, -16, true)
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.moveRegister(Word64, x0, Context)
+    e.code.loadDouble(temp(0), Context, ContextStep)
+    e.code.callRegister(temp(0))
+    e.code.moveRegister(Word32, temp(0), x0)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadWord(temp(1), Context, ContextBase)
+    e.frameOf(RegistersBase, temp(1))
+    e.code.loadPair(framePointer, linkRegister, stackPointer, 16, true)
+    e.code.branchIfNotZero(Word32, temp(0), failed)
+    e.code.returnToCaller()
+
+  proc dispatch(e: var Emitter) {.raises: [BasicError].} =
+    ## Jumps to the block for whatever offset the context names.
+    e.code.loadWord(temp(0), Context, ContextOffset)
+    e.code.addRegister(Word64, temp(1), TableBase, temp(0), 3)
+    e.code.loadDouble(temp(1), temp(1), 0)
+    e.code.jumpRegister(temp(1))
+
+  proc prologue(e: var Emitter) {.raises: [BasicError].} =
+    ## Saves what the platform says to keep and loads the machine state.
+    e.code.storePair(framePointer, linkRegister, stackPointer, -FrameBytes,
+      true)
+    e.code.storePair(x19, x20, stackPointer, 16)
+    e.code.storePair(x21, x22, stackPointer, 32)
+    e.code.storePair(x23, x24, stackPointer, 48)
+    e.code.storePair(x25, x26, stackPointer, 64)
+    e.code.storePair(x27, x28, stackPointer, 80)
+    e.code.moveRegister(Word64, Context, x0)
+    e.code.loadDouble(GlobalsBase, Context, 0)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadDouble(FileBase, Context, ContextRegisterFile)
+    e.code.loadDouble(TableBase, Context, ContextTable)
+    e.code.loadDouble(MemoryBase, Context, ContextMemory)
+    e.code.loadDouble(ArgumentsBase, Context, ContextArguments)
+    e.code.loadDouble(FramesBase, Context, ContextFrames)
+    e.code.loadWord(temp(0), Context, ContextBase)
+    e.frameOf(RegistersBase, temp(0))
+
+  proc epilogue(e: var Emitter, status: NativeStatus)
+      {.raises: [BasicError].} =
+    ## Restores what the platform says to keep and returns a status.
+    e.code.loadImmediate(Word32, x0, int64(ord(status)))
+    e.code.loadPair(x19, x20, stackPointer, 16)
+    e.code.loadPair(x21, x22, stackPointer, 32)
+    e.code.loadPair(x23, x24, stackPointer, 48)
+    e.code.loadPair(x25, x26, stackPointer, 64)
+    e.code.loadPair(x27, x28, stackPointer, 80)
+    e.code.loadPair(framePointer, linkRegister, stackPointer, FrameBytes,
+      true)
+    e.code.returnToCaller()
+
+  proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
+    ## Publishes the budgets and where the program stopped, then returns.
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.loadImmediate(Word32, temp(0), int64(offset))
+    e.code.storeWord(temp(0), Context, ContextOffset)
+    e.epilogue(NativeCompleted)
+
+  proc finish(e: var Emitter): seq[byte] {.raises: [BasicError].} =
+    ## Resolves every branch and returns the finished bytes.
+    e.code.resolve()
+    result = newSeq[byte](e.code.code.len * 4)
+    if result.len > 0:
+      copyMem(result[0].addr, e.code.code[0].addr, result.len)
+
+  proc offsetBytes(e: Emitter, target: Label): int {.raises: [].} =
+    ## Returns where a label ended up, in bytes.
+    e.code.offsetOf(target) * 4
 
 elif NativeAmd64:
   ## x86-64 code generation
   ##
-  ## rbx  base of the globals array
-  ## r12  remaining instruction budget
-  ## r13  remaining work budget
-  ## rax and rdx are reserved for the divide;  r11 is scratch
+  ## r15  context            r12  instruction budget   r13  work budget
+  ## rbx  globals            rbp  current frame        r14  array cells
+  ## rax rcx rsi rdi r8 r9 r10  working registers;  r11  one cell;
+  ## rdx  the divide's high half and a spare
   ##
-  ## The two conventions differ only in which register carries the argument
-  ## and which ones a callee must preserve. System V takes its argument in
-  ## rdi and may use rsi and rdi freely; Windows takes its argument in rcx
-  ## and must preserve both rsi and rdi.
+  ## The six long-lived registers are the ones both platform conventions
+  ## keep across a call. Windows also keeps rsi and rdi, so those are
+  ## saved on the way in there. Everything else the program touches
+  ## rarely is read from the context when it is needed.
 
   const
-    GlobalsBase = rbx
-    RegistersBase = rbp
+    Context = r15
     Instructions = r12
     Work = r13
-    Scratch = r11
-    ValueScratch = [rax, rdx]
+    GlobalsBase = rbx
+    RegistersBase = rbp
+    MemoryBase = r14
+    Temps = [rax, rcx, rsi, rdi, r8, r9, r10]
+    Cell = r11
+    Spare = rdx
 
   when defined(windows):
     const
-      Context = rcx
-      Hoisted = [r14, r15, rsi, rdi, r8, r9, r10]
+      FirstArgument = rcx
+      SecondArgument = rdx
       Saved = [rbx, rbp, r12, r13, r14, r15, rsi, rdi]
+      ## Four shadow slots for the callee, plus eight to realign.
+      Padding = 40
   else:
     const
-      Context = rdi
-      Hoisted = [r14, r15, rsi, rcx, r8, r9, r10]
+      FirstArgument = rdi
+      SecondArgument = rsi
       Saved = [rbx, rbp, r12, r13, r14, r15]
+      Padding = 8
 
-  proc slotRegister(slot: int): Register {.raises: [].} =
-    ## Returns the register holding one hoisted global.
-    Hoisted[slot]
+  proc temp(index: int): Register {.inline, raises: [].} =
+    ## Returns one working register.
+    Temps[index]
 
-  proc nativeCondition(test: Test): Condition {.raises: [].} =
-    ## Maps a neutral condition onto the architecture's encoding.
-    case test
-    of EqualTest: EqualCondition
-    of NotEqualTest: NotEqualCondition
-    of LessTest: LessCondition
-    of LessEqualTest: LessEqualCondition
-    of GreaterTest: GreaterCondition
-    of GreaterEqualTest: GreaterEqualCondition
+  proc nativeCondition(check: Check): Condition {.raises: [].} =
+    ## Maps a neutral outcome onto the architecture's encoding.
+    case check
+    of EqualCheck: EqualCondition
+    of NotEqualCheck: NotEqualCondition
+    of LessCheck: LessCondition
+    of LessEqualCheck: LessEqualCondition
+    of GreaterCheck: GreaterCondition
+    of GreaterEqualCheck: GreaterEqualCondition
 
-  proc branchWhen(emitter: var Assembler, test: Test, target: Label)
+  type
+    Emitter = object
+      ## The assembler. Every branch here reaches anywhere already, so
+      ## there is nothing to widen.
+      code: Assembler
+      far: bool
+
+  proc label(e: var Emitter): Label {.inline, raises: [].} =
+    ## Reserves a label.
+    e.code.label()
+
+  proc place(e: var Emitter, target: Label) {.inline, raises: [].} =
+    ## Places a label here.
+    e.code.place(target)
+
+  proc jump(e: var Emitter, target: Label) {.raises: [].} =
+    ## Jumps unconditionally.
+    e.code.branch(target)
+
+  proc jumpWhen(e: var Emitter, condition: Condition, target: Label)
       {.raises: [].} =
-    ## Branches when the neutral condition holds.
-    emitter.branchIf(nativeCondition(test), target)
+    ## Jumps when a condition holds.
+    e.code.branchIf(condition, target)
 
-  proc startRegion(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Saves callee-saved registers and loads the interpreter state.
-    for register in Saved:
-      emitter.push(register)
-    emitter.loadDouble(GlobalsBase, Context, 0)
-    emitter.loadDouble(Instructions, Context, ContextInstructions)
-    emitter.loadDouble(Work, Context, ContextWork)
-
-  proc endRegion(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Restores callee-saved registers and returns to the interpreter.
-    for index in countdown(Saved.len - 1, 0):
-      emitter.pop(Saved[index])
-    emitter.returnToCaller()
-
-  proc readNumeric(emitter: var Assembler, scratch: int, slot: int32,
-      leave: Label) {.raises: [BasicError].} =
-    ## Reads a slot's tag into Scratch and its payload into a working
-    ## register, leaving the region for anything that is not a number.
-    let base = int(slot) * ValueStride
-    emitter.loadByteZeroed(Scratch, RegistersBase, base)
-    emitter.compareImmediate(Word32, Scratch, FixedTag)
-    emitter.branchIf(AboveCondition, leave)
-    emitter.loadWord(ValueScratch[scratch], RegistersBase,
-      base + ValuePayload)
-
-  proc requireSameKind(emitter: var Assembler, slot: int32, leave: Label)
+  proc contextField(e: var Emitter, destination: Register, offset: int)
       {.raises: [BasicError].} =
-    ## Leaves the region unless a second slot carries the same tag as the
-    ## one already held. Whole numbers and fixed-point ones add, subtract
-    ## and compare through the very same instructions, so a pair that
-    ## agrees needs no further telling apart; a mixed pair would have to
-    ## be promoted, which can fail, so it goes back to the interpreter.
-    emitter.loadByteZeroed(ValueScratch[1], RegistersBase,
-      int(slot) * ValueStride)
-    emitter.compareRegister(Word32, Scratch, ValueScratch[1])
-    emitter.branchIf(NotEqualCondition, leave)
+    ## Loads one pointer from the context.
+    e.code.loadDouble(destination, Context, offset)
 
-  proc writeNumeric(emitter: var Assembler, scratch: int, slot: int32)
+  proc reach(e: var Emitter, place: Place): (Register, int)
       {.raises: [BasicError].} =
-    ## Writes a payload back under the tag the operands carried.
-    let base = int(slot) * ValueStride
-    emitter.storeByteLow(RegistersBase, base, Scratch)
-    emitter.storeWord(ValueScratch[scratch], RegistersBase,
-      base + ValuePayload)
+    ## Returns a base register and byte offset for a value. Displacements
+    ## are thirty-two bits wide here, so every index is reached directly.
+    let offset = int(place.index) * ValueStride
+    case place.home
+    of SlotHome: (RegistersBase, offset)
+    of GlobalHome: (GlobalsBase, offset)
+    of ArgumentHome:
+      e.contextField(Cell, ContextArguments)
+      (Cell, offset)
+    of HostHome:
+      e.contextField(Cell, ContextHostData)
+      (Cell, offset)
+    of CellHome: (Cell, 0)
 
-  proc branchIfFixed(emitter: var Assembler, target: Label)
+  proc readValue(e: var Emitter, value, tag: int, place: Place)
       {.raises: [BasicError].} =
-    ## Branches when the held tag says fixed point.
-    emitter.compareImmediate(Word32, Scratch, FixedTag)
-    emitter.branchIf(EqualCondition, target)
+    ## Reads a value's kind and its 32-bit payload.
+    let (base, offset) = e.reach(place)
+    e.code.loadByteZeroed(temp(tag), base, offset)
+    e.code.loadWord(temp(value), base, offset + ValuePayload)
 
-  proc requireWholeKind(emitter: var Assembler, leave: Label)
+  proc writeWhole(e: var Emitter, place: Place, value: int)
       {.raises: [BasicError].} =
-    ## Leaves the region unless the held tag says whole number.
-    emitter.compareImmediate(Word32, Scratch, 0)
-    emitter.branchIf(NotEqualCondition, leave)
+    ## Writes a whole number.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteImmediate(base, offset, 0)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
 
-  proc readSlotValue(emitter: var Assembler, scratch: int, slot: int32)
+  proc writeKind(e: var Emitter, place: Place, tag, value: int)
       {.raises: [BasicError].} =
-    ## Reads a slot's payload, its tag having already been established.
-    emitter.loadWord(ValueScratch[scratch], RegistersBase,
-      int(slot) * ValueStride + ValuePayload)
+    ## Writes a payload under the kind held in a working register.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteLow(base, offset, temp(tag))
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
 
-  proc guardDivisor(emitter: var Assembler, scratch: int, leave: Label)
+  proc writeFixed(e: var Emitter, place: Place, value: int)
       {.raises: [BasicError].} =
-    ## Leaves the region for the two divisors that are not plain division:
-    ## zero, which the interpreter refuses, and minus one, which would
-    ## trap here on the most negative dividend.
-    emitter.compareImmediate(Word32, ValueScratch[scratch], 0)
-    emitter.branchIf(EqualCondition, leave)
-    emitter.compareImmediate(Word32, ValueScratch[scratch], -1)
-    emitter.branchIf(EqualCondition, leave)
+    ## Writes a fixed-point payload.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteImmediate(base, offset, byte(FixedTag))
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
 
-  proc quotientScratch(emitter: var Assembler, left, right: int)
+  proc writeConstant(e: var Emitter, place: Place, tag: int, bits: int32)
       {.raises: [BasicError].} =
-    ## Divides the first working register by the second, toward zero.
-    ## The divide reads and writes the accumulator pair, so the divisor is
-    ## moved aside first and the answer moved back afterwards.
-    emitter.moveRegister(Word32, Scratch, ValueScratch[right])
-    emitter.moveRegister(Word32, rax, ValueScratch[left])
-    emitter.signExtendToPair(Word32)
-    emitter.signedDivide(Word32, Scratch)
-    emitter.moveRegister(Word32, ValueScratch[left], rax)
+    ## Writes a constant of a known kind.
+    let (base, offset) = e.reach(place)
+    e.code.storeByteImmediate(base, offset, byte(tag))
+    e.code.storeWordImmediate(base, offset + ValuePayload, bits)
 
-  proc remainderScratch(emitter: var Assembler, left, right: int)
+  proc copyValue(e: var Emitter, destination, source: Place)
       {.raises: [BasicError].} =
-    ## Leaves what the division of the two working registers left over.
-    emitter.moveRegister(Word32, Scratch, ValueScratch[right])
-    emitter.moveRegister(Word32, rax, ValueScratch[left])
-    emitter.signExtendToPair(Word32)
-    emitter.signedDivide(Word32, Scratch)
-    emitter.moveRegister(Word32, ValueScratch[left], rdx)
+    ## Copies a value entire, whatever kind it holds, as the interpreter
+    ## does.
+    let (fromBase, fromOffset) = e.reach(source)
+    e.code.loadDouble(temp(5), fromBase, fromOffset)
+    e.code.loadDouble(temp(6), fromBase, fromOffset + ValuePayload)
+    let (toBase, toOffset) = e.reach(destination)
+    e.code.storeDouble(temp(5), toBase, toOffset)
+    e.code.storeDouble(temp(6), toBase, toOffset + ValuePayload)
 
-  proc multiplyFixed(emitter: var Assembler, left, right: int)
+  proc unlessWhole(e: var Emitter, tag: int, slow: Label)
+      {.raises: [].} =
+    ## Takes the slow path unless a kind says whole number.
+    e.code.testRegister(Word32, temp(tag), temp(tag))
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc unlessNumeric(e: var Emitter, tag: int, slow: Label)
+      {.raises: [].} =
+    ## Takes the slow path unless a kind says number of either sort.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(AboveCondition, slow)
+
+  proc unlessSame(e: var Emitter, tag, other: int, slow: Label)
+      {.raises: [].} =
+    ## Takes the slow path unless two kinds agree.
+    e.code.compareRegister(Word32, temp(tag), temp(other))
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc whenFixed(e: var Emitter, tag: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a kind says fixed point.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(EqualCondition, target)
+
+  proc loadConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [].} =
+    ## Loads a constant into a working register.
+    e.code.loadImmediate(Word32, temp(value), int64(bits))
+
+  proc add(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Adds, wrapping.
+    e.code.addRegister(Word32, temp(left), temp(right))
+
+  proc subtract(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Subtracts, wrapping.
+    e.code.subtractRegister(Word32, temp(left), temp(right))
+
+  proc multiply(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Multiplies, wrapping.
+    e.code.multiplyRegister(Word32, temp(left), temp(right))
+
+  proc negate(e: var Emitter, value: int) {.raises: [].} =
+    ## Negates, wrapping.
+    e.code.negateRegister(Word32, temp(value))
+
+  proc bitAnd(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits both hold.
+    e.code.andRegister(Word32, temp(left), temp(right))
+
+  proc bitOr(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits either holds.
+    e.code.orRegister(Word32, temp(left), temp(right))
+
+  proc bitXor(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits exactly one holds.
+    e.code.xorRegister(Word32, temp(left), temp(right))
+
+  proc bitNot(e: var Emitter, value: int) {.raises: [].} =
+    ## Flips every bit.
+    e.code.notRegister(Word32, temp(value))
+
+  proc divide(e: var Emitter, left, right: int, keepRemainder: bool)
+      {.raises: [].} =
+    ## Divides toward zero; the divisor is known not to be zero. The
+    ## hardware traps on the most negative number over minus one, which
+    ## the interpreter defines, so minus one is answered without dividing:
+    ## the quotient is the negation, wrapping, and nothing is left over.
+    let normal = e.label()
+    let done = e.label()
+    e.code.compareImmediate(Word32, temp(right), -1)
+    e.jumpWhen(NotEqualCondition, normal)
+    if keepRemainder:
+      e.code.loadImmediate(Word32, temp(left), 0)
+    else:
+      e.code.negateRegister(Word32, temp(left))
+    e.jump(done)
+    e.place(normal)
+    e.code.moveRegister(Word32, rax, temp(left))
+    e.code.signExtendToPair(Word32)
+    e.code.signedDivide(Word32, temp(right))
+    if keepRemainder:
+      e.code.moveRegister(Word32, temp(left), Spare)
+    else:
+      e.code.moveRegister(Word32, temp(left), rax)
+    e.place(done)
+
+  proc quotient(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Divides toward zero.
+    e.divide(left, right, false)
+
+  proc remainder(e: var Emitter, left, right: int)
+      {.raises: [].} =
+    ## Leaves what dividing left over, with the sign of the dividend.
+    e.divide(left, right, true)
+
+  proc multiplyFixed(e: var Emitter, left, right: int)
       {.raises: [BasicError].} =
     ## Multiplies two Q16.16 numbers through a widened intermediate,
     ## rounding to nearest exactly as the fixed-point library does.
-    emitter.signExtendDouble(ValueScratch[left], ValueScratch[left])
-    emitter.signExtendDouble(ValueScratch[right], ValueScratch[right])
-    emitter.multiplyRegister(Word64, ValueScratch[left], ValueScratch[right])
-    emitter.addImmediate(Word64, ValueScratch[left], int32(FixedRounding))
-    emitter.shiftRightImmediate(Word64, ValueScratch[left], FixedShift)
+    e.code.signExtendDouble(temp(left), temp(left))
+    e.code.signExtendDouble(temp(6), temp(right))
+    e.code.multiplyRegister(Word64, temp(left), temp(6))
+    e.code.addImmediate(Word64, temp(left), int32(FixedRounding))
+    e.code.shiftRightImmediate(Word64, temp(left), FixedShift)
+    e.code.moveRegister(Word32, temp(left), temp(left))
 
-  proc elementAddress(emitter: var Assembler, scratch: int,
-      extent: ArrayExtent, leave: Label) {.raises: [BasicError].} =
-    ## Bounds checks an index and leaves the cell's address in Scratch.
-    ## One unsigned comparison covers both ends, exactly as the
-    ## interpreter's does, and a refusal hands the offset back so the
-    ## interpreter can raise with the array's own name.
-    let index = ValueScratch[scratch]
-    emitter.compareImmediate(Word32, index, extent.length)
-    emitter.branchIf(AboveEqualCondition, leave)
-    emitter.addImmediate(Word32, index, extent.base)
-    emitter.shiftLeftImmediate(Word64, index, 4)
-    emitter.loadDouble(Scratch, Context, ContextMemory)
-    emitter.addRegister(Word64, Scratch, index)
-
-  proc copyElementToSlot(emitter: var Assembler, slot: int32)
+  proc widenToFixed(e: var Emitter, value, tag: int, slow: Label)
       {.raises: [BasicError].} =
-    ## Copies a whole cell into a register slot, whatever it holds. The
-    ## interpreter copies the value entire, so this does too, and neither
-    ## needs to know what kind it is.
-    let base = int(slot) * ValueStride
-    emitter.loadDouble(ValueScratch[0], Scratch, 0)
-    emitter.loadDouble(ValueScratch[1], Scratch, ValuePayload)
-    emitter.storeDouble(ValueScratch[0], RegistersBase, base)
-    emitter.storeDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
+    ## Turns a number of either kind into its Q16.16 bits, widened to
+    ## sixty-four. A whole number outside the fixed-point range cannot
+    ## become one, which the interpreter refuses, so that goes slow.
+    let register = temp(value)
+    let already = e.label()
+    let ready = e.label()
+    e.whenFixed(tag, already)
+    e.code.compareImmediate(Word32, register, 32767)
+    e.jumpWhen(GreaterCondition, slow)
+    e.code.compareImmediate(Word32, register, -32768)
+    e.jumpWhen(LessCondition, slow)
+    e.code.signExtendDouble(register, register)
+    e.code.shiftLeftImmediate(Word64, register, FixedShift)
+    e.jump(ready)
+    e.place(already)
+    e.code.signExtendDouble(register, register)
+    e.place(ready)
 
-  proc copySlotToElement(emitter: var Assembler, slot: int32)
+  proc divideFixed(e: var Emitter, left, right: int, slow: Label)
       {.raises: [BasicError].} =
-    ## Copies a whole register slot into a cell, whatever it holds.
-    let base = int(slot) * ValueStride
-    emitter.loadDouble(ValueScratch[0], RegistersBase, base)
-    emitter.loadDouble(ValueScratch[1], RegistersBase, base + ValuePayload)
-    emitter.storeDouble(ValueScratch[0], Scratch, 0)
-    emitter.storeDouble(ValueScratch[1], Scratch, ValuePayload)
+    ## Divides two widened Q16.16 numbers, rounding to nearest with halves
+    ## going up, for either sign, exactly as the fixed-point library
+    ## does: the signs are put right first, half the divisor is added,
+    ## and the truncating divide is corrected back to a floor. The divide
+    ## works in rax and rdx, so the numerator is moved there.
+    let denominator = temp(right)
+    let half = temp(5)
+    let numerator = temp(6)
+    e.code.moveRegister(Word64, rax, temp(left))
+    e.code.compareImmediate(Word64, denominator, 0)
+    e.jumpWhen(EqualCondition, slow)
+    let signsSettled = e.label()
+    e.jumpWhen(GreaterCondition, signsSettled)
+    e.code.negateRegister(Word64, rax)
+    e.code.negateRegister(Word64, denominator)
+    e.place(signsSettled)
+    e.code.shiftLeftImmediate(Word64, rax, FixedShift)
+    e.code.moveRegister(Word64, half, denominator)
+    e.code.shiftRightImmediate(Word64, half, 1)
+    e.code.addRegister(Word64, rax, half)
+    e.code.moveRegister(Word64, numerator, rax)
+    e.code.signExtendToPair(Word64)
+    e.code.signedDivide(Word64, denominator)
+    let done = e.label()
+    e.code.testRegister(Word64, Spare, Spare)
+    e.jumpWhen(EqualCondition, done)
+    e.code.testRegister(Word64, numerator, numerator)
+    e.jumpWhen(GreaterEqualCondition, done)
+    e.code.subtractImmediate(Word64, rax, 1)
+    e.place(done)
+    e.code.moveRegister(Word32, temp(left), rax)
 
-  proc readElement(emitter: var Assembler, scratch: int, leave: Label)
-      {.raises: [BasicError].} =
-    ## Reads a cell as an integer, leaving the region if it holds else.
-    let target = ValueScratch[scratch]
-    emitter.loadByteZeroed(target, Scratch, 0)
-    emitter.testRegister(Word32, target, target)
-    emitter.branchIf(NotEqualCondition, leave)
-    emitter.loadWord(target, Scratch, ValuePayload)
-
-  proc writeElement(emitter: var Assembler, scratch: int)
-      {.raises: [BasicError].} =
-    ## Writes a cell as an integer.
-    emitter.storeByteImmediate(Scratch, 0, 0)
-    emitter.storeWord(ValueScratch[scratch], Scratch, ValuePayload)
-
-  proc guardInteger(emitter: var Assembler, base: int, failed: Label)
-      {.raises: [BasicError].} =
-    ## Leaves the region unless the global at this offset holds an integer.
-    emitter.loadByteZeroed(Scratch, GlobalsBase, base)
-    emitter.testRegister(Word32, Scratch, Scratch)
-    emitter.branchIf(NotEqualCondition, failed)
-
-  proc loadRegistersBase(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Points at the first slot of the frame the region runs in.
-    emitter.loadDouble(RegistersBase, Context, ContextRegisters)
-
-  proc readSlot(emitter: var Assembler, scratch: int, slot: int32,
-      leave: Label) {.raises: [BasicError].} =
-    ## Reads one register slot as an integer, leaving the region if it
-    ## holds anything else. The tag is read into the same register the
-    ## value will land in, so no third register is needed.
-    let target = ValueScratch[scratch]
-    let base = int(slot) * ValueStride
-    emitter.loadByteZeroed(target, RegistersBase, base)
-    emitter.testRegister(Word32, target, target)
-    emitter.branchIf(NotEqualCondition, leave)
-    emitter.loadWord(target, RegistersBase, base + ValuePayload)
-
-  proc writeSlot(emitter: var Assembler, scratch: int, slot: int32)
-      {.raises: [BasicError].} =
-    ## Writes one register slot as an integer.
-    let base = int(slot) * ValueStride
-    emitter.storeByteImmediate(RegistersBase, base, 0)
-    emitter.storeWord(ValueScratch[scratch], RegistersBase,
-      base + ValuePayload)
-
-  proc setScratch(emitter: var Assembler, scratch: int, value: int32)
-      {.raises: [BasicError].} =
-    ## Loads a constant into a working register.
-    emitter.loadImmediate(Word32, ValueScratch[scratch], int64(value))
-
-  proc addScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Adds the second working register into the first, wrapping.
-    emitter.addRegister(Word32, ValueScratch[left], ValueScratch[right])
-
-  proc subtractScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Subtracts the second working register from the first, wrapping.
-    emitter.subtractRegister(Word32, ValueScratch[left], ValueScratch[right])
-
-  proc multiplyScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
-    ## Multiplies the first working register by the second, wrapping.
-    emitter.multiplyRegister(Word32, ValueScratch[left], ValueScratch[right])
-
-  proc negateScratch(emitter: var Assembler, scratch: int)
-      {.raises: [BasicError].} =
-    ## Replaces a working register with its negation, wrapping.
-    emitter.negateRegister(Word32, ValueScratch[scratch])
-
-  proc compareScratch(emitter: var Assembler, left, right: int)
-      {.raises: [BasicError].} =
+  proc compare(e: var Emitter, left, right: int) {.raises: [].} =
     ## Sets flags from two working registers.
-    emitter.compareRegister(Word32, ValueScratch[left], ValueScratch[right])
+    e.code.compareRegister(Word32, temp(left), temp(right))
 
-  proc answerCondition(emitter: var Assembler, scratch: int, test: Test)
-      {.raises: [BasicError].} =
-    ## Writes BASIC's -1 for true and zero for false.
-    emitter.setIfCondition(ValueScratch[scratch], nativeCondition(test))
-    emitter.negateRegister(Word32, ValueScratch[scratch])
+  proc compareConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [].} =
+    ## Sets flags from a working register against a constant.
+    e.code.compareImmediate(Word32, temp(value), bits)
 
-  proc scratchFromHoisted(emitter: var Assembler, scratch, slot: int)
-      {.raises: [BasicError].} =
-    ## Copies a hoisted global into a working register.
-    emitter.moveRegister(Word32, ValueScratch[scratch], slotRegister(slot))
+  proc answer(e: var Emitter, value: int, check: Check) {.raises: [].} =
+    ## Writes BASIC's -1 for true and zero for false. The byte form only
+    ## names the low byte of rax, rcx, rdx and rbx without a prefix, so
+    ## this is only ever asked of the first working register.
+    e.code.setIfCondition(temp(value), nativeCondition(check))
+    e.code.negateRegister(Word32, temp(value))
 
-  proc hoistedFromScratch(emitter: var Assembler, slot, scratch: int)
-      {.raises: [BasicError].} =
-    ## Copies a working register into a hoisted global.
-    emitter.moveRegister(Word32, slotRegister(slot), ValueScratch[scratch])
+  proc jumpOn(e: var Emitter, check: Check, target: Label)
+      {.raises: [].} =
+    ## Jumps on a comparison outcome.
+    e.jumpWhen(nativeCondition(check), target)
 
-  proc branchIfScratchZero(emitter: var Assembler, scratch: int,
-      target: Label) {.raises: [BasicError].} =
-    ## Branches when a working register holds zero.
-    emitter.testRegister(Word32, ValueScratch[scratch], ValueScratch[scratch])
-    emitter.branchIf(EqualCondition, target)
+  proc jumpIfZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds zero.
+    e.code.testRegister(Word32, temp(value), temp(value))
+    e.jumpWhen(EqualCondition, target)
 
-  proc loadHoisted(emitter: var Assembler, slot: int, base: int)
-      {.raises: [BasicError].} =
-    ## Reads one global into its register.
-    emitter.loadWord(slotRegister(slot), GlobalsBase, base + ValuePayload)
+  proc jumpIfNotZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds anything but zero.
+    e.code.testRegister(Word32, temp(value), temp(value))
+    e.jumpWhen(NotEqualCondition, target)
 
-  proc storeHoisted(emitter: var Assembler, slot: int, base: int)
-      {.raises: [BasicError].} =
-    ## Publishes one register back as an integer value.
-    emitter.storeByteImmediate(GlobalsBase, base, 0)
-    emitter.storeWord(slotRegister(slot), GlobalsBase, base + ValuePayload)
+  proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
+      slow: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index and leaves the cell's address in Cell. One
+    ## unsigned comparison covers both ends, as the interpreter's does.
+    e.code.compareImmediate(Word32, temp(index), extent.length)
+    e.jumpWhen(AboveEqualCondition, slow)
+    e.code.moveRegister(Word32, Cell, temp(index))
+    e.code.addImmediate(Word32, Cell, extent.base)
+    e.code.shiftLeftImmediate(Word64, Cell, 4)
+    e.code.addRegister(Word64, Cell, MemoryBase)
 
-  proc setSlot(emitter: var Assembler, slot: int, value: int32)
-      {.raises: [BasicError].} =
-    ## Loads a constant into a hoisted register.
-    emitter.loadImmediate(Word32, slotRegister(slot), int64(value))
-
-  proc copySlot(emitter: var Assembler, destination, source: int)
-      {.raises: [BasicError].} =
-    ## Copies one hoisted register into another.
-    emitter.moveRegister(
-      Word32, slotRegister(destination), slotRegister(source)
-    )
-
-  proc addSlots(emitter: var Assembler, destination, source: int)
-      {.raises: [BasicError].} =
-    ## Adds one hoisted register into another, wrapping on overflow.
-    emitter.addRegister(
-      Word32, slotRegister(destination), slotRegister(source)
-    )
-
-  proc addToSlot(emitter: var Assembler, slot: int, value: int32)
-      {.raises: [BasicError].} =
-    ## Adds a constant to a hoisted register, wrapping on overflow.
-    emitter.addImmediate(Word32, slotRegister(slot), value)
-
-  const MaxPooled* = 0
-
-  proc compareSlot(emitter: var Assembler, slot: int, value: int32,
-      pooled = -1) {.raises: [BasicError].} =
-    ## Sets flags from a hoisted register against a constant.
-    emitter.compareImmediate(Word32, slotRegister(slot), value)
-
-  proc remainderTest(emitter: var Assembler, slot: int, divisor: int32)
-      {.raises: [BasicError].} =
-    ## Sets flags so NotEqualTest means the remainder is not zero.
-    emitter.moveRegister(Word32, rax, slotRegister(slot))
-    emitter.signExtendToPair(Word32)
-    emitter.loadImmediate(Word32, Scratch, int64(divisor))
-    emitter.signedDivide(Word32, Scratch)
-    emitter.testRegister(Word32, rdx, rdx)
-
-  proc budgetGate(emitter: var Assembler, instructionCount, workCost: int64,
-      short: Label) {.raises: [BasicError].} =
+  proc meter(e: var Emitter, instructions, work: int32, slow: Label)
+      {.raises: [].} =
     ## Checks both budgets before charging either, as the interpreter does.
-    ## Both counts come from int32 operands, so they fit the immediate form.
-    emitter.compareImmediate(Word64, Instructions, int32(instructionCount))
-    emitter.branchIf(LessCondition, short)
-    emitter.compareImmediate(Word64, Work, int32(workCost))
-    emitter.branchIf(LessCondition, short)
-    emitter.subtractImmediate(Word64, Instructions, int32(instructionCount))
-    emitter.subtractImmediate(Word64, Work, int32(workCost))
+    e.code.compareImmediate(Word64, Instructions, instructions)
+    e.jumpWhen(LessCondition, slow)
+    e.code.compareImmediate(Word64, Work, work)
+    e.jumpWhen(LessCondition, slow)
+    e.code.subtractImmediate(Word64, Instructions, instructions)
+    e.code.subtractImmediate(Word64, Work, work)
 
-  proc exitStub(emitter: var Assembler, offset: int32, status: int32,
-      writeback: Label) {.raises: [BasicError].} =
-    ## Names the resume offset and status, then joins the shared exit.
-    emitter.storeWordImmediate(Context, ContextOffset, offset)
-    emitter.loadImmediate(Word32, rax, int64(status))
-    emitter.branch(writeback)
-
-  proc publishState(emitter: var Assembler) {.raises: [BasicError].} =
-    ## Writes the budgets back; the status already sits in the result.
-    emitter.storeDouble(Instructions, Context, ContextInstructions)
-    emitter.storeDouble(Work, Context, ContextWork)
-
-  proc guardExit(emitter: var Assembler, start: int32)
+  proc slotAddress(e: var Emitter, destination, index: Register)
       {.raises: [BasicError].} =
-    ## Hands the loop back untouched after a failed guard.
-    emitter.storeWordImmediate(Context, ContextOffset, start)
-    emitter.loadImmediate(Word32, rax, int64(ord(NativeGuardFailed)))
-    emitter.endRegion()
-  proc setSlotConstant(emitter: var Assembler, slot: int32, tag: int,
-      bits: int32) {.raises: [BasicError].} =
-    ## Writes a constant of a known kind straight into a slot.
-    let base = int(slot) * ValueStride
-    emitter.storeByteImmediate(RegistersBase, base, byte(tag))
-    emitter.loadImmediate(Word32, ValueScratch[0], int64(bits))
-    emitter.storeWord(ValueScratch[0], RegistersBase, base + ValuePayload)
+    ## Points a register at one register-file slot by its absolute index.
+    ## The index register is left scaled.
+    e.contextField(destination, ContextRegisterFile)
+    e.code.shiftLeftImmediate(Word64, index, 4)
+    e.code.addRegister(Word64, destination, index)
 
-  proc hostDataAddress(emitter: var Assembler, index: int32)
+  proc copyValues(e: var Emitter, destination, source: Register,
+      count: int) {.raises: [BasicError].} =
+    ## Copies a run of whole values, in a loop once there are many. Works
+    ## in rax, rdx, r8, r9 and r10, so neither end may be one of those.
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.loadDouble(rax, source, index * ValueStride)
+        e.code.loadDouble(Spare, source, index * ValueStride + ValuePayload)
+        e.code.storeDouble(rax, destination, index * ValueStride)
+        e.code.storeDouble(Spare, destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, r10, source)
+    e.code.moveRegister(Word64, r9, destination)
+    e.code.loadImmediate(Word32, r8, int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.loadDouble(rax, r10, 0)
+    e.code.loadDouble(Spare, r10, ValuePayload)
+    e.code.storeDouble(rax, r9, 0)
+    e.code.storeDouble(Spare, r9, ValuePayload)
+    e.code.addImmediate(Word64, r10, ValueStride)
+    e.code.addImmediate(Word64, r9, ValueStride)
+    e.code.subtractImmediate(Word32, r8, 1)
+    e.jumpWhen(NotEqualCondition, again)
+
+  proc clearValues(e: var Emitter, destination: Register, count: int)
       {.raises: [BasicError].} =
-    ## Leaves one host data value's address in Scratch.
-    emitter.loadDouble(Scratch, Context, ContextHostData)
-    emitter.addImmediate(Word64, Scratch, index * int32(ValueStride))
+    ## Zeroes a run of values, in a loop once there are many.
+    e.code.loadImmediate(Word32, rax, 0)
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.storeDouble(rax, destination, index * ValueStride)
+        e.code.storeDouble(rax, destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, r9, destination)
+    e.code.loadImmediate(Word32, r8, int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.storeDouble(rax, r9, 0)
+    e.code.storeDouble(rax, r9, ValuePayload)
+    e.code.addImmediate(Word64, r9, ValueStride)
+    e.code.subtractImmediate(Word32, r8, 1)
+    e.jumpWhen(NotEqualCondition, again)
 
-  proc copyHostDataToSlot(emitter: var Assembler, index, slot: int32)
+  proc enterRoutine(e: var Emitter, gosub: bool, calleeId: int32,
+      calleeRegisters, calleeParameters, callerRegisters: int32,
+      resumeAt: int32, limits: CallLimits, slow: Label)
       {.raises: [BasicError].} =
-    ## Copies a host value entire into a slot, as the interpreter does.
-    emitter.hostDataAddress(index)
-    emitter.copyElementToSlot(slot)
+    ## Pushes a frame into the interpreter's own array and moves the
+    ## current frame on, refusing the same two ceilings it refuses.
+    let depth = rax
+    let oldBase = rcx
+    let newBase = rsi
+    let frame = rdi
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.code.compareImmediate(Word32, depth, limits.frames - 1)
+    e.jumpWhen(GreaterEqualCondition, slow)
+    e.code.loadWord(oldBase, Context, ContextBase)
+    e.code.moveRegister(Word32, newBase, oldBase)
+    e.code.addImmediate(Word32, newBase, callerRegisters)
+    e.code.compareImmediate(Word32, newBase,
+      limits.slots - calleeRegisters)
+    e.jumpWhen(GreaterCondition, slow)
 
-  proc readHostDataInteger(emitter: var Assembler, scratch: int,
-      index: int32, leave: Label) {.raises: [BasicError].} =
-    ## Reads a host value as an integer, leaving the region if it is not.
-    emitter.hostDataAddress(index)
-    emitter.readElement(scratch, leave)
+    e.contextField(frame, ContextFrames)
+    e.code.moveRegister(Word32, r8, depth)
+    e.code.shiftLeftImmediate(Word64, r8, 4)
+    e.code.addRegister(Word64, frame, r8)
+    e.code.storeWord(oldBase, frame, FrameBase)
+    e.code.loadWord(r8, Context, ContextRoutine)
+    e.code.storeWord(r8, frame, FrameRoutine)
+    e.code.storeWordImmediate(frame, FrameReturn, resumeAt)
+    e.code.storeWordImmediate(frame, FrameTag, if gosub: 1 else: 0)
 
+    e.code.addImmediate(Word32, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.code.storeWord(newBase, Context, ContextBase)
+    e.code.storeWordImmediate(Context, ContextRoutine, calleeId)
 
-proc compileRegion*(code: seq[Instruction], start, stop, globals,
-    slots: int, extents: seq[ArrayExtent], constants: seq[int32] = @[],
-    hostData = 0, routines: seq[RoutineExtent] = @[],
-    limits = CallLimits()): Region {.raises: [BasicError].} =
-  ## Compiles one loop, or returns nil when it is outside the modelled set.
-  ##
-  ## Generated code indexes global storage without checking, so every
-  ## index it will use is proved to be in range here, before any of it is
-  ## emitted. The interpreter checks each access as it runs; compiled code
-  ## cannot, which is exactly why this pass has to be exhaustive.
-  when not (NativeArm64 or NativeAmd64):
-    # No backend for this target: the interpreter is the only path.
-    return nil
-  else:
-    if start < 0 or stop > code.len or start >= stop:
-      return nil
-    if code.reachesOutside(start, stop):
-      return nil
-
-    if globals < 0 or slots < 0:
-      return nil
-    var usesSlots = false
-    var usesCalls = false
-    var usesHostCalls = false
-
-    ## The offsets this region covers, and where each one's block sits.
-    ## A call brings the callee's whole body in with it.
-    var members: seq[int32]
-    var covered = newSeq[bool](code.len)
-    for index in start ..< stop:
-      members.add(int32(index))
-      covered[index] = true
-    if not gatherCalled(code, members, covered, routines):
-      return nil
-
-    ## Which routine each offset belongs to, since a call has to record
-    ## how many slots the caller was using. Routine zero is the program
-    ## itself, so every offset has an owner.
-    var ownerOf = newSeq[int32](code.len + 1)
-    for index in 0 ..< ownerOf.len:
-      ownerOf[index] = -1
-    for id, routine in routines:
-      if routine.entry < 0 or routine.length < 0:
-        return nil
-      for step in 0 ..< int(routine.length):
-        let offset = int(routine.entry) + step
-        if offset >= code.len:
-          return nil
-        ownerOf[offset] = int32(id)
-    # Only a call needs to know which routine it sits in, to record how
-    # many slots the caller was using.
-    for member in members:
-      if code[int(member)].op == CallOp and ownerOf[int(member)] < 0:
-        return nil
-    if limits.frames <= 0 or limits.slots <= 0:
-      for offset in members:
-        if code[int(offset)].op in {CallOp, ReturnOp, ExitSubOp}:
-          return nil
-    var placeOf = newSeq[int32](code.len + 1)
-    for index in 0 ..< placeOf.len:
-      placeOf[index] = -1
-    for place, offset in members:
-      placeOf[int(offset)] = int32(place)
-
-    proc covers(offset: int32): bool {.closure, raises: [].} =
-      ## Reports whether an offset is compiled into this region.
-      offset >= 0 and int(offset) < placeOf.len and placeOf[int(offset)] >= 0
-
-
-    var hoisted: seq[int32]
-    for member in members:
-      let index = int(member)
-      let item = code[index]
-      if not item.isCompilable:
-        return nil
-      item.touchedGlobals(hoisted)
-      # Slots are read and written where they sit, so each index only has
-      # to be proved in range; nothing is carried across the region.
-      # Every array named must exist, and its cells must sit where a
-      # displacement can reach them.
-      # Every constant and host slot named has to exist, and a divisor
-      # fixed at compile time has to be one that divides plainly.
-      case item.op
-      of LoadFixedOp:
-        if item.b < 0 or int(item.b) >= constants.len:
-          return nil
-        usesSlots = true
-      of LoadHostDataOp, AddGlobalHostDataOp:
-        if item.b < 0 or int(item.b) >= hostData:
-          return nil
-        if int(item.b) >
-            (MaxDisplacementBytes - ValuePayload) div ValueStride:
-          return nil
-        if item.op == LoadHostDataOp:
-          usesSlots = true
-      of AddGlobalRegisterOp:
-        usesSlots = true
-      of ModuloGlobalImmediateOp:
-        if item.c == 0 or item.c == -1:
-          return nil
-      else:
-        discard
-      var arrayId = 0'i32
-      if item.namedArray(arrayId):
-        if arrayId < 0 or int(arrayId) >= extents.len:
-          return nil
-        let extent = extents[int(arrayId)]
-        if extent.length <= 0 or extent.base < 0:
-          return nil
-        if int(extent.base) + int(extent.length) >
-            MaxDisplacementBytes div ValueStride:
-          return nil
-        usesSlots = true
-      var touched: seq[int32]
-      item.touchedSlots(touched)
-      if touched.len > 0:
-        usesSlots = true
-        for slot in touched:
-          if slot < 0 or int(slot) >= slots:
-            return nil
-          if int(slot) > (MaxDisplacementBytes - ValuePayload) div ValueStride:
-            return nil
-      var target = 0'i32
-      if item.branchTarget(target):
-        # A branch may land one past the last offset, where the
-        # interpreter stops, but never beyond it.
-        if int(target) < 0 or int(target) > code.len:
-          return nil
-      if item.op in {CallOp, ReturnOp, ExitSubOp, HostCallOp}:
-        usesCalls = true
-        usesSlots = true
-      if item.op == HostCallOp:
-        # A host function may use any register a callee is allowed to,
-        # so nothing loop-invariant may be left in one across the call.
-        usesHostCalls = true
-        if item.a >= 0 and (item.a < 0 or int(item.a) >= slots):
-          return nil
-      var calleeId = 0'i32
-      if item.calledRoutine(calleeId):
-        let callee = routines[int(calleeId)]
-        if callee.registers < 0 or callee.parameters < 0 or
-            callee.parameters > callee.registers:
-          return nil
-        if callee.registers > MaxClearedSlots:
-          return nil
-    ## Too many globals to hold in registers means holding none of them
-    ## there. Only the operations written for memory are taken then, and
-    ## only where the generator has them.
-    let hoisting = hoisted.len > 0 and hoisted.len <= MaxHoistedGlobals
-    if not hoisting:
-      when not ModelsMemoryGlobals:
-        return nil
-      else:
-        for member in members:
-          if not code[int(member)].suitsMemoryGlobals:
-            return nil
-    var reached: seq[int32]
-    if hoisting:
-      reached = hoisted
+    # A GOSUB hands the callee a copy of the caller's slots; a call clears
+    # them and lays the arguments over the first few, in that order.
+    e.code.moveRegister(Word64, frame, RegistersBase)
+    e.code.moveRegister(Word32, rcx, newBase)
+    e.slotAddress(RegistersBase, rcx)
+    if gosub:
+      e.copyValues(RegistersBase, frame, int(calleeRegisters))
     else:
-      for member in members:
-        code[int(member)].touchedGlobals(reached)
-    for index in reached:
-      if index < 0 or int(index) >= globals:
-        return nil
-      if int(index) > (MaxDisplacementBytes - ValuePayload) div ValueStride:
-        return nil
-    when NativeArm64:
-      # The tag is read through a scaled byte offset, which is narrower
-      # than the range the bounds check above already allows.
-      for index in reached:
-        if int(index) * ValueStride + ValuePayload > 4095:
-          return nil
+      e.clearValues(RegistersBase, int(calleeRegisters))
+      if calleeParameters > 0:
+        e.contextField(Cell, ContextArguments)
+        e.copyValues(RegistersBase, Cell, int(calleeParameters))
 
-    proc slotOf(index: int32): int {.closure, raises: [BasicError].} =
-      ## Returns which hoisted register holds one global. Reaching the end
-      ## would mean an operation reads a global that was never gathered,
-      ## and so never bounds checked, so it refuses rather than picking a
-      ## register that happens to be next.
-      result = -1
-      for slot, candidate in hoisted:
-        if candidate == index:
-          result = slot
-          break
-      if result < 0:
-        raise newException(
-          BasicError, "BASIC native compiler met an ungathered global"
-        )
+  proc leaveRoutine(e: var Emitter, parameters: int32, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
+    ## frame first hands the shared parameters back to the caller.
+    let depth = rax
+    let frame = rcx
+    let base = rsi
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.code.testRegister(Word32, depth, depth)
+    e.jumpWhen(EqualCondition, slow)
+    e.code.subtractImmediate(Word32, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.contextField(frame, ContextFrames)
+    e.code.moveRegister(Word32, r8, depth)
+    e.code.shiftLeftImmediate(Word64, r8, 4)
+    e.code.addRegister(Word64, frame, r8)
+    e.code.loadWord(base, frame, FrameBase)
+    if parameters > 0:
+      let plain = e.label()
+      e.code.loadByteZeroed(Spare, frame, FrameTag)
+      e.code.compareImmediate(Word32, Spare, 1)
+      e.jumpWhen(NotEqualCondition, plain)
+      e.code.moveRegister(Word32, r8, base)
+      e.slotAddress(rdi, r8)
+      e.copyValues(rdi, RegistersBase, int(parameters))
+      e.place(plain)
+    e.code.storeWord(base, Context, ContextBase)
+    e.code.loadWord(Spare, frame, FrameRoutine)
+    e.code.storeWord(Spare, Context, ContextRoutine)
+    e.code.loadWord(Spare, frame, FrameReturn)
+    e.code.storeWord(Spare, Context, ContextOffset)
+    e.code.moveRegister(Word32, r8, base)
+    e.slotAddress(RegistersBase, r8)
+    e.contextField(rax, ContextTable)
+    e.code.shiftLeftImmediate(Word64, Spare, 3)
+    e.code.addRegister(Word64, rax, Spare)
+    e.code.loadDouble(rax, rax, 0)
+    e.code.jumpRegister(rax)
 
-    const CountedLoops = NativeArm64
-    let plan = planLoop(code, start, stop)
-    # Both of those settle the budget by how far a pass has got through
-    # the loop, which stops meaning anything once a region takes in the
-    # body of something it calls. Such a region charges block by block.
-    let counted = CountedLoops and plan.counted and not usesCalls
-    let spending = CountedLoops and plan.spending and not plan.counted and
-      not usesCalls
-    let pool =
-      if MaxPooled > 0 and not usesHostCalls:
-        pooledConstants(code, start, stop, MaxPooled)
-      else: @[]
+  proc callSlow(e: var Emitter, offset: int32, routine: Label)
+      {.raises: [].} =
+    ## Runs the interpreter's own code for one instruction.
+    e.code.loadImmediate(Word32, SecondArgument, int64(offset))
+    e.code.callLabel(routine)
 
-    proc poolSlot(value: int32): int {.closure, raises: [].} =
-      ## Returns which register already holds a constant, if one does.
-      for slot, held in pool:
-        if held == int64(value):
-          return slot
-      -1
+  proc slowRoutine(e: var Emitter, failed: Label)
+      {.raises: [BasicError].} =
+    ## The one place compiled code calls out. The budgets go into the
+    ## context for the interpreter's code to charge, and come back from it
+    ## along with the frame, since a call or a return may have moved it.
+    ## A failure leaves through the shared exit, dropping the return
+    ## address this routine was called with on the way.
+    let refused = e.label()
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.moveRegister(Word64, FirstArgument, Context)
+    e.code.subtractImmediate(Word64, rsp, Padding)
+    e.contextField(rax, ContextStep)
+    e.code.callRegister(rax)
+    e.code.addImmediate(Word64, rsp, Padding)
+    e.code.moveRegister(Word32, r10, rax)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadWord(rcx, Context, ContextBase)
+    e.slotAddress(RegistersBase, rcx)
+    e.code.testRegister(Word32, r10, r10)
+    e.jumpWhen(NotEqualCondition, refused)
+    e.code.returnToCaller()
+    e.place(refused)
+    e.code.addImmediate(Word64, rsp, 8)
+    e.jump(failed)
 
-    var emitter = Assembler()
-    var blocks: seq[Label]
-    for index in members:
-      blocks.add(emitter.label())
-    let guardFailed = emitter.label()
-    let writeback = emitter.label()
-    var exits: seq[(Label, int32, NativeStatus, int)]
+  proc dispatch(e: var Emitter) {.raises: [BasicError].} =
+    ## Jumps to the block for whatever offset the context names.
+    e.code.loadWord(rax, Context, ContextOffset)
+    e.code.shiftLeftImmediate(Word64, rax, 3)
+    e.contextField(rcx, ContextTable)
+    e.code.addRegister(Word64, rcx, rax)
+    e.code.loadDouble(rcx, rcx, 0)
+    e.code.jumpRegister(rcx)
 
-    template blockAt(offset: int32): Label =
-      blocks[placeOf[int(offset)]]
+  proc prologue(e: var Emitter) {.raises: [BasicError].} =
+    ## Saves what the platform says to keep and loads the machine state.
+    for register in Saved:
+      e.code.push(register)
+    e.code.subtractImmediate(Word64, rsp, Padding)
+    e.code.moveRegister(Word64, Context, FirstArgument)
+    e.code.loadDouble(GlobalsBase, Context, 0)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.contextField(MemoryBase, ContextMemory)
+    e.code.loadWord(rcx, Context, ContextBase)
+    e.slotAddress(RegistersBase, rcx)
 
-    proc exitLabel(target: int32, status: NativeStatus,
-        leaving: int): Label =
-      ## Names the out-of-line stub that resumes the interpreter here.
-      ## A countable loop charges for how far the leaving pass got, so
-      ## stubs differ by where they leave as well as where they go.
-      for (stub, existing, kind, origin) in exits:
-        if existing == target and kind == status and origin == leaving:
-          return stub
-      result = emitter.label()
-      exits.add((result, target, status, leaving))
+  proc epilogue(e: var Emitter, status: NativeStatus)
+      {.raises: [].} =
+    ## Restores what the platform says to keep and returns a status.
+    e.code.loadImmediate(Word32, rax, int64(ord(status)))
+    e.code.addImmediate(Word64, rsp, Padding)
+    for index in countdown(Saved.len - 1, 0):
+      e.code.pop(Saved[index])
+    e.code.returnToCaller()
 
-    template leaveFor(target: int32, status: NativeStatus, leaving: int) =
-      ## Jumps to the stub that resumes the interpreter at an offset.
-      emitter.branch(exitLabel(target, status, leaving))
+  proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
+    ## Publishes the budgets and where the program stopped, then returns.
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.storeWordImmediate(Context, ContextOffset, offset)
+    e.epilogue(NativeCompleted)
 
-    ## Entry: prove every participating global is an integer, then hoist it.
-    emitter.startRegion()
-    if usesSlots:
-      emitter.loadRegistersBase()
-    if hoisting:
-      for slot, index in hoisted:
-        let base = int(index) * ValueStride
-        emitter.guardInteger(base, guardFailed)
-        emitter.loadHoisted(slot, base)
-    when CountedLoops:
-      for slot, value in pool:
-        emitter.loadPooled(slot, value)
-      # Nothing has been written yet, so a refusal here hands the loop
-      # back exactly as it was found.
-      if counted:
-        emitter.beginCountedLoop(
-          plan.instructions, plan.work,
-          exitLabel(int32(start), NativeExhausted, start)
-        )
-      elif spending:
-        emitter.beginSpendingLoop(
-          plan.passInstructions, plan.passWork,
-          exitLabel(int32(start), NativeExhausted, start)
-        )
+  proc finish(e: var Emitter): seq[byte] {.raises: [BasicError].} =
+    ## Resolves every branch and returns the finished bytes.
+    e.code.resolve()
+    e.code.code
 
-    ## Body: one native block per bytecode offset, so branches keep working.
-    for member in members:
-      let index = int(member)
+  proc offsetBytes(e: Emitter, target: Label): int {.raises: [].} =
+    ## Returns where a label ended up, in bytes.
+    e.code.offsetOf(target)
+
+proc invoke*(machine: Machine, context: var NativeContext): NativeStatus
+    {.raises: [].} =
+  ## Runs the compiled program from the offset the context names.
+  NativeStatus(machine.call(context.addr))
+
+proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
+    ownerOf: seq[int32], extents: seq[ArrayExtent], constants: seq[int32],
+    limits: CallLimits, far: bool): (seq[byte], seq[int])
+    {.raises: [BasicError].} =
+  ## Emits the whole program and returns its bytes along with where each
+  ## offset's block starts.
+  when not (NativeArm64 or NativeAmd64):
+    raise newException(BasicError, "BASIC has no whole-program backend here")
+  else:
+    var e = Emitter(far: far)
+    var blocks = newSeq[Label](code.len + 1)
+    for index in 0 .. code.len:
+      blocks[index] = e.label()
+    let dispatchLabel = e.label()
+    let slowLabel = e.label()
+    let failedLabel = e.label()
+
+    e.prologue()
+    e.jump(dispatchLabel)
+
+    var stubs: seq[Stub]
+    for index in 0 ..< code.len:
       let item = code[index]
-      emitter.place(blockAt(member))
+      let offset = int32(index)
+      e.place(blocks[index])
 
-      # A slot holding anything but an integer hands this offset back to
-      # the interpreter, which can work in whatever the slot does hold.
-      # Nothing has been written for this operation yet, and the charge
-      # for the pass so far is the one every other exit uses.
-      let leaveHere = exitLabel(int32(index), NativeCompleted, index)
+      template slowFor(after: Branching): Label =
+        ## Names a slow path for this instruction, emitted after the block.
+        let stub = Stub(label: e.label(), offset: offset, carry: after)
+        stubs.add(stub)
+        stub.label
 
-      template branchOut(target: int32, test: Test) =
-        ## Takes an in-region branch directly, or leaves through a stub.
-        if covers(target):
-          emitter.branchWhen(test, blockAt(target))
-        else:
-          emitter.branchWhen(
-            test, exitLabel(target, NativeCompleted, index)
-          )
+      template runSlow() =
+        ## Runs this instruction through the interpreter's code in line.
+        e.callSlow(offset, slowLabel)
 
+      var fallsThrough = true
       case item.op
       of MeterOp:
-        when CountedLoops:
-          if counted:
-            # The budget was settled on entry, so a countable loop needs
-            # only to know it has passes left.
-            if index == start:
-              emitter.checkCounter(
-                exitLabel(int32(start), NativeCompleted, start)
-              )
-          elif spending:
-            if plan.checkpoints[index - start]:
-              emitter.checkSpending(
-                exitLabel(int32(index), NativeCompleted, index)
-              )
-            emitter.recordSpending(int64(item.b), int64(item.a))
-          else:
-            emitter.budgetGate(
-              int64(item.b), int64(item.a),
-              exitLabel(int32(index), NativeExhausted, index)
-            )
-        else:
-          emitter.budgetGate(
-            int64(item.b), int64(item.a),
-            exitLabel(int32(index), NativeExhausted, index)
-          )
-      of StoreGlobalImmediateOp:
-        if hoisting:
-          emitter.setSlot(slotOf(item.a), item.b)
-        else:
-          when ModelsMemoryGlobals:
-            emitter.setGlobalWhole(item.a, item.b)
-      of MoveGlobalOp:
-        if hoisting:
-          emitter.copySlot(slotOf(item.a), slotOf(item.b))
-        else:
-          when ModelsMemoryGlobals:
-            emitter.copyGlobalToGlobal(item.a, item.b)
-      of AddGlobalImmediateOp:
-        if hoisting:
-          emitter.addToSlot(slotOf(item.a), item.b)
-        else:
-          when ModelsMemoryGlobals:
-            emitter.addToGlobal(item.a, item.b, leaveHere)
-      of AddGlobalOp:
-        emitter.addSlots(slotOf(item.a), slotOf(item.b))
+        e.meter(item.b, item.a, slowFor(ToNext))
       of LoadImmediateOp:
-        emitter.setScratch(0, item.b)
-        emitter.writeSlot(0, item.a)
+        e.writeConstant(slot(item.a), 0, item.b)
+      of LoadFixedOp:
+        e.writeConstant(slot(item.a), FixedTag, constants[int(item.b)])
       of MoveOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.writeSlot(0, item.a)
+        e.copyValue(slot(item.a), slot(item.b))
       of LoadGlobalOp:
-        if hoisting:
-          emitter.scratchFromHoisted(0, slotOf(item.b))
-          emitter.writeSlot(0, item.a)
-        else:
-          when ModelsMemoryGlobals:
-            emitter.copyGlobalToSlot(item.b, item.a)
+        e.copyValue(slot(item.a), global(item.b))
+      of LoadHostDataOp:
+        e.copyValue(slot(item.a), host(item.b))
       of StoreGlobalOp:
-        if hoisting:
-          emitter.readSlot(0, item.b, leaveHere)
-          emitter.hoistedFromScratch(slotOf(item.a), 0)
+        e.copyValue(global(item.a), slot(item.b))
+      of StoreGlobalImmediateOp:
+        e.writeConstant(global(item.a), 0, item.b)
+      of MoveGlobalOp:
+        e.copyValue(global(item.a), global(item.b))
+      of SetArgumentOp:
+        e.copyValue(argument(item.a), slot(item.b))
+      of SetArgumentImmediateOp:
+        e.writeConstant(argument(item.a), 0, item.b)
+      of SetArgumentGlobalOp:
+        e.copyValue(argument(item.a), global(item.b))
+      of AddGlobalImmediateOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.loadConstant(1, item.b)
+        e.add(0, 1)
+        e.writeWhole(global(item.a), 0)
+      of AddGlobalOp, AddGlobalHostDataOp, AddGlobalRegisterOp:
+        let slow = slowFor(ToNext)
+        let source =
+          case item.op
+          of AddGlobalOp: global(item.b)
+          of AddGlobalHostDataOp: host(item.b)
+          else: slot(item.b)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.readValue(1, 3, source)
+        e.unlessWhole(3, slow)
+        e.add(0, 1)
+        e.writeWhole(global(item.a), 0)
+      of ModuloGlobalImmediateOp:
+        if item.c == 0:
+          runSlow()
         else:
-          when ModelsMemoryGlobals:
-            emitter.copySlotToGlobal(item.b, item.a)
-      of AddOp, SubtractOp:
-        # Whole and fixed-point numbers add and subtract through the same
-        # instructions, so one path serves both and the answer keeps the
-        # kind its operands agreed on.
-        emitter.readNumeric(0, item.b, leaveHere)
-        emitter.requireSameKind(item.c, leaveHere)
-        emitter.readSlotValue(1, item.c)
-        if item.op == AddOp:
-          emitter.addScratch(0, 1)
-        else:
-          emitter.subtractScratch(0, 1)
-        emitter.writeNumeric(0, item.a)
-      of MultiplyOp:
-        emitter.readNumeric(0, item.b, leaveHere)
-        emitter.requireSameKind(item.c, leaveHere)
-        emitter.readSlotValue(1, item.c)
+          let slow = slowFor(ToNext)
+          e.readValue(0, 2, global(item.b))
+          e.unlessWhole(2, slow)
+          e.loadConstant(1, item.c)
+          e.remainder(0, 1)
+          e.writeWhole(global(item.a), 0)
+      of AddGlobalArrayGlobalIndexOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, global(item.c))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.b)], slow)
+        e.readValue(1, 3, cell())
+        e.unlessWhole(3, slow)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.add(0, 1)
+        e.writeWhole(global(item.a), 0)
+      of ArrayAddGlobalsOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, global(item.b))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.a)], slow)
+        e.readValue(1, 3, cell())
+        e.unlessWhole(3, slow)
+        e.readValue(0, 2, global(item.c))
+        e.unlessWhole(2, slow)
+        e.add(1, 0)
+        e.writeWhole(cell(), 1)
+      of AddOp, SubtractOp, MultiplyOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.readValue(1, 3, slot(item.c))
+        e.unlessSame(2, 3, slow)
         when ModelsFixed:
-          let fixedWay = emitter.label()
-          let joined = emitter.label()
-          emitter.branchIfFixed(fixedWay)
-          emitter.multiplyScratch(0, 1)
-          emitter.branch(joined)
-          emitter.place(fixedWay)
-          emitter.multiplyFixed(0, 1)
-          emitter.place(joined)
+          e.unlessNumeric(2, slow)
         else:
-          emitter.requireWholeKind(leaveHere)
-          emitter.multiplyScratch(0, 1)
-        emitter.writeNumeric(0, item.a)
+          e.unlessWhole(2, slow)
+        case item.op
+        of AddOp:
+          e.add(0, 1)
+        of SubtractOp:
+          e.subtract(0, 1)
+        else:
+          when ModelsFixed:
+            let fixedWay = e.label()
+            let joined = e.label()
+            e.whenFixed(2, fixedWay)
+            e.multiply(0, 1)
+            e.jump(joined)
+            e.place(fixedWay)
+            e.multiplyFixed(0, 1)
+            e.place(joined)
+          else:
+            e.multiply(0, 1)
+        e.writeKind(slot(item.a), 2, 0)
+      of DivideOp:
+        when ModelsFixed:
+          let slow = slowFor(ToNext)
+          e.readValue(0, 2, slot(item.b))
+          e.unlessNumeric(2, slow)
+          e.readValue(1, 3, slot(item.c))
+          e.unlessNumeric(3, slow)
+          e.widenToFixed(0, 2, slow)
+          e.widenToFixed(1, 3, slow)
+          e.divideFixed(0, 1, slow)
+          e.writeFixed(slot(item.a), 0)
+        else:
+          runSlow()
+      of IntegerDivideOp, ModuloOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.readValue(1, 3, slot(item.c))
+        e.unlessWhole(3, slow)
+        e.jumpIfZeroValue(1, slow)
+        if item.op == IntegerDivideOp:
+          e.quotient(0, 1)
+        else:
+          e.remainder(0, 1)
+        e.writeWhole(slot(item.a), 0)
       of NegateOp:
-        emitter.readNumeric(0, item.b, leaveHere)
-        emitter.negateScratch(0)
-        emitter.writeNumeric(0, item.a)
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        when ModelsFixed:
+          e.unlessNumeric(2, slow)
+        else:
+          e.unlessWhole(2, slow)
+        e.negate(0)
+        e.writeKind(slot(item.a), 2, 0)
       of EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp,
           GreaterEqualOp:
-        # Ordering is the same on the stored bits either way round, and
-        # the answer is always a whole number.
-        emitter.readNumeric(0, item.b, leaveHere)
-        emitter.requireSameKind(item.c, leaveHere)
-        emitter.readSlotValue(1, item.c)
-        emitter.compareScratch(0, 1)
-        emitter.answerCondition(0, comparisonTest(item.op))
-        emitter.writeSlot(0, item.a)
-      of DivideOp:
-        when ModelsFixed and ModelsDivide:
-          # Either kind may appear on either side here, unlike adding,
-          # because both are widened to the same thing before dividing.
-          emitter.readNumeric(0, item.b, leaveHere)
-          emitter.widenToFixed(0, leaveHere)
-          emitter.readNumeric(1, item.c, leaveHere)
-          emitter.widenToFixed(1, leaveHere)
-          emitter.divideFixed(leaveHere)
-          emitter.setSlotKind(item.a, FixedTag)
-          emitter.writeSlotPayload(0, item.a)
+        # The same kind on both sides orders the same on the stored bits,
+        # and the answer is always a whole number.
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.readValue(1, 3, slot(item.c))
+        e.unlessSame(2, 3, slow)
+        e.unlessNumeric(2, slow)
+        e.compare(0, 1)
+        e.answer(0, comparisonCheck(item.op))
+        e.writeWhole(slot(item.a), 0)
+      of AndOp, OrOp, XorOp, EqvOp, ImpOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.readValue(1, 3, slot(item.c))
+        e.unlessWhole(3, slow)
+        case item.op
+        of AndOp:
+          e.bitAnd(0, 1)
+        of OrOp:
+          e.bitOr(0, 1)
+        of XorOp:
+          e.bitXor(0, 1)
+        of EqvOp:
+          e.bitXor(0, 1)
+          e.bitNot(0)
         else:
-          return nil
-      of ModuloOp, IntegerDivideOp:
-        # Both want whole numbers, both refuse a zero divisor, and minus
-        # one would trap on one of the two architectures, so all three go
-        # back to the interpreter rather than being modelled.
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.readSlot(1, item.c, leaveHere)
-        emitter.guardDivisor(1, leaveHere)
-        if item.op == ModuloOp:
-          emitter.remainderScratch(0, 1)
-        else:
-          emitter.quotientScratch(0, 1)
-        emitter.writeSlot(0, item.a)
-      of LoadFixedOp:
-        emitter.setSlotConstant(item.a, FixedTag, constants[int(item.b)])
-      of LoadHostDataOp:
-        emitter.copyHostDataToSlot(item.b, item.a)
-      of AddGlobalHostDataOp:
-        emitter.readHostDataInteger(0, item.b, leaveHere)
-        emitter.scratchFromHoisted(1, slotOf(item.a))
-        emitter.addScratch(1, 0)
-        emitter.hoistedFromScratch(slotOf(item.a), 1)
-      of AddGlobalRegisterOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.scratchFromHoisted(1, slotOf(item.a))
-        emitter.addScratch(1, 0)
-        emitter.hoistedFromScratch(slotOf(item.a), 1)
-      of ModuloGlobalImmediateOp:
-        emitter.scratchFromHoisted(0, slotOf(item.b))
-        emitter.setScratch(1, item.c)
-        emitter.remainderScratch(0, 1)
-        emitter.hoistedFromScratch(slotOf(item.a), 0)
-      of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp,
-          CallOp, ReturnOp, ExitSubOp, HostCallOp:
-        when ModelsCalls:
-          case item.op
-          of SetArgumentOp:
-            emitter.stageArgumentFromSlot(item.a, item.b)
-          of SetArgumentImmediateOp:
-            emitter.stageArgumentWhole(item.a, item.b)
-          of SetArgumentGlobalOp:
-            if hoisting:
-              emitter.stageArgumentFromHoisted(item.a, slotOf(item.b))
-            else:
-              when ModelsMemoryGlobals:
-                emitter.copyGlobalToArgument(item.a, item.b)
-          of CallOp:
-            let callee = routines[int(item.a)]
-            emitter.enterRoutine(
-              callee, item.a, routines[int(ownerOf[index])].registers,
-              int32(index + 1), limits, leaveHere
-            )
-            emitter.branch(blockAt(callee.entry))
-          of HostCallOp:
-            emitter.callHost(
-              item.b, item.a,
-              exitLabel(int32(index), NativeFailed, index)
-            )
-          else:
-            emitter.leaveRoutine(leaveHere)
-        else:
-          return nil
-      of ArrayGetOp:
-        emitter.readSlot(0, item.c, leaveHere)
-        emitter.elementAddress(0, extents[int(item.b)], leaveHere)
-        emitter.copyElementToSlot(item.a)
-      of ArraySetOp:
-        emitter.readSlot(0, item.b, leaveHere)
-        emitter.elementAddress(0, extents[int(item.a)], leaveHere)
-        emitter.copySlotToElement(item.c)
-      of ArrayAddGlobalsOp:
-        emitter.scratchFromHoisted(0, slotOf(item.b))
-        emitter.elementAddress(0, extents[int(item.a)], leaveHere)
-        emitter.readElement(0, leaveHere)
-        emitter.scratchFromHoisted(1, slotOf(item.c))
-        emitter.addScratch(0, 1)
-        emitter.writeElement(0)
-      of AddGlobalArrayGlobalIndexOp:
-        emitter.scratchFromHoisted(0, slotOf(item.c))
-        emitter.elementAddress(0, extents[int(item.b)], leaveHere)
-        emitter.readElement(0, leaveHere)
-        emitter.scratchFromHoisted(1, slotOf(item.a))
-        emitter.addScratch(1, 0)
-        emitter.hoistedFromScratch(slotOf(item.a), 1)
-      of JumpIfZeroOp:
-        emitter.readSlot(0, item.a, leaveHere)
-        if covers(item.b):
-          emitter.branchIfScratchZero(0, blockAt(item.b))
-        else:
-          emitter.branchIfScratchZero(
-            0, exitLabel(item.b, NativeCompleted, index)
-          )
+          e.bitNot(0)
+          e.bitOr(0, 1)
+        e.writeWhole(slot(item.a), 0)
+      of NotOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.bitNot(0)
+        e.writeWhole(slot(item.a), 0)
       of JumpOp:
-        if covers(item.a):
-          when CountedLoops:
-            if counted and index == stop - 1:
-              emitter.advanceCounter()
-          emitter.branch(blockAt(item.a))
-        else:
-          leaveFor(item.a, NativeCompleted, index)
+        e.jump(blocks[int(item.a)])
+        fallsThrough = false
+      of JumpIfZeroOp:
+        # A fixed-point zero is all zero bits too, so either kind tests
+        # the same way.
+        let slow = slowFor(ToOffset)
+        e.readValue(0, 2, slot(item.a))
+        e.unlessNumeric(2, slow)
+        e.jumpIfZeroValue(0, blocks[int(item.b)])
       of JumpUnlessGlobalEqualImmediateOp,
           JumpUnlessGlobalNotEqualImmediateOp,
           JumpUnlessGlobalLessImmediateOp,
           JumpUnlessGlobalLessEqualImmediateOp,
           JumpUnlessGlobalGreaterImmediateOp,
           JumpUnlessGlobalGreaterEqualImmediateOp:
-        if hoisting:
-          emitter.compareSlot(slotOf(item.a), item.b, poolSlot(item.b))
-        else:
-          when ModelsMemoryGlobals:
-            emitter.compareGlobalWhole(item.a, item.b, leaveHere)
-        branchOut(item.c, takenOn(item.op))
+        let slow = slowFor(ToOffset)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.compareConstant(0, item.b)
+        e.jumpOn(takenOn(item.op), blocks[int(item.c)])
       of JumpUnlessGlobalModuloEqualZeroOp:
-        # Dividing by one or minus one always leaves no remainder, and
-        # minus one would trap on x86, so never emit the divide for those.
-        if item.b != 1 and item.b != -1:
-          emitter.remainderTest(slotOf(item.a), item.b)
-          branchOut(item.c, NotEqualTest)
-      else:
-        return nil
+        if item.b == 0:
+          runSlow()
+          e.jump(dispatchLabel)
+          fallsThrough = false
+        else:
+          let slow = slowFor(ToOffset)
+          e.readValue(0, 2, global(item.a))
+          e.unlessWhole(2, slow)
+          e.loadConstant(1, item.b)
+          e.remainder(0, 1)
+          e.jumpIfNotZeroValue(0, blocks[int(item.c)])
+      of ArrayGetOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.c))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.b)], slow)
+        e.copyValue(slot(item.a), cell())
+      of ArraySetOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.a)], slow)
+        e.copyValue(cell(), slot(item.c))
+      of CallOp, GosubOp:
+        let owner = routines[int(ownerOf[index])]
+        let slow = slowFor(ToOffset)
+        if item.op == CallOp:
+          let callee = routines[int(item.a)]
+          e.enterRoutine(false, item.a, callee.registers, callee.parameters,
+            owner.registers, offset + 1, limits, slow)
+          e.jump(blocks[int(callee.entry)])
+        else:
+          e.enterRoutine(true, ownerOf[index], owner.registers, 0,
+            owner.registers, offset + 1, limits, slow)
+          e.jump(blocks[int(item.a)])
+        fallsThrough = false
+      of ReturnOp:
+        let owner = routines[int(ownerOf[index])]
+        e.leaveRoutine(owner.parameters, slowFor(ToOffset))
+        fallsThrough = false
+      of HaltOp:
+        e.halt(offset)
+        fallsThrough = false
+      of ReturnLabelOp, ExitSubOp:
+        runSlow()
+        e.jump(dispatchLabel)
+        fallsThrough = false
+      of LoadStringOp, TextCallOp, HostCallOp, PrintTextOp, PrintValueOp,
+          PrintNewlineOp:
+        runSlow()
 
-    ## Falling off the last offset resumes the interpreter at the next one.
-    leaveFor(int32(stop), NativeCompleted, stop - 1)
+      # Slow paths go after the block, out of the way of the fast ones.
+      let blockEnds = index + 1 == code.len or code[index + 1].op == MeterOp
+      if blockEnds and stubs.len > 0:
+        if fallsThrough:
+          e.jump(blocks[index + 1])
+        for stub in stubs:
+          e.place(stub.label)
+          e.callSlow(stub.offset, slowLabel)
+          case stub.carry
+          of ToNext:
+            e.jump(blocks[int(stub.offset) + 1])
+          of ToOffset:
+            e.jump(dispatchLabel)
+        stubs.setLen(0)
 
-    for (stub, target, status, leaving) in exits:
-      emitter.place(stub)
-      when CountedLoops:
-        if counted and status == NativeCompleted:
-          # Charge the passes that ran, plus how far the leaving one got.
-          emitter.chargeCounted(
-            plan.instructions, plan.work,
-            plan.partialInstructions[leaving - start],
-            plan.partialWork[leaving - start]
-          )
-        elif spending and status == NativeCompleted:
-          emitter.chargeSpending()
-      emitter.exitStub(target, int32(ord(status)), writeback)
+    # One past the end holds nothing to run. The interpreter's code is
+    # left to refuse it the way it would.
+    e.place(blocks[code.len])
+    e.callSlow(int32(code.len), slowLabel)
+    e.jump(dispatchLabel)
 
-    ## Shared exit: publish the hoisted globals and budgets, then return.
-    emitter.place(writeback)
-    if hoisting:
-      for slot, index in hoisted:
-        emitter.storeHoisted(slot, int(index) * ValueStride)
-    emitter.publishState()
-    emitter.endRegion()
+    e.place(dispatchLabel)
+    e.dispatch()
+    e.place(slowLabel)
+    e.slowRoutine(failedLabel)
+    e.place(failedLabel)
+    e.epilogue(NativeFailed)
 
-    ## Guard failure happens before any global is written, so the loop is
-    ## simply handed back untouched for the interpreter to run.
-    var resumeElsewhere = emitter.label()
-    when ModelsCalls:
-      if usesCalls:
-        emitter.place(resumeElsewhere)
-        emitter.resumeAtStoredOffset(if hoisting: hoisted else: @[])
+    let bytes = e.finish()
+    var starts = newSeq[int](code.len + 1)
+    for index in 0 .. code.len:
+      starts[index] = e.offsetBytes(blocks[index])
+    (bytes, starts)
 
-    emitter.place(guardFailed)
-    emitter.guardExit(int32(start))
-
-    emitter.resolve()
-    let size = emitter.code.len * sizeof(emitter.code[0])
-    if size > MaxRegionBytes:
+proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
+    extents: seq[ArrayExtent], constants: seq[int32], globals, hostData,
+    arguments: int, limits: CallLimits): Machine {.raises: [BasicError].} =
+  ## Compiles every offset of a program to machine code, or returns nil
+  ## when this target has no backend or the program is outside what the
+  ## generator is sure of. Generated code indexes storage without
+  ## checking, so every index it will use is proved in range here first.
+  when not (NativeArm64 or NativeAmd64):
+    return nil
+  else:
+    if not layoutMatches() or code.len == 0 or routines.len == 0:
+      return nil
+    if limits.frames <= 0 or limits.slots < 0:
+      return nil
+    # Every value is reached through a displacement worked out here, so
+    # each store of values must end where one of thirty-two bits still
+    # reaches, whichever architecture this is.
+    const Reachable = (int(high(int32)) - ValueStride) div ValueStride
+    if globals > Reachable or hostData > Reachable or
+        arguments > Reachable or int(limits.slots) > Reachable:
       return nil
 
-    result = Region(
-      start: int32(start), stop: int32(stop), hoisted: hoisted, size: size
-    )
-    ## Where every offset lands. Anything this region did not compile
-    ## goes to the one stub that hands the offset back, which is how a
-    ## return into interpreted code needs no test of its own.
-    if usesCalls:
-      result.returns = newSeq[pointer](code.len + 1)
-    result.listing = newSeq[byte](size)
-    if size > 0:
-      copyMem(result.listing[0].addr, emitter.code[0].addr, size)
-    result.buffer = initCodeBuffer(size)
-    result.buffer.write(emitter.code)
+    # Every offset belongs to exactly one routine, and none runs on into
+    # the next, so the routine an instruction runs in is known here.
+    var ownerOf = newSeq[int32](code.len)
+    for index in 0 ..< ownerOf.len:
+      ownerOf[index] = -1
+    for id, routine in routines:
+      if routine.entry < 0 or routine.length <= 0 or
+          int(routine.entry) + int(routine.length) > code.len:
+        return nil
+      if routine.registers < 0 or int(routine.registers) > Reachable or
+          routine.parameters < 0 or
+          routine.parameters > routine.registers or
+          routine.parameters > int32(arguments):
+        return nil
+      for step in 0 ..< int(routine.length):
+        let offset = int(routine.entry) + step
+        if ownerOf[offset] >= 0:
+          return nil
+        ownerOf[offset] = int32(id)
+      let last = code[int(routine.entry) + int(routine.length) - 1]
+      if last.op notin Terminators:
+        return nil
+    for index in 0 ..< code.len:
+      if ownerOf[index] < 0:
+        return nil
+
+    for index, item in code:
+      let owner = routines[int(ownerOf[index])]
+      template requireSlot(value: int32) =
+        if value < 0 or value >= owner.registers:
+          return nil
+      template requireGlobal(value: int32) =
+        if value < 0 or int(value) >= globals:
+          return nil
+      template requireArray(value: int32) =
+        if value < 0 or int(value) >= extents.len:
+          return nil
+        let extent = extents[int(value)]
+        if extent.base < 0 or extent.length < 0 or
+            int(extent.base) + int(extent.length) > Reachable:
+          return nil
+      template requireHost(value: int32) =
+        if value < 0 or int(value) >= hostData:
+          return nil
+      template requireArgument(value: int32) =
+        if value < 0 or int(value) >= arguments:
+          return nil
+      template requireTarget(value: int32) =
+        if value < 0 or int(value) >= code.len or
+            ownerOf[int(value)] != ownerOf[index]:
+          return nil
+      case item.op
+      of MeterOp:
+        if item.a < 0 or item.b < 0:
+          return nil
+      of LoadImmediateOp:
+        requireSlot(item.a)
+      of LoadFixedOp:
+        requireSlot(item.a)
+        if item.b < 0 or int(item.b) >= constants.len:
+          return nil
+      of MoveOp, NegateOp, NotOp:
+        requireSlot(item.a)
+        requireSlot(item.b)
+      of LoadGlobalOp:
+        requireSlot(item.a)
+        requireGlobal(item.b)
+      of LoadHostDataOp:
+        requireSlot(item.a)
+        requireHost(item.b)
+      of StoreGlobalOp:
+        requireGlobal(item.a)
+        requireSlot(item.b)
+      of StoreGlobalImmediateOp, AddGlobalImmediateOp:
+        requireGlobal(item.a)
+      of MoveGlobalOp, AddGlobalOp, ModuloGlobalImmediateOp:
+        requireGlobal(item.a)
+        requireGlobal(item.b)
+      of AddGlobalHostDataOp:
+        requireGlobal(item.a)
+        requireHost(item.b)
+      of AddGlobalRegisterOp:
+        requireGlobal(item.a)
+        requireSlot(item.b)
+      of AddGlobalArrayGlobalIndexOp:
+        requireGlobal(item.a)
+        requireArray(item.b)
+        requireGlobal(item.c)
+      of ArrayAddGlobalsOp:
+        requireArray(item.a)
+        requireGlobal(item.b)
+        requireGlobal(item.c)
+      of AddOp, SubtractOp, MultiplyOp, DivideOp, IntegerDivideOp,
+          ModuloOp, EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp,
+          GreaterEqualOp, AndOp, OrOp, XorOp, EqvOp, ImpOp:
+        requireSlot(item.a)
+        requireSlot(item.b)
+        requireSlot(item.c)
+      of JumpOp, GosubOp, ReturnLabelOp:
+        requireTarget(item.a)
+      of JumpIfZeroOp:
+        requireSlot(item.a)
+        requireTarget(item.b)
+      of JumpUnlessGlobalEqualImmediateOp,
+          JumpUnlessGlobalNotEqualImmediateOp,
+          JumpUnlessGlobalLessImmediateOp,
+          JumpUnlessGlobalLessEqualImmediateOp,
+          JumpUnlessGlobalGreaterImmediateOp,
+          JumpUnlessGlobalGreaterEqualImmediateOp,
+          JumpUnlessGlobalModuloEqualZeroOp:
+        requireGlobal(item.a)
+        requireTarget(item.c)
+      of ArrayGetOp:
+        requireSlot(item.a)
+        requireArray(item.b)
+        requireSlot(item.c)
+      of ArraySetOp:
+        requireArray(item.a)
+        requireSlot(item.b)
+        requireSlot(item.c)
+      of SetArgumentOp:
+        requireArgument(item.a)
+        requireSlot(item.b)
+      of SetArgumentImmediateOp:
+        requireArgument(item.a)
+      of SetArgumentGlobalOp:
+        requireArgument(item.a)
+        requireGlobal(item.b)
+      of CallOp:
+        if item.a <= 0 or int(item.a) >= routines.len:
+          return nil
+      else:
+        discard
+      if item.op in {CallOp, GosubOp} and index + 1 >= code.len:
+        return nil
+
+    var emitted: (seq[byte], seq[int])
+    try:
+      emitted = emitProgram(code, routines, ownerOf, extents, constants,
+        limits, false)
+    except BasicError:
+      # Some branch could not reach; every branch then goes the long way.
+      emitted = emitProgram(code, routines, ownerOf, extents, constants,
+        limits, true)
+    let (bytes, starts) = emitted
+    if bytes.len > MaxProgramBytes:
+      return nil
+
+    result = Machine(size: bytes.len, listing: bytes)
+    result.buffer = initCodeBuffer(bytes.len)
+    result.buffer.write(bytes)
     result.buffer.seal()
     result.call = cast[NativeCall](result.buffer.entry)
-    if usesCalls:
-      let origin = cast[int](result.buffer.entry)
-      let elsewhere = origin +
-        emitter.offsetOf(resumeElsewhere) * sizeof(emitter.code[0])
-      for index in 0 ..< result.returns.len:
-        result.returns[index] = cast[pointer](elsewhere)
-      for place, offset in members:
-        result.returns[int(offset)] = cast[pointer](
-          origin + emitter.offsetOf(blocks[place]) * sizeof(emitter.code[0])
-        )
-      result.returnTable = result.returns[0].addr
+    let origin = cast[int](result.buffer.entry)
+    result.table = newSeq[pointer](code.len + 1)
+    for index in 0 .. code.len:
+      result.table[index] = cast[pointer](origin + starts[index])
 
-proc invoke*(region: Region, context: var NativeContext): NativeStatus
-    {.raises: [].} =
-  ## Runs one compiled loop and reports why it returned.
-  NativeStatus(region.call(context.addr))
-
-proc compileLoops*(code: seq[Instruction], globals, slots: int,
-    extents: seq[ArrayExtent] = @[], constants: seq[int32] = @[],
-    hostData = 0, routines: seq[RoutineExtent] = @[],
-    limits = CallLimits()): seq[Region]
-    {.raises: [BasicError].} =
-  ## Compiles every backward-branching loop the code generator models.
-  ## The result is indexed by bytecode offset, so the interpreter reaches
-  ## a compiled loop with one load rather than a lookup.
-  if not layoutMatches():
-    return
-  for index in 0 ..< code.len:
-    var target = 0'i32
-    if not code[index].branchTarget(target):
-      continue
-    if int(target) > index or int(target) < 0:
-      continue
-    if result.len > 0 and result[int(target)] != nil:
-      continue
-    var region: Region = nil
-    try:
-      region = compileRegion(
-        code, int(target), index + 1, globals, slots, extents,
-        constants, hostData, routines, limits
-      )
-    except BasicError:
-      region = nil
-    if region != nil:
-      if result.len == 0:
-        result = newSeq[Region](code.len)
-      result[int(target)] = region
+proc tableAddress*(machine: Machine): pointer {.raises: [].} =
+  ## Returns the table of native addresses indexed by bytecode offset.
+  machine.table[0].addr

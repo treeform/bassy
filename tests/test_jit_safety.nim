@@ -3,7 +3,7 @@
 ## through offsets worked out at compile time, so the checks that make
 ## that safe are the ones worth attacking.
 ##
-## Two halves. The first hands compileRegion bytecode the language's own
+## Two halves. The first hands compileProgram bytecode the language's own
 ## compiler would never produce, and requires it to refuse rather than
 ## emit. The second runs generated scripts down both paths and requires
 ## the results and both budgets to match, because a script that could tell
@@ -39,205 +39,155 @@ report(
 const
   Globals = 4
   Slots = 8
+  Limits = CallLimits(frames: 8, slots: 64)
 
 proc countingLoop(globalIndex: int32, target: int32): seq[Instruction] =
-  ## A minimal loop, parameterised so it can be made malformed.
+  ## A minimal program, parameterised so it can be made malformed.
   @[
     Instruction(op: MeterOp, a: 4, b: 2),
     Instruction(
       op: JumpUnlessGlobalLessImmediateOp, a: globalIndex, b: 10, c: target
     ),
     Instruction(op: AddGlobalImmediateOp, a: globalIndex, b: 1),
-    Instruction(op: JumpOp, a: 0)
+    Instruction(op: JumpOp, a: 0),
+    Instruction(op: MeterOp, a: 1, b: 1),
+    Instruction(op: HaltOp)
   ]
+
+proc main(code: seq[Instruction]): seq[RoutineExtent] =
+  ## One routine covering the whole program.
+  @[RoutineExtent(entry: 0, length: int32(code.len), registers: Slots)]
+
+proc compiles(code: seq[Instruction], globals = Globals,
+    routines: seq[RoutineExtent] = @[], extents: seq[ArrayExtent] = @[],
+    constants: seq[int32] = @[], hostData = 0, arguments = 4): bool =
+  ## Reports whether the whole program was accepted.
+  let table = if routines.len > 0: routines else: main(code)
+  compileProgram(code, table, extents, constants, globals, hostData,
+    arguments, Limits) != nil
 
 block:
   # The same shape must compile when it is well formed, or the refusals
   # below would prove nothing.
-  let code = countingLoop(1, 4)
   report(
-    "a well formed loop still compiles",
-    (not jitSupported()) or compileRegion(code, 0, 4, Globals, Slots, @[]) != nil
+    "a well formed program still compiles",
+    (not jitSupported()) or countingLoop(1, 4).compiles
   )
 
-block:
-  let code = countingLoop(Globals, 4)
-  report(
-    "a global one past the end is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil,
-    "an out of range index would become a fixed offset store"
-  )
+report(
+  "a global one past the end is refused",
+  not countingLoop(Globals, 4).compiles,
+  "an out of range index would become a fixed offset store"
+)
 
-block:
-  let code = countingLoop(1_000_000, 4)
-  report(
-    "a far out of range global is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
-  )
+report(
+  "a global far past the end is refused",
+  not countingLoop(1_000_000, 4).compiles
+)
 
-block:
-  let code = countingLoop(-1, 4)
-  report(
-    "a negative global is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil,
-    "a negative index would address below the globals"
-  )
+report("a negative global is refused", not countingLoop(-1, 4).compiles)
 
-block:
-  let code = countingLoop(1, 99)
-  report(
-    "a branch past the end of the code is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
-  )
+report(
+  "a branch past the end of the code is refused",
+  not countingLoop(1, 99).compiles
+)
 
-block:
-  let code = countingLoop(1, -5)
-  report(
-    "a negative branch target is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
-  )
+report(
+  "a negative branch target is refused",
+  not countingLoop(1, -5).compiles
+)
 
-block:
-  let code = countingLoop(1, 4)
-  report(
-    "a region reaching past the code is refused",
-    compileRegion(code, 0, 99, Globals, Slots, @[]) == nil
-  )
-
-block:
-  let code = countingLoop(1, 4)
-  report(
-    "a region with no storage behind it is refused",
-    compileRegion(code, 0, 4, 0, Slots, @[]) == nil
-  )
-
-block:
-  # Dividing by zero raises in the interpreter, so it must never reach a
-  # divide instruction.
-  let code = @[
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: JumpUnlessGlobalModuloEqualZeroOp, a: 1, b: 0, c: 4),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
-  report(
-    "a zero divisor is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
-  )
-
-block:
-  # A block whose charge will not fit the instruction that adds it must
-  # leave that loop interpreted, not abandon the whole compilation.
-  let code = @[
-    Instruction(op: MeterOp, a: 9_000_000, b: 9_000_000),
-    Instruction(
-      op: JumpUnlessGlobalLessImmediateOp, a: 1, b: 10, c: 5
-    ),
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
-  var raised = false
-  try:
-    discard compileRegion(code, 0, 5, Globals, Slots, @[])
-  except BasicError:
-    raised = true
-  # Falling back to the per-block check is a fine outcome here. Refusing
-  # the whole compilation is not.
-  report("a charge too wide to add does not abandon compilation", not raised)
-
-block:
-  # compileLoops must survive a region it cannot finish, because the
-  # interpreter can run anything the generator declines.
-  let code = @[
-    Instruction(op: MeterOp, a: 9_000_000, b: 9_000_000),
-    Instruction(
-      op: JumpUnlessGlobalLessImmediateOp, a: 1, b: 10, c: 5
-    ),
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0),
-    Instruction(op: HaltOp)
-  ]
-  var survived = false
-  try:
-    discard compileLoops(code, Globals, Slots, @[])
-    survived = true
-  except BasicError:
-    survived = false
-  report("compiling many loops survives one it cannot finish", survived)
+report(
+  "a program with no storage behind it is refused",
+  not countingLoop(1, 4).compiles(globals = 0)
+)
 
 block:
   # Nothing may hand the generator a global so far out that its offset
   # would not fit the displacement it is reached through.
-  let code = countingLoop(high(int32) div 8, 4)
   report(
     "a global whose offset would not fit is refused",
-    compileRegion(code, 0, 4, high(int32), Slots, @[]) == nil
+    not countingLoop(high(int32) div 8, 4).compiles(globals = high(int32))
   )
 
 block:
-  let code = @[
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: LoadGlobalOp, a: int32(Slots), b: 1),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
+  var code = countingLoop(1, 4)
+  code[2] = Instruction(op: LoadGlobalOp, a: int32(Slots), b: 1)
+  report("a register slot past the frame is refused", not code.compiles)
+  code[2] = Instruction(op: LoadGlobalOp, a: -1, b: 1)
+  report("a negative register slot is refused", not code.compiles)
+  code[2] = Instruction(op: JumpIfZeroOp, a: int32(Slots), b: 4)
+  report("a jump-if-zero slot past the frame is refused", not code.compiles)
+
+block:
+  var code = countingLoop(1, 4)
+  code[2] = Instruction(op: ArrayGetOp, a: 0, b: 7, c: 1)
+  report("an array that does not exist is refused", not code.compiles)
   report(
-    "a register slot past the frame is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
+    "an array with a negative length is refused",
+    not code.compiles(extents = @[
+      ArrayExtent(base: 0, length: 1), ArrayExtent(base: 0, length: 1),
+      ArrayExtent(base: 0, length: 1), ArrayExtent(base: 0, length: 1),
+      ArrayExtent(base: 0, length: 1), ArrayExtent(base: 0, length: 1),
+      ArrayExtent(base: 0, length: 1), ArrayExtent(base: 0, length: -4)
+    ])
   )
 
 block:
-  let code = @[
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: LoadGlobalOp, a: -1, b: 1),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
+  var code = countingLoop(1, 4)
+  code[2] = Instruction(op: LoadFixedOp, a: 0, b: 3)
+  report("a fixed-point constant that does not exist is refused",
+    not code.compiles(constants = @[1'i32]))
+  code[2] = Instruction(op: LoadHostDataOp, a: 0, b: 2)
+  report("host data that does not exist is refused",
+    not code.compiles(hostData = 2))
+  code[2] = Instruction(op: SetArgumentImmediateOp, a: 4, b: 1)
+  report("an argument past the staging area is refused",
+    not code.compiles(arguments = 4))
+
+block:
+  let code = countingLoop(1, 4)
   report(
-    "a negative register slot is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
+    "a routine table that leaves code uncovered is refused",
+    not code.compiles(routines = @[
+      RoutineExtent(entry: 0, length: 4, registers: Slots)
+    ])
+  )
+  report(
+    "routines that overlap are refused",
+    not code.compiles(routines = @[
+      RoutineExtent(entry: 0, length: 6, registers: Slots),
+      RoutineExtent(entry: 4, length: 2, registers: Slots)
+    ])
+  )
+  report(
+    "a routine reaching past the code is refused",
+    not code.compiles(routines = @[
+      RoutineExtent(entry: 0, length: 9, registers: Slots)
+    ])
+  )
+  report(
+    "a routine that runs on into the next one is refused",
+    not code.compiles(routines = @[
+      RoutineExtent(entry: 0, length: 2, registers: Slots),
+      RoutineExtent(entry: 2, length: 4, registers: Slots)
+    ])
+  )
+  report(
+    "a branch into another routine is refused",
+    not countingLoop(1, 4).compiles(routines = @[
+      RoutineExtent(entry: 0, length: 4, registers: Slots),
+      RoutineExtent(entry: 4, length: 2, registers: Slots)
+    ])
   )
 
 block:
-  # An operation naming an array that does not exist must be refused.
-  let code = @[
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: ArrayGetOp, a: 0, b: 7, c: 1),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
-  report(
-    "an array that does not exist is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
-  )
-
-block:
-  # Cells reaching past what a displacement covers must be refused.
-  let code = @[
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: ArrayGetOp, a: 0, b: 0, c: 1),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
-  let far = @[ArrayExtent(base: high(int32) div 4, length: 16)]
-  report(
-    "an array placed out of reach is refused",
-    compileRegion(code, 0, 4, Globals, Slots, far) == nil
-  )
-
-block:
-  let code = @[
-    Instruction(op: MeterOp, a: 4, b: 2),
-    Instruction(op: JumpIfZeroOp, a: int32(Slots), b: 4),
-    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
-    Instruction(op: JumpOp, a: 0)
-  ]
-  report(
-    "a jump-if-zero slot past the frame is refused",
-    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
-  )
+  var code = countingLoop(1, 4)
+  code[2] = Instruction(op: CallOp, a: 0)
+  report("a call to the main program is refused", not code.compiles)
+  code[2] = Instruction(op: CallOp, a: 5)
+  report("a call to a routine that does not exist is refused",
+    not code.compiles)
 
 ## Scripts, down both paths
 

@@ -1,5 +1,5 @@
-## Checks that compiled loops agree with the interpreter.
-## Every script runs twice, once interpreted and once with its hot loops
+## Checks that compiled programs agree with the interpreter.
+## Every script runs twice, once interpreted and once with the whole program
 ## executed as machine code. The globals and both budgets must match
 ## exactly, because a script must not be able to tell which path ran.
 
@@ -12,7 +12,7 @@ type Outcome = object
   instructions: int64
   work: int64
   failure: string
-  regions: int
+  compiled: int
 
 proc describe(value: Value): string =
   ## Renders a global for comparison output.
@@ -26,7 +26,7 @@ proc execute(source: string, native: bool): Outcome =
   let program = compile(source)
   var runtime = initRuntime(program)
   if native:
-    result.regions = runtime.compileNative()
+    result.compiled = runtime.compileNative()
   try:
     discard runtime.run()
   except BasicError as error:
@@ -37,13 +37,13 @@ proc execute(source: string, native: bool): Outcome =
   result.instructions = instructions
   result.work = work
 
-proc check(name, source: string, expectRegions = true) =
+proc check(name, source: string) =
   ## Compares the two execution paths and reports any disagreement.
   let plain = execute(source, false)
   let fast = execute(source, true)
   var problems: seq[string]
-  if jitSupported() and expectRegions and fast.regions == 0:
-    problems.add("no loop was compiled")
+  if jitSupported() and fast.compiled == 0:
+    problems.add("the program was not compiled")
   if plain.globals.len != fast.globals.len:
     problems.add("global count differs")
   else:
@@ -72,7 +72,7 @@ proc check(name, source: string, expectRegions = true) =
       echo "     ", problem
     quit(1)
   let note =
-    if fast.regions > 0: &"{fast.regions} compiled"
+    if fast.compiled > 0: &"{fast.compiled} compiled"
     else: "interpreted only"
   echo &"  ok  {name:<34} {note}"
 
@@ -139,16 +139,16 @@ while i < 100
 wend
 """
 
-# A loop whose counter becomes fixed point must fall back to the
-# interpreter without changing the answer.
-check "fixed point defeats the guard", """
+# A counter that is fixed point from the start takes the other kind's
+# path through every comparison and add without changing the answer.
+check "a fixed-point counter", """
 i = 0.5
 total = 0
 while i < 10
   total = total + 1
   i = i + 1
 wend
-""", expectRegions = false
+"""
 
 # The instruction budget has to be refused at exactly the same point.
 proc checkBudget(name: string, source: string, maximum: int64) =

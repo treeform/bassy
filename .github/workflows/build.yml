@@ -55,9 +55,18 @@ jobs:
         run: |
           nim r -d:release tests/test_arm64.nim
           nim r -d:release tests/test_amd64.nim
-      - name: Test compiled loops against the interpreter
-        run: nim r -d:release tests/test_jit.nim
-      - name: Test that compiled loops cannot outrun the sandbox
+      - name: Test compiled programs against the interpreter
+        run: |
+          nim r -d:release tests/test_jit.nim
+          nim r -d:release tests/test_native.nim
+          nim r -d:danger tests/test_native.nim
+          nim r -d:fixedChecks tests/test_native.nim
+      - name: Run the whole suite as machine code
+        run: |
+          nim r -d:release -d:bassyNative tests/tests.nim
+          nim r -d:danger -d:bassyNative tests/tests.nim
+          nim r -d:fixedChecks -d:bassyNative tests/tests.nim
+      - name: Test that compiled programs cannot outrun the sandbox
         run: |
           nim r -d:release tests/test_jit_safety.nim
           nim r -d:danger tests/test_jit_safety.nim
