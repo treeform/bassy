@@ -74,6 +74,8 @@ jobs:
         run: nim r -d:release -d:bassyNoJit tests/test_jit.nim
       - name: Render the BASIC raytracer and check cross-platform determinism
         run: nim r -d:release tests/bench_raytracer.nim
+      - name: Run the BASIC text workload and check cross-platform determinism
+        run: nim r -d:release tests/bench_strings.nim
       - name: Report native compilation speedups
         run: nim r -d:release tests/bench_jit.nim
       - name: Run examples
