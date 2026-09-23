@@ -5,7 +5,7 @@
 
 import
   std/[strutils, tables],
-  bassy/[bytecode, jit, numbers, texts]
+  bassy/[bytecode, jit, numbers, programs, texts]
 
 export bytecode, jit, numbers
 
@@ -217,6 +217,10 @@ type
     regionAt: seq[Region]
     bypass: int32
     hostFailure: string
+    machine: Machine
+    printer: PrintProc
+    nativeError: ref Exception
+    handedBack: int64
 
   Expr = object
     text: bool
@@ -2935,6 +2939,9 @@ proc clear(values: var seq[Value]) =
   if values.len > 0:
     zeroMem(addr values[0], values.len * sizeof(Value))
 
+proc compileNative*(runtime: var Runtime): int
+  ## Compiles this program to machine code; the body sits further down.
+
 proc initRuntimeState(
     program: Program,
     host: Host,
@@ -3052,6 +3059,12 @@ proc initRuntimeState(
   for i, function in program.hostFunctions:
     let id = host.functionIds.getOrDefault(function.name, -1'i32)
     result.hostCallbacks[i] = host.functions[int(id)].callback
+  when defined(bassyNative):
+    # Every runtime runs as machine code, so a whole test suite checks the
+    # two paths agree. A program the compiler refuses fails loudly here.
+    if jitSupported():
+      doAssert result.compileNative() == program.code.len,
+        "native compilation refused this program"
 
 proc initRuntime*(program: Program, limits = defaultLimits()): Runtime =
   ## Allocates a runtime for a program without host bindings.
@@ -3162,6 +3175,12 @@ proc fixedConstants*(program: Program): seq[int32] =
   for value in program.fixedValues:
     result.add(int32(value))
 
+proc handedBack*(runtime: Runtime): int64 {.inline.} =
+  ## Returns how many instructions compiled code has handed to the
+  ## interpreter's own code to run, because they were strings, printing,
+  ## host calls, or about to fail. Everything else ran as machine code.
+  runtime.handedBack
+
 proc nativeRegions*(runtime: Runtime): int =
   ## Returns how many compiled loops are still active.
   for region in runtime.regionAt:
@@ -3169,11 +3188,14 @@ proc nativeRegions*(runtime: Runtime): int =
       inc result
 
 proc compileNative*(runtime: var Runtime): int =
-  ## Compiles the hot integer loops of this program to machine code and
-  ## returns how many were accepted. Loops the compiler does not model are
-  ## left to the interpreter, so behavior never depends on the result.
+  ## Compiles this program to machine code and returns how many bytecode
+  ## offsets now run natively. The whole program is compiled where the
+  ## target has a backend for it, and otherwise only its hot loops.
+  ## Whatever is not compiled is left to the interpreter, so behavior
+  ## never depends on the result.
   runtime.bypass = -1
   runtime.regionAt = @[]
+  runtime.machine = nil
   if not jitSupported():
     return 0
   if not frameLayoutMatches():
@@ -3183,6 +3205,22 @@ proc compileNative*(runtime: var Runtime): int =
   var extents = newSeq[ArrayExtent](runtime.program.arrays.len)
   for index, item in runtime.program.arrays:
     extents[index] = ArrayExtent(base: item.base, length: item.length)
+  let limits = CallLimits(
+    frames: int32(runtime.frames.len),
+    slots: int32(runtime.registers.len)
+  )
+  runtime.machine = compileProgram(
+    runtime.program.code,
+    runtime.program.routineExtents,
+    extents,
+    runtime.program.fixedConstants,
+    runtime.globals.len,
+    runtime.hostData.len,
+    runtime.arguments.len,
+    limits
+  )
+  if runtime.machine != nil:
+    return runtime.program.code.len
   runtime.regionAt = compileLoops(
     runtime.program.code,
     runtime.globals.len,
@@ -3953,6 +3991,89 @@ template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
       print(PrintEvent(kind: NewlinePrint))
     inc runtime.pc
 
+proc nativeStep(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
+  ## Runs one instruction for compiled code, through the very code the
+  ## interpreter runs. Compiled code keeps the frame and budgets in the
+  ## context, so they are carried in and back out around it. A failure
+  ## cannot travel back through frames compiled code built, so it is kept
+  ## here and raised again once compiled code has returned.
+  var runtime = cast[Runtime](context.runtime)
+  inc runtime.handedBack
+  runtime.pc = pc
+  runtime.base = context.base
+  runtime.depth = context.depth
+  runtime.routine = context.routine
+  runtime.remainingInstructions = context.remainingInstructions
+  runtime.remainingWork = context.remainingWork
+  try:
+    let item = runtime.program.code[int(pc)]
+    if item.op == MeterOp:
+      runtime.chargeMeter(item)
+      inc runtime.pc
+    else:
+      runtime.performOp(item, runtime.printer)
+  except Exception as error:
+    runtime.nativeError = error
+    return 1
+  context.pc = runtime.pc
+  context.base = runtime.base
+  context.depth = runtime.depth
+  context.routine = runtime.routine
+  context.remainingInstructions = runtime.remainingInstructions
+  context.remainingWork = runtime.remainingWork
+  0
+
+proc runMachine(runtime: var Runtime, print: PrintProc) =
+  ## Runs the compiled program from wherever the runtime stands until it
+  ## halts, or raises whatever the interpreter's code raised on its way.
+  var context = NativeContext(
+    globals:
+      if runtime.globals.len == 0: nil
+      else: runtime.globals[0].addr,
+    registers:
+      if runtime.registers.len == 0: nil
+      else: runtime.registers[int(runtime.base)].addr,
+    memory:
+      if runtime.memory.len == 0: nil
+      else: runtime.memory[0].addr,
+    hostData:
+      if runtime.hostData.len == 0: nil
+      else: runtime.hostData[0].addr,
+    frames:
+      if runtime.frames.len == 0: nil
+      else: runtime.frames[0].addr,
+    arguments:
+      if runtime.arguments.len == 0: nil
+      else: runtime.arguments[0].addr,
+    registerFile:
+      if runtime.registers.len == 0: nil
+      else: runtime.registers[0].addr,
+    returnTable: runtime.machine.tableAddress,
+    base: runtime.base,
+    depth: runtime.depth,
+    routine: runtime.routine,
+    runtime: cast[pointer](runtime),
+    step: cast[pointer](nativeStep),
+    remainingInstructions: runtime.remainingInstructions,
+    remainingWork: runtime.remainingWork,
+    pc: runtime.pc
+  )
+  runtime.printer = print
+  let status = runtime.machine.invoke(context)
+  runtime.printer = nil
+  if status == NativeFailed:
+    # The interpreter's code left the runtime exactly as it failed.
+    let error = runtime.nativeError
+    runtime.nativeError = nil
+    raise error
+  runtime.remainingInstructions = context.remainingInstructions
+  runtime.remainingWork = context.remainingWork
+  runtime.pc = context.pc
+  runtime.base = context.base
+  runtime.depth = context.depth
+  runtime.routine = context.routine
+  runtime.finished = true
+
 proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
   ## Executes verified bytecode with bounded work, memory, calls, and output.
   if runtime.finished:
@@ -3964,6 +4085,8 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
     startEvents = runtime.printedEvents
   template fetch(): Instruction =
     runtime.program.code[int(runtime.pc)]
+  if runtime.machine != nil:
+    runtime.runMachine(print)
   while not runtime.finished:
     var item = fetch()
     if item.op == MeterOp:

@@ -541,3 +541,10 @@ proc shiftRightImmediate*(assembler: var Assembler, width: Width,
     base or (uint32(count) shl 16) or (uint32(size - 1) shl 10) or
       (source.number shl 5) or destination.number
   )
+
+proc branchLink*(assembler: var Assembler, target: Label) {.raises: [].} =
+  ## Calls a label, leaving the return address in the link register.
+  assembler.fixups.add(
+    Fixup(kind: Branch26Fixup, at: assembler.code.len, label: int(target))
+  )
+  assembler.emit(0x94000000'u32)

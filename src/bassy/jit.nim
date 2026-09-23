@@ -64,8 +64,9 @@ type
     routine*: int32
     runtime*: pointer
     hostCall*: pointer
+    step*: pointer
 
-  NativeCall = proc(context: ptr NativeContext): int32
+  NativeCall* = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
 
   RoutineExtent* = object
@@ -108,23 +109,24 @@ type
     GreaterEqualTest
 
 const
-  ValueStride = 16
-  ValuePayload = 8
-  ContextInstructions = 8
-  ContextWork = 16
-  ContextOffset = 24
-  ContextRegisters = 32
-  ContextMemory = 40
-  ContextHostData = 48
-  ContextFrames = 56
-  ContextArguments = 64
-  ContextRegisterFile = 72
-  ContextReturnTable = 80
-  ContextBase = 88
-  ContextDepth = 92
-  ContextRoutine = 96
-  ContextRuntime = 104
-  ContextHostCall = 112
+  ValueStride* = 16
+  ValuePayload* = 8
+  ContextInstructions* = 8
+  ContextWork* = 16
+  ContextOffset* = 24
+  ContextRegisters* = 32
+  ContextMemory* = 40
+  ContextHostData* = 48
+  ContextFrames* = 56
+  ContextArguments* = 64
+  ContextRegisterFile* = 72
+  ContextReturnTable* = 80
+  ContextBase* = 88
+  ContextDepth* = 92
+  ContextRoutine* = 96
+  ContextRuntime* = 104
+  ContextHostCall* = 112
+  ContextStep* = 120
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -141,9 +143,9 @@ const
   ## A call clears the callee's slots one at a time, so a routine wanting
   ## more than this keeps to the interpreter rather than growing the code.
   MaxClearedSlots = 64
-  FixedTag = 1
-  FixedShift = 16
-  FixedRounding = 1'i64 shl (FixedShift - 1)
+  FixedTag* = 1
+  FixedShift* = 16
+  FixedRounding* = 1'i64 shl (FixedShift - 1)
 
   ## Fixed-point values are only modelled when overflow is allowed to
   ## wrap. Under fixedChecks the interpreter asserts instead, and nothing
@@ -215,6 +217,8 @@ proc layoutMatches*(): bool {.raises: [].} =
   if cast[int](context.runtime.addr) - origin != ContextRuntime:
     return false
   if cast[int](context.hostCall.addr) - origin != ContextHostCall:
+    return false
+  if cast[int](context.step.addr) - origin != ContextStep:
     return false
   true
 

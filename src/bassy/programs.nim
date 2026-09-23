@@ -1,0 +1,1204 @@
+## Compiles a whole program from the register bytecode to machine code.
+##
+## Every bytecode offset becomes a native block, so jumps, calls and
+## returns go straight from one block to the next and the interpreter
+## loop never runs. Values stay exactly where the interpreter keeps them,
+## in the globals, the register file, the arguments and the array cells,
+## which is what lets the two agree on every result, every budget and
+## every failure.
+##
+## The common cases run inline: whole-number and fixed-point arithmetic,
+## comparisons, branches, moves, array cells, calls, returns and budget
+## meters. Everything else, such as strings, printing and host functions,
+## and every operation about to fail, calls the one routine the
+## interpreter itself runs for that instruction. Nothing is written
+## before such a call, so the instruction is simply run there instead.
+
+import
+  bytecode, jit, machine, numbers
+
+when NativeArm64:
+  import arm64
+elif NativeAmd64:
+  import amd64
+
+type
+  Machine* = ref object
+    ## One whole program compiled to machine code.
+    size*: int
+    listing*: seq[byte]
+    table: seq[pointer]
+    buffer: CodeBuffer
+    call: NativeCall
+
+  Home = enum
+    ## Where a value lives.
+    SlotHome,
+    GlobalHome,
+    ArgumentHome,
+    HostHome,
+    CellHome
+
+  Place = object
+    ## One value's address, as a home and an index into it.
+    home: Home
+    index: int32
+
+  Branching = enum
+    ## Where a slow path carries on once the interpreter's code has run.
+    ToNext,
+    ToOffset
+
+  Stub = object
+    ## A slow path, placed after the block its operation sits in.
+    label: Label
+    offset: int32
+    carry: Branching
+
+  Check = enum
+    ## An architecture-neutral comparison outcome.
+    EqualCheck,
+    NotEqualCheck,
+    LessCheck,
+    LessEqualCheck,
+    GreaterCheck,
+    GreaterEqualCheck
+
+const
+  MaxProgramBytes = 64 * 1024 * 1024
+  ## Leaving a routine without one of these would run on into the next
+  ## routine's code, which no call set up.
+  Terminators = {JumpOp, ReturnOp, ReturnLabelOp, ExitSubOp, HaltOp}
+
+proc slot(index: int32): Place {.inline, raises: [].} =
+  ## Names a register slot in the current frame.
+  Place(home: SlotHome, index: index)
+
+proc global(index: int32): Place {.inline, raises: [].} =
+  ## Names a scalar global.
+  Place(home: GlobalHome, index: index)
+
+proc argument(index: int32): Place {.inline, raises: [].} =
+  ## Names a staged call argument.
+  Place(home: ArgumentHome, index: index)
+
+proc host(index: int32): Place {.inline, raises: [].} =
+  ## Names a host data value.
+  Place(home: HostHome, index: index)
+
+proc cell(): Place {.inline, raises: [].} =
+  ## Names the array cell whose address was just worked out.
+  Place(home: CellHome)
+
+proc comparisonCheck(op: Op): Check {.raises: [].} =
+  ## Returns the outcome a comparison answers true on.
+  case op
+  of EqualOp: EqualCheck
+  of NotEqualOp: NotEqualCheck
+  of LessOp: LessCheck
+  of LessEqualOp: LessEqualCheck
+  of GreaterOp: GreaterCheck
+  else: GreaterEqualCheck
+
+proc takenOn(op: Op): Check {.raises: [].} =
+  ## Returns the outcome on which a fused test takes its branch.
+  case op
+  of JumpUnlessGlobalEqualImmediateOp: NotEqualCheck
+  of JumpUnlessGlobalNotEqualImmediateOp: EqualCheck
+  of JumpUnlessGlobalLessImmediateOp: GreaterEqualCheck
+  of JumpUnlessGlobalLessEqualImmediateOp: GreaterCheck
+  of JumpUnlessGlobalGreaterImmediateOp: LessEqualCheck
+  else: LessCheck
+
+when NativeArm64:
+  ## AArch64 code generation
+  ##
+  ## x19  context            x20  instruction budget   x21  work budget
+  ## x22  globals            x23  current frame        x24  offset table
+  ## x25  array cells        x26  arguments            x27  frames
+  ## x28  register file
+  ## x9 .. x15  working registers;  x16  far addresses;  x17  one cell
+  ##
+  ## Everything long lived sits in a register the platform's convention
+  ## keeps across a call, so calling back into the interpreter's code
+  ## costs no saving beyond the two budgets it may charge.
+
+  const
+    Context = x19
+    Instructions = x20
+    Work = x21
+    GlobalsBase = x22
+    RegistersBase = x23
+    TableBase = x24
+    MemoryBase = x25
+    ArgumentsBase = x26
+    FramesBase = x27
+    FileBase = x28
+    Temps = [x9, x10, x11, x12, x13, x14, x15]
+    Far = x16
+    Cell = x17
+    FrameBytes = 96
+    NearBytes = 4095 - ValuePayload
+
+  proc temp(index: int): Register {.inline, raises: [].} =
+    ## Returns one working register.
+    Temps[index]
+
+  proc nativeCondition(check: Check): Condition {.raises: [].} =
+    ## Maps a neutral outcome onto the architecture's encoding.
+    case check
+    of EqualCheck: EqualCondition
+    of NotEqualCheck: NotEqualCondition
+    of LessCheck: LessCondition
+    of LessEqualCheck: LessEqualCondition
+    of GreaterCheck: GreaterCondition
+    of GreaterEqualCheck: GreaterEqualCondition
+
+  proc inverse(condition: Condition): Condition {.raises: [].} =
+    ## Returns the condition that holds exactly when this one does not.
+    Condition(ord(condition) xor 1)
+
+  type
+    Emitter = object
+      ## The assembler plus whether branches must reach anywhere at all.
+      code: Assembler
+      far: bool
+
+  proc label(e: var Emitter): Label {.inline, raises: [].} =
+    ## Reserves a label.
+    e.code.label()
+
+  proc place(e: var Emitter, target: Label) {.inline, raises: [].} =
+    ## Places a label here.
+    e.code.place(target)
+
+  proc jump(e: var Emitter, target: Label) {.raises: [].} =
+    ## Jumps unconditionally.
+    e.code.branch(target)
+
+  proc jumpWhen(e: var Emitter, condition: Condition, target: Label)
+      {.raises: [].} =
+    ## Jumps when a condition holds, however far away the target is.
+    if e.far:
+      let skip = e.code.label()
+      e.code.branchIf(condition.inverse, skip)
+      e.code.branch(target)
+      e.code.place(skip)
+    else:
+      e.code.branchIf(condition, target)
+
+  proc jumpIfZero(e: var Emitter, register: Register, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds zero.
+    if e.far:
+      let skip = e.code.label()
+      e.code.branchIfNotZero(Word32, register, skip)
+      e.code.branch(target)
+      e.code.place(skip)
+    else:
+      e.code.branchIfZero(Word32, register, target)
+
+  proc jumpIfNotZero(e: var Emitter, register: Register, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds anything but zero.
+    if e.far:
+      let skip = e.code.label()
+      e.code.branchIfZero(Word32, register, skip)
+      e.code.branch(target)
+      e.code.place(skip)
+    else:
+      e.code.branchIfNotZero(Word32, register, target)
+
+  proc reach(e: var Emitter, place: Place): (Register, int)
+      {.raises: [BasicError].} =
+    ## Returns a base register and byte offset for a value, working the
+    ## address out in full when the offset is too wide to encode.
+    var base = Cell
+    case place.home
+    of SlotHome: base = RegistersBase
+    of GlobalHome: base = GlobalsBase
+    of ArgumentHome: base = ArgumentsBase
+    of HostHome:
+      e.code.loadDouble(Cell, Context, ContextHostData)
+    of CellHome:
+      return (Cell, 0)
+    let offset = int(place.index) * ValueStride
+    if offset <= NearBytes:
+      return (base, offset)
+    e.code.loadImmediate(Word64, Far, int64(offset))
+    e.code.addRegister(Word64, Far, base, Far)
+    (Far, 0)
+
+  proc readValue(e: var Emitter, value, tag: int, place: Place)
+      {.raises: [BasicError].} =
+    ## Reads a value's kind and its 32-bit payload.
+    let (base, offset) = e.reach(place)
+    e.code.loadByte(temp(tag), base, offset)
+    e.code.loadWord(temp(value), base, offset + ValuePayload)
+
+  proc writeWhole(e: var Emitter, place: Place, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a whole number.
+    let (base, offset) = e.reach(place)
+    e.code.storeByte(zeroRegister, base, offset)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeKind(e: var Emitter, place: Place, tag, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a payload under the kind held in a working register.
+    let (base, offset) = e.reach(place)
+    e.code.storeByte(temp(tag), base, offset)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeFixed(e: var Emitter, place: Place, value: int)
+      {.raises: [BasicError].} =
+    ## Writes a fixed-point payload.
+    let (base, offset) = e.reach(place)
+    e.code.loadImmediate(Word32, temp(5), FixedTag)
+    e.code.storeByte(temp(5), base, offset)
+    e.code.storeWord(temp(value), base, offset + ValuePayload)
+
+  proc writeConstant(e: var Emitter, place: Place, tag: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Writes a constant of a known kind.
+    e.code.loadImmediate(Word32, temp(6), int64(bits))
+    let (base, offset) = e.reach(place)
+    if tag == 0:
+      e.code.storeByte(zeroRegister, base, offset)
+    else:
+      e.code.loadImmediate(Word32, temp(5), int64(tag))
+      e.code.storeByte(temp(5), base, offset)
+    e.code.storeWord(temp(6), base, offset + ValuePayload)
+
+  proc copyValue(e: var Emitter, destination, source: Place)
+      {.raises: [BasicError].} =
+    ## Copies a value entire, whatever kind it holds, as the interpreter
+    ## does.
+    let (fromBase, fromOffset) = e.reach(source)
+    e.code.loadDouble(temp(5), fromBase, fromOffset)
+    e.code.loadDouble(temp(6), fromBase, fromOffset + ValuePayload)
+    let (toBase, toOffset) = e.reach(destination)
+    e.code.storeDouble(temp(5), toBase, toOffset)
+    e.code.storeDouble(temp(6), toBase, toOffset + ValuePayload)
+
+  proc unlessWhole(e: var Emitter, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless a kind says whole number.
+    e.jumpIfNotZero(temp(tag), slow)
+
+  proc unlessNumeric(e: var Emitter, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless a kind says number of either sort.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.jumpWhen(UnsignedGreaterCondition, slow)
+
+  proc unlessSame(e: var Emitter, tag, other: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Takes the slow path unless two kinds agree.
+    e.code.compareRegister(Word32, temp(tag), temp(other))
+    e.jumpWhen(NotEqualCondition, slow)
+
+  proc whenFixed(e: var Emitter, tag: int, target: Label)
+      {.raises: [BasicError].} =
+    ## Jumps when a kind says fixed point.
+    e.code.compareImmediate(Word32, temp(tag), FixedTag)
+    e.code.branchIf(EqualCondition, target)
+
+  proc loadConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [].} =
+    ## Loads a constant into a working register.
+    e.code.loadImmediate(Word32, temp(value), int64(bits))
+
+  proc add(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Adds, wrapping.
+    e.code.addRegister(Word32, temp(left), temp(left), temp(right))
+
+  proc subtract(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Subtracts, wrapping.
+    e.code.subtractRegister(Word32, temp(left), temp(left), temp(right))
+
+  proc multiply(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Multiplies, wrapping.
+    e.code.multiply(Word32, temp(left), temp(left), temp(right))
+
+  proc negate(e: var Emitter, value: int) {.raises: [].} =
+    ## Negates, wrapping.
+    e.code.negate(Word32, temp(value), temp(value))
+
+  proc bitAnd(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits both hold.
+    e.code.andRegister(Word32, temp(left), temp(left), temp(right))
+
+  proc bitOr(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits either holds.
+    e.code.orRegister(Word32, temp(left), temp(left), temp(right))
+
+  proc bitXor(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Keeps the bits exactly one holds.
+    e.code.xorRegister(Word32, temp(left), temp(left), temp(right))
+
+  proc bitNot(e: var Emitter, value: int) {.raises: [].} =
+    ## Flips every bit.
+    e.code.notRegister(Word32, temp(value), temp(value))
+
+  proc quotient(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Divides toward zero; the divisor is known not to be zero. The most
+    ## negative number over minus one wraps back to itself here, which is
+    ## the answer the interpreter defines.
+    e.code.signedDivide(Word32, temp(left), temp(left), temp(right))
+
+  proc remainder(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Leaves what dividing left over, with the sign of the dividend.
+    e.code.signedDivide(Word32, temp(6), temp(left), temp(right))
+    e.code.multiplySubtract(Word32, temp(left), temp(6), temp(right),
+      temp(left))
+
+  proc multiplyFixed(e: var Emitter, left, right: int)
+      {.raises: [BasicError].} =
+    ## Multiplies two Q16.16 numbers through a widened intermediate,
+    ## rounding to nearest exactly as the fixed-point library does.
+    e.code.signedMultiplyLong(temp(left), temp(left), temp(right))
+    e.code.loadImmediate(Word64, temp(6), jit.FixedRounding)
+    e.code.addRegister(Word64, temp(left), temp(left), temp(6))
+    e.code.arithmeticShiftRight(Word64, temp(left), temp(left), jit.FixedShift)
+    e.code.moveRegister(Word32, temp(left), temp(left))
+
+  proc widenToFixed(e: var Emitter, value, tag: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Turns a number of either kind into its Q16.16 bits, widened to
+    ## sixty-four. A whole number outside the fixed-point range cannot
+    ## become one, which the interpreter refuses, so that goes slow.
+    let register = temp(value)
+    let already = e.label()
+    let ready = e.label()
+    e.whenFixed(tag, already)
+    e.code.loadImmediate(Word32, temp(6), 32767)
+    e.code.compareRegister(Word32, register, temp(6))
+    e.jumpWhen(GreaterCondition, slow)
+    e.code.loadImmediate(Word32, temp(6), -32768)
+    e.code.compareRegister(Word32, register, temp(6))
+    e.jumpWhen(LessCondition, slow)
+    e.code.signExtendWord(register, register)
+    e.code.shiftLeftImmediate(Word64, register, register, jit.FixedShift)
+    e.jump(ready)
+    e.place(already)
+    e.code.signExtendWord(register, register)
+    e.place(ready)
+
+  proc divideFixed(e: var Emitter, left, right: int, slow: Label)
+      {.raises: [BasicError].} =
+    ## Divides two widened Q16.16 numbers, rounding to nearest with halves
+    ## going up, for either sign, exactly as the fixed-point library
+    ## does: the signs are put right first, half the divisor is added,
+    ## and the truncating divide is corrected back to a floor.
+    let numerator = temp(left)
+    let denominator = temp(right)
+    let answer = temp(5)
+    let leftOver = temp(6)
+    e.code.compareImmediate(Word64, denominator, 0)
+    e.jumpWhen(EqualCondition, slow)
+    let signsSettled = e.label()
+    e.code.branchIf(GreaterCondition, signsSettled)
+    e.code.negate(Word64, numerator, numerator)
+    e.code.negate(Word64, denominator, denominator)
+    e.place(signsSettled)
+    e.code.shiftLeftImmediate(Word64, numerator, numerator, jit.FixedShift)
+    e.code.shiftRightImmediate(Word64, answer, denominator, 1)
+    e.code.addRegister(Word64, numerator, numerator, answer)
+    e.code.signedDivide(Word64, answer, numerator, denominator)
+    e.code.multiplySubtract(Word64, leftOver, answer, denominator,
+      numerator)
+    let done = e.label()
+    e.code.compareImmediate(Word64, leftOver, 0)
+    e.code.branchIf(EqualCondition, done)
+    e.code.compareImmediate(Word64, numerator, 0)
+    e.code.branchIf(GreaterEqualCondition, done)
+    e.code.subtractImmediate(Word64, answer, answer, 1)
+    e.place(done)
+    e.code.moveRegister(Word32, numerator, answer)
+
+  proc compare(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two working registers.
+    e.code.compareRegister(Word32, temp(left), temp(right))
+
+  proc compareConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Sets flags from a working register against a constant.
+    if bits >= 0 and bits <= 4095:
+      e.code.compareImmediate(Word32, temp(value), int(bits))
+    else:
+      e.code.loadImmediate(Word32, temp(6), int64(bits))
+      e.code.compareRegister(Word32, temp(value), temp(6))
+
+  proc answer(e: var Emitter, value: int, check: Check) {.raises: [].} =
+    ## Writes BASIC's -1 for true and zero for false.
+    e.code.setOnCondition(Word32, temp(value), nativeCondition(check))
+
+  proc jumpOn(e: var Emitter, check: Check, target: Label)
+      {.raises: [].} =
+    ## Jumps on a comparison outcome.
+    e.jumpWhen(nativeCondition(check), target)
+
+  proc jumpIfZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds zero.
+    e.jumpIfZero(temp(value), target)
+
+  proc jumpIfNotZeroValue(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a working register holds anything but zero.
+    e.jumpIfNotZero(temp(value), target)
+
+  proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
+      slow: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index and leaves the cell's address in Cell. One
+    ## unsigned comparison covers both ends, as the interpreter's does.
+    let position = temp(index)
+    e.code.loadImmediate(Word32, temp(6), int64(extent.length))
+    e.code.compareRegister(Word32, position, temp(6))
+    e.jumpWhen(CarrySetCondition, slow)
+    e.code.loadImmediate(Word32, temp(6), int64(extent.base))
+    e.code.addRegister(Word32, temp(6), temp(6), position)
+    e.code.addRegister(Word64, Cell, MemoryBase, temp(6), 4)
+
+  proc meter(e: var Emitter, instructions, work: int32, slow: Label)
+      {.raises: [BasicError].} =
+    ## Checks both budgets before charging either, as the interpreter does.
+    if instructions <= 4095:
+      e.code.compareImmediate(Word64, Instructions, int(instructions))
+    else:
+      e.code.loadImmediate(Word64, temp(5), int64(instructions))
+      e.code.compareRegister(Word64, Instructions, temp(5))
+    e.jumpWhen(LessCondition, slow)
+    if work <= 4095:
+      e.code.compareImmediate(Word64, Work, int(work))
+    else:
+      e.code.loadImmediate(Word64, temp(6), int64(work))
+      e.code.compareRegister(Word64, Work, temp(6))
+    e.jumpWhen(LessCondition, slow)
+    if instructions <= 4095:
+      e.code.subtractImmediate(Word64, Instructions, Instructions,
+        int(instructions))
+    else:
+      e.code.subtractRegister(Word64, Instructions, Instructions, temp(5))
+    if work <= 4095:
+      e.code.subtractImmediate(Word64, Work, Work, int(work))
+    else:
+      e.code.subtractRegister(Word64, Work, Work, temp(6))
+
+  proc frameOf(e: var Emitter, base: Register, index: Register)
+      {.raises: [].} =
+    ## Points a register at one register-file slot by its absolute index.
+    e.code.addRegister(Word64, base, FileBase, index, 4)
+
+  proc copyValues(e: var Emitter, destination, source: Register,
+      count: int) {.raises: [BasicError].} =
+    ## Copies a run of whole values, in a loop once there are many.
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.loadDouble(temp(5), source, index * ValueStride)
+        e.code.loadDouble(temp(6), source, index * ValueStride + ValuePayload)
+        e.code.storeDouble(temp(5), destination, index * ValueStride)
+        e.code.storeDouble(temp(6), destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, temp(2), source)
+    e.code.moveRegister(Word64, temp(3), destination)
+    e.code.loadImmediate(Word32, temp(4), int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.loadDouble(temp(5), temp(2), 0)
+    e.code.loadDouble(temp(6), temp(2), ValuePayload)
+    e.code.storeDouble(temp(5), temp(3), 0)
+    e.code.storeDouble(temp(6), temp(3), ValuePayload)
+    e.code.addImmediate(Word64, temp(2), temp(2), ValueStride)
+    e.code.addImmediate(Word64, temp(3), temp(3), ValueStride)
+    e.code.subtractImmediate(Word32, temp(4), temp(4), 1)
+    e.code.branchIfNotZero(Word32, temp(4), again)
+
+  proc clearValues(e: var Emitter, destination: Register, count: int)
+      {.raises: [BasicError].} =
+    ## Zeroes a run of values, in a loop once there are many.
+    if count <= 8:
+      for index in 0 ..< count:
+        e.code.storeDouble(zeroRegister, destination, index * ValueStride)
+        e.code.storeDouble(zeroRegister, destination,
+          index * ValueStride + ValuePayload)
+      return
+    e.code.moveRegister(Word64, temp(3), destination)
+    e.code.loadImmediate(Word32, temp(4), int64(count))
+    let again = e.label()
+    e.place(again)
+    e.code.storeDouble(zeroRegister, temp(3), 0)
+    e.code.storeDouble(zeroRegister, temp(3), ValuePayload)
+    e.code.addImmediate(Word64, temp(3), temp(3), ValueStride)
+    e.code.subtractImmediate(Word32, temp(4), temp(4), 1)
+    e.code.branchIfNotZero(Word32, temp(4), again)
+
+  proc enterRoutine(e: var Emitter, gosub: bool, calleeId: int32,
+      calleeRegisters, calleeParameters, callerRegisters: int32,
+      resumeAt: int32, limits: CallLimits, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pushes a frame into the interpreter's own array and moves the
+    ## current frame on, refusing the same two ceilings it refuses.
+    let depth = temp(0)
+    let oldBase = temp(1)
+    let newBase = temp(2)
+    let frame = temp(3)
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.code.loadImmediate(Word32, temp(6), int64(limits.frames) - 1)
+    e.code.compareRegister(Word32, depth, temp(6))
+    e.jumpWhen(GreaterEqualCondition, slow)
+    e.code.loadWord(oldBase, Context, ContextBase)
+    e.code.loadImmediate(Word32, temp(6), int64(callerRegisters))
+    e.code.addRegister(Word32, newBase, oldBase, temp(6))
+    e.code.loadImmediate(Word32, temp(6),
+      int64(limits.slots) - int64(calleeRegisters))
+    e.code.compareRegister(Word32, newBase, temp(6))
+    e.jumpWhen(GreaterCondition, slow)
+
+    e.code.addRegister(Word64, frame, FramesBase, depth, 4)
+    e.code.storeWord(oldBase, frame, FrameBase)
+    e.code.loadWord(temp(4), Context, ContextRoutine)
+    e.code.storeWord(temp(4), frame, FrameRoutine)
+    e.code.loadImmediate(Word32, temp(4), int64(resumeAt))
+    e.code.storeWord(temp(4), frame, FrameReturn)
+    if gosub:
+      e.code.loadImmediate(Word32, temp(4), 1)
+      e.code.storeWord(temp(4), frame, FrameTag)
+    else:
+      e.code.storeWord(zeroRegister, frame, FrameTag)
+
+    e.code.addImmediate(Word32, depth, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.code.storeWord(newBase, Context, ContextBase)
+    e.code.loadImmediate(Word32, temp(4), int64(calleeId))
+    e.code.storeWord(temp(4), Context, ContextRoutine)
+
+    # A GOSUB hands the callee a copy of the caller's slots; a call clears
+    # them and lays the arguments over the first few, in that order.
+    e.code.moveRegister(Word64, frame, RegistersBase)
+    e.frameOf(RegistersBase, newBase)
+    if gosub:
+      e.copyValues(RegistersBase, frame, int(calleeRegisters))
+    else:
+      e.clearValues(RegistersBase, int(calleeRegisters))
+      e.copyValues(RegistersBase, ArgumentsBase, int(calleeParameters))
+
+  proc leaveRoutine(e: var Emitter, parameters: int32, slow: Label)
+      {.raises: [BasicError].} =
+    ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
+    ## frame first hands the shared parameters back to the caller.
+    let depth = temp(0)
+    let frame = temp(1)
+    let base = temp(2)
+    let resume = temp(3)
+    e.code.loadWord(depth, Context, ContextDepth)
+    e.jumpIfZero(depth, slow)
+    e.code.subtractImmediate(Word32, depth, depth, 1)
+    e.code.storeWord(depth, Context, ContextDepth)
+    e.code.addRegister(Word64, frame, FramesBase, depth, 4)
+    e.code.loadWord(base, frame, FrameBase)
+    if parameters > 0:
+      let plain = e.label()
+      e.code.loadByte(temp(4), frame, FrameTag)
+      e.code.compareImmediate(Word32, temp(4), 1)
+      e.code.branchIf(NotEqualCondition, plain)
+      e.frameOf(Far, base)
+      e.copyValues(Far, RegistersBase, int(parameters))
+      e.place(plain)
+    e.code.storeWord(base, Context, ContextBase)
+    e.code.loadWord(temp(4), frame, FrameRoutine)
+    e.code.storeWord(temp(4), Context, ContextRoutine)
+    e.code.loadWord(resume, frame, FrameReturn)
+    e.code.storeWord(resume, Context, ContextOffset)
+    e.frameOf(RegistersBase, base)
+    e.code.addRegister(Word64, temp(4), TableBase, resume, 3)
+    e.code.loadDouble(temp(4), temp(4), 0)
+    e.code.jumpRegister(temp(4))
+
+  proc callSlow(e: var Emitter, offset: int32, routine: Label)
+      {.raises: [BasicError].} =
+    ## Runs the interpreter's own code for one instruction.
+    e.code.loadImmediate(Word32, x1, int64(offset))
+    e.code.branchLink(routine)
+
+  proc slowRoutine(e: var Emitter, failed: Label)
+      {.raises: [BasicError].} =
+    ## The one place compiled code calls out. The budgets go into the
+    ## context for the interpreter's code to charge, and come back from it
+    ## along with the frame, since a call or a return may have moved it.
+    e.code.storePair(framePointer, linkRegister, stackPointer, -16, true)
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.moveRegister(Word64, x0, Context)
+    e.code.loadDouble(temp(0), Context, ContextStep)
+    e.code.callRegister(temp(0))
+    e.code.moveRegister(Word32, temp(0), x0)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadWord(temp(1), Context, ContextBase)
+    e.frameOf(RegistersBase, temp(1))
+    e.code.loadPair(framePointer, linkRegister, stackPointer, 16, true)
+    e.code.branchIfNotZero(Word32, temp(0), failed)
+    e.code.returnToCaller()
+
+  proc dispatch(e: var Emitter) {.raises: [BasicError].} =
+    ## Jumps to the block for whatever offset the context names.
+    e.code.loadWord(temp(0), Context, ContextOffset)
+    e.code.addRegister(Word64, temp(1), TableBase, temp(0), 3)
+    e.code.loadDouble(temp(1), temp(1), 0)
+    e.code.jumpRegister(temp(1))
+
+  proc prologue(e: var Emitter) {.raises: [BasicError].} =
+    ## Saves what the platform says to keep and loads the machine state.
+    e.code.storePair(framePointer, linkRegister, stackPointer, -FrameBytes,
+      true)
+    e.code.storePair(x19, x20, stackPointer, 16)
+    e.code.storePair(x21, x22, stackPointer, 32)
+    e.code.storePair(x23, x24, stackPointer, 48)
+    e.code.storePair(x25, x26, stackPointer, 64)
+    e.code.storePair(x27, x28, stackPointer, 80)
+    e.code.moveRegister(Word64, Context, x0)
+    e.code.loadDouble(GlobalsBase, Context, 0)
+    e.code.loadDouble(Instructions, Context, ContextInstructions)
+    e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadDouble(FileBase, Context, ContextRegisterFile)
+    e.code.loadDouble(TableBase, Context, ContextReturnTable)
+    e.code.loadDouble(MemoryBase, Context, ContextMemory)
+    e.code.loadDouble(ArgumentsBase, Context, ContextArguments)
+    e.code.loadDouble(FramesBase, Context, ContextFrames)
+    e.code.loadWord(temp(0), Context, ContextBase)
+    e.frameOf(RegistersBase, temp(0))
+
+  proc epilogue(e: var Emitter, status: NativeStatus)
+      {.raises: [BasicError].} =
+    ## Restores what the platform says to keep and returns a status.
+    e.code.loadImmediate(Word32, x0, int64(ord(status)))
+    e.code.loadPair(x19, x20, stackPointer, 16)
+    e.code.loadPair(x21, x22, stackPointer, 32)
+    e.code.loadPair(x23, x24, stackPointer, 48)
+    e.code.loadPair(x25, x26, stackPointer, 64)
+    e.code.loadPair(x27, x28, stackPointer, 80)
+    e.code.loadPair(framePointer, linkRegister, stackPointer, FrameBytes,
+      true)
+    e.code.returnToCaller()
+
+  proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
+    ## Publishes the budgets and where the program stopped, then returns.
+    e.code.storeDouble(Instructions, Context, ContextInstructions)
+    e.code.storeDouble(Work, Context, ContextWork)
+    e.code.loadImmediate(Word32, temp(0), int64(offset))
+    e.code.storeWord(temp(0), Context, ContextOffset)
+    e.epilogue(NativeCompleted)
+
+  proc finish(e: var Emitter): seq[byte] {.raises: [BasicError].} =
+    ## Resolves every branch and returns the finished bytes.
+    e.code.resolve()
+    result = newSeq[byte](e.code.code.len * 4)
+    if result.len > 0:
+      copyMem(result[0].addr, e.code.code[0].addr, result.len)
+
+  proc offsetBytes(e: Emitter, target: Label): int {.raises: [].} =
+    ## Returns where a label ended up, in bytes.
+    e.code.offsetOf(target) * 4
+
+proc invoke*(machine: Machine, context: var NativeContext): NativeStatus
+    {.raises: [].} =
+  ## Runs the compiled program from the offset the context names.
+  NativeStatus(machine.call(context.addr))
+
+proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
+    ownerOf: seq[int32], extents: seq[ArrayExtent], constants: seq[int32],
+    limits: CallLimits, far: bool): (seq[byte], seq[int])
+    {.raises: [BasicError].} =
+  ## Emits the whole program and returns its bytes along with where each
+  ## offset's block starts.
+  when not NativeArm64:
+    raise newException(BasicError, "BASIC has no whole-program backend here")
+  else:
+    var e = Emitter(far: far)
+    var blocks = newSeq[Label](code.len + 1)
+    for index in 0 .. code.len:
+      blocks[index] = e.label()
+    let dispatchLabel = e.label()
+    let slowLabel = e.label()
+    let failedLabel = e.label()
+
+    e.prologue()
+    e.jump(dispatchLabel)
+
+    var stubs: seq[Stub]
+    for index in 0 ..< code.len:
+      let item = code[index]
+      let offset = int32(index)
+      e.place(blocks[index])
+
+      template slowFor(after: Branching): Label =
+        ## Names a slow path for this instruction, emitted after the block.
+        let stub = Stub(label: e.label(), offset: offset, carry: after)
+        stubs.add(stub)
+        stub.label
+
+      template runSlow() =
+        ## Runs this instruction through the interpreter's code in line.
+        e.callSlow(offset, slowLabel)
+
+      var fallsThrough = true
+      case item.op
+      of MeterOp:
+        e.meter(item.b, item.a, slowFor(ToNext))
+      of LoadImmediateOp:
+        e.writeConstant(slot(item.a), 0, item.b)
+      of LoadFixedOp:
+        e.writeConstant(slot(item.a), FixedTag, constants[int(item.b)])
+      of MoveOp:
+        e.copyValue(slot(item.a), slot(item.b))
+      of LoadGlobalOp:
+        e.copyValue(slot(item.a), global(item.b))
+      of LoadHostDataOp:
+        e.copyValue(slot(item.a), host(item.b))
+      of StoreGlobalOp:
+        e.copyValue(global(item.a), slot(item.b))
+      of StoreGlobalImmediateOp:
+        e.writeConstant(global(item.a), 0, item.b)
+      of MoveGlobalOp:
+        e.copyValue(global(item.a), global(item.b))
+      of SetArgumentOp:
+        e.copyValue(argument(item.a), slot(item.b))
+      of SetArgumentImmediateOp:
+        e.writeConstant(argument(item.a), 0, item.b)
+      of SetArgumentGlobalOp:
+        e.copyValue(argument(item.a), global(item.b))
+      of AddGlobalImmediateOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.loadConstant(1, item.b)
+        e.add(0, 1)
+        e.writeWhole(global(item.a), 0)
+      of AddGlobalOp, AddGlobalHostDataOp, AddGlobalRegisterOp:
+        let slow = slowFor(ToNext)
+        let source =
+          case item.op
+          of AddGlobalOp: global(item.b)
+          of AddGlobalHostDataOp: host(item.b)
+          else: slot(item.b)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.readValue(1, 3, source)
+        e.unlessWhole(3, slow)
+        e.add(0, 1)
+        e.writeWhole(global(item.a), 0)
+      of ModuloGlobalImmediateOp:
+        if item.c == 0:
+          runSlow()
+        else:
+          let slow = slowFor(ToNext)
+          e.readValue(0, 2, global(item.b))
+          e.unlessWhole(2, slow)
+          e.loadConstant(1, item.c)
+          e.remainder(0, 1)
+          e.writeWhole(global(item.a), 0)
+      of AddGlobalArrayGlobalIndexOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, global(item.c))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.b)], slow)
+        e.readValue(1, 3, cell())
+        e.unlessWhole(3, slow)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.add(0, 1)
+        e.writeWhole(global(item.a), 0)
+      of ArrayAddGlobalsOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, global(item.b))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.a)], slow)
+        e.readValue(1, 3, cell())
+        e.unlessWhole(3, slow)
+        e.readValue(0, 2, global(item.c))
+        e.unlessWhole(2, slow)
+        e.add(1, 0)
+        e.writeWhole(cell(), 1)
+      of AddOp, SubtractOp, MultiplyOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.readValue(1, 3, slot(item.c))
+        e.unlessSame(2, 3, slow)
+        when ModelsFixed:
+          e.unlessNumeric(2, slow)
+        else:
+          e.unlessWhole(2, slow)
+        case item.op
+        of AddOp:
+          e.add(0, 1)
+        of SubtractOp:
+          e.subtract(0, 1)
+        else:
+          when ModelsFixed:
+            let fixedWay = e.label()
+            let joined = e.label()
+            e.whenFixed(2, fixedWay)
+            e.multiply(0, 1)
+            e.jump(joined)
+            e.place(fixedWay)
+            e.multiplyFixed(0, 1)
+            e.place(joined)
+          else:
+            e.multiply(0, 1)
+        e.writeKind(slot(item.a), 2, 0)
+      of DivideOp:
+        when ModelsFixed:
+          let slow = slowFor(ToNext)
+          e.readValue(0, 2, slot(item.b))
+          e.unlessNumeric(2, slow)
+          e.readValue(1, 3, slot(item.c))
+          e.unlessNumeric(3, slow)
+          e.widenToFixed(0, 2, slow)
+          e.widenToFixed(1, 3, slow)
+          e.divideFixed(0, 1, slow)
+          e.writeFixed(slot(item.a), 0)
+        else:
+          runSlow()
+      of IntegerDivideOp, ModuloOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.readValue(1, 3, slot(item.c))
+        e.unlessWhole(3, slow)
+        e.jumpIfZeroValue(1, slow)
+        if item.op == IntegerDivideOp:
+          e.quotient(0, 1)
+        else:
+          e.remainder(0, 1)
+        e.writeWhole(slot(item.a), 0)
+      of NegateOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        when ModelsFixed:
+          e.unlessNumeric(2, slow)
+        else:
+          e.unlessWhole(2, slow)
+        e.negate(0)
+        e.writeKind(slot(item.a), 2, 0)
+      of EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp,
+          GreaterEqualOp:
+        # The same kind on both sides orders the same on the stored bits,
+        # and the answer is always a whole number.
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.readValue(1, 3, slot(item.c))
+        e.unlessSame(2, 3, slow)
+        e.unlessNumeric(2, slow)
+        e.compare(0, 1)
+        e.answer(0, comparisonCheck(item.op))
+        e.writeWhole(slot(item.a), 0)
+      of AndOp, OrOp, XorOp, EqvOp, ImpOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.readValue(1, 3, slot(item.c))
+        e.unlessWhole(3, slow)
+        case item.op
+        of AndOp:
+          e.bitAnd(0, 1)
+        of OrOp:
+          e.bitOr(0, 1)
+        of XorOp:
+          e.bitXor(0, 1)
+        of EqvOp:
+          e.bitXor(0, 1)
+          e.bitNot(0)
+        else:
+          e.bitNot(0)
+          e.bitOr(0, 1)
+        e.writeWhole(slot(item.a), 0)
+      of NotOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.bitNot(0)
+        e.writeWhole(slot(item.a), 0)
+      of JumpOp:
+        e.jump(blocks[int(item.a)])
+        fallsThrough = false
+      of JumpIfZeroOp:
+        # A fixed-point zero is all zero bits too, so either kind tests
+        # the same way.
+        let slow = slowFor(ToOffset)
+        e.readValue(0, 2, slot(item.a))
+        e.unlessNumeric(2, slow)
+        e.jumpIfZeroValue(0, blocks[int(item.b)])
+      of JumpUnlessGlobalEqualImmediateOp,
+          JumpUnlessGlobalNotEqualImmediateOp,
+          JumpUnlessGlobalLessImmediateOp,
+          JumpUnlessGlobalLessEqualImmediateOp,
+          JumpUnlessGlobalGreaterImmediateOp,
+          JumpUnlessGlobalGreaterEqualImmediateOp:
+        let slow = slowFor(ToOffset)
+        e.readValue(0, 2, global(item.a))
+        e.unlessWhole(2, slow)
+        e.compareConstant(0, item.b)
+        e.jumpOn(takenOn(item.op), blocks[int(item.c)])
+      of JumpUnlessGlobalModuloEqualZeroOp:
+        if item.b == 0:
+          runSlow()
+          e.jump(dispatchLabel)
+          fallsThrough = false
+        else:
+          let slow = slowFor(ToOffset)
+          e.readValue(0, 2, global(item.a))
+          e.unlessWhole(2, slow)
+          e.loadConstant(1, item.b)
+          e.remainder(0, 1)
+          e.jumpIfNotZeroValue(0, blocks[int(item.c)])
+      of ArrayGetOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.c))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.b)], slow)
+        e.copyValue(slot(item.a), cell())
+      of ArraySetOp:
+        let slow = slowFor(ToNext)
+        e.readValue(0, 2, slot(item.b))
+        e.unlessWhole(2, slow)
+        e.cellAddress(0, extents[int(item.a)], slow)
+        e.copyValue(cell(), slot(item.c))
+      of CallOp, GosubOp:
+        let owner = routines[int(ownerOf[index])]
+        let slow = slowFor(ToOffset)
+        if item.op == CallOp:
+          let callee = routines[int(item.a)]
+          e.enterRoutine(false, item.a, callee.registers, callee.parameters,
+            owner.registers, offset + 1, limits, slow)
+          e.jump(blocks[int(callee.entry)])
+        else:
+          e.enterRoutine(true, ownerOf[index], owner.registers, 0,
+            owner.registers, offset + 1, limits, slow)
+          e.jump(blocks[int(item.a)])
+        fallsThrough = false
+      of ReturnOp:
+        let owner = routines[int(ownerOf[index])]
+        e.leaveRoutine(owner.parameters, slowFor(ToOffset))
+        fallsThrough = false
+      of HaltOp:
+        e.halt(offset)
+        fallsThrough = false
+      of ReturnLabelOp, ExitSubOp:
+        runSlow()
+        e.jump(dispatchLabel)
+        fallsThrough = false
+      of LoadStringOp, TextCallOp, HostCallOp, PrintTextOp, PrintValueOp,
+          PrintNewlineOp:
+        runSlow()
+
+      # Slow paths go after the block, out of the way of the fast ones.
+      let blockEnds = index + 1 == code.len or code[index + 1].op == MeterOp
+      if blockEnds and stubs.len > 0:
+        if fallsThrough:
+          e.jump(blocks[index + 1])
+        for stub in stubs:
+          e.place(stub.label)
+          e.callSlow(stub.offset, slowLabel)
+          case stub.carry
+          of ToNext:
+            e.jump(blocks[int(stub.offset) + 1])
+          of ToOffset:
+            e.jump(dispatchLabel)
+        stubs.setLen(0)
+
+    # One past the end holds nothing to run. The interpreter's code is
+    # left to refuse it the way it would.
+    e.place(blocks[code.len])
+    e.callSlow(int32(code.len), slowLabel)
+    e.jump(dispatchLabel)
+
+    e.place(dispatchLabel)
+    e.dispatch()
+    e.place(slowLabel)
+    e.slowRoutine(failedLabel)
+    e.place(failedLabel)
+    e.epilogue(NativeFailed)
+
+    let bytes = e.finish()
+    var starts = newSeq[int](code.len + 1)
+    for index in 0 .. code.len:
+      starts[index] = e.offsetBytes(blocks[index])
+    (bytes, starts)
+
+proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
+    extents: seq[ArrayExtent], constants: seq[int32], globals, hostData,
+    arguments: int, limits: CallLimits): Machine {.raises: [BasicError].} =
+  ## Compiles every offset of a program to machine code, or returns nil
+  ## when this target has no backend or the program is outside what the
+  ## generator is sure of. Generated code indexes storage without
+  ## checking, so every index it will use is proved in range here first.
+  when not NativeArm64:
+    return nil
+  else:
+    if not layoutMatches() or code.len == 0 or routines.len == 0:
+      return nil
+    if limits.frames <= 0 or limits.slots < 0:
+      return nil
+
+    # Every offset belongs to exactly one routine, and none runs on into
+    # the next, so the routine an instruction runs in is known here.
+    var ownerOf = newSeq[int32](code.len)
+    for index in 0 ..< ownerOf.len:
+      ownerOf[index] = -1
+    for id, routine in routines:
+      if routine.entry < 0 or routine.length <= 0 or
+          int(routine.entry) + int(routine.length) > code.len:
+        return nil
+      if routine.registers < 0 or routine.parameters < 0 or
+          routine.parameters > routine.registers or
+          routine.parameters > int32(arguments):
+        return nil
+      for step in 0 ..< int(routine.length):
+        let offset = int(routine.entry) + step
+        if ownerOf[offset] >= 0:
+          return nil
+        ownerOf[offset] = int32(id)
+      let last = code[int(routine.entry) + int(routine.length) - 1]
+      if last.op notin Terminators:
+        return nil
+    for index in 0 ..< code.len:
+      if ownerOf[index] < 0:
+        return nil
+
+    for index, item in code:
+      let owner = routines[int(ownerOf[index])]
+      template requireSlot(value: int32) =
+        if value < 0 or value >= owner.registers:
+          return nil
+      template requireGlobal(value: int32) =
+        if value < 0 or int(value) >= globals:
+          return nil
+      template requireArray(value: int32) =
+        if value < 0 or int(value) >= extents.len:
+          return nil
+        let extent = extents[int(value)]
+        if extent.base < 0 or extent.length < 0:
+          return nil
+      template requireHost(value: int32) =
+        if value < 0 or int(value) >= hostData:
+          return nil
+      template requireArgument(value: int32) =
+        if value < 0 or int(value) >= arguments:
+          return nil
+      template requireTarget(value: int32) =
+        if value < 0 or int(value) >= code.len or
+            ownerOf[int(value)] != ownerOf[index]:
+          return nil
+      case item.op
+      of MeterOp:
+        if item.a < 0 or item.b < 0:
+          return nil
+      of LoadImmediateOp:
+        requireSlot(item.a)
+      of LoadFixedOp:
+        requireSlot(item.a)
+        if item.b < 0 or int(item.b) >= constants.len:
+          return nil
+      of MoveOp, NegateOp, NotOp:
+        requireSlot(item.a)
+        requireSlot(item.b)
+      of LoadGlobalOp:
+        requireSlot(item.a)
+        requireGlobal(item.b)
+      of LoadHostDataOp:
+        requireSlot(item.a)
+        requireHost(item.b)
+      of StoreGlobalOp:
+        requireGlobal(item.a)
+        requireSlot(item.b)
+      of StoreGlobalImmediateOp, AddGlobalImmediateOp:
+        requireGlobal(item.a)
+      of MoveGlobalOp, AddGlobalOp, ModuloGlobalImmediateOp:
+        requireGlobal(item.a)
+        requireGlobal(item.b)
+      of AddGlobalHostDataOp:
+        requireGlobal(item.a)
+        requireHost(item.b)
+      of AddGlobalRegisterOp:
+        requireGlobal(item.a)
+        requireSlot(item.b)
+      of AddGlobalArrayGlobalIndexOp:
+        requireGlobal(item.a)
+        requireArray(item.b)
+        requireGlobal(item.c)
+      of ArrayAddGlobalsOp:
+        requireArray(item.a)
+        requireGlobal(item.b)
+        requireGlobal(item.c)
+      of AddOp, SubtractOp, MultiplyOp, DivideOp, IntegerDivideOp,
+          ModuloOp, EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp,
+          GreaterEqualOp, AndOp, OrOp, XorOp, EqvOp, ImpOp:
+        requireSlot(item.a)
+        requireSlot(item.b)
+        requireSlot(item.c)
+      of JumpOp, GosubOp, ReturnLabelOp:
+        requireTarget(item.a)
+      of JumpIfZeroOp:
+        requireSlot(item.a)
+        requireTarget(item.b)
+      of JumpUnlessGlobalEqualImmediateOp,
+          JumpUnlessGlobalNotEqualImmediateOp,
+          JumpUnlessGlobalLessImmediateOp,
+          JumpUnlessGlobalLessEqualImmediateOp,
+          JumpUnlessGlobalGreaterImmediateOp,
+          JumpUnlessGlobalGreaterEqualImmediateOp,
+          JumpUnlessGlobalModuloEqualZeroOp:
+        requireGlobal(item.a)
+        requireTarget(item.c)
+      of ArrayGetOp:
+        requireSlot(item.a)
+        requireArray(item.b)
+        requireSlot(item.c)
+      of ArraySetOp:
+        requireArray(item.a)
+        requireSlot(item.b)
+        requireSlot(item.c)
+      of SetArgumentOp:
+        requireArgument(item.a)
+        requireSlot(item.b)
+      of SetArgumentImmediateOp:
+        requireArgument(item.a)
+      of SetArgumentGlobalOp:
+        requireArgument(item.a)
+        requireGlobal(item.b)
+      of CallOp:
+        if item.a <= 0 or int(item.a) >= routines.len:
+          return nil
+      else:
+        discard
+      if item.op in {CallOp, GosubOp} and index + 1 >= code.len:
+        return nil
+
+    var emitted: (seq[byte], seq[int])
+    try:
+      emitted = emitProgram(code, routines, ownerOf, extents, constants,
+        limits, false)
+    except BasicError:
+      # Some branch could not reach; every branch then goes the long way.
+      emitted = emitProgram(code, routines, ownerOf, extents, constants,
+        limits, true)
+    let (bytes, starts) = emitted
+    if bytes.len > MaxProgramBytes:
+      return nil
+
+    result = Machine(size: bytes.len, listing: bytes)
+    result.buffer = initCodeBuffer(bytes.len)
+    result.buffer.write(bytes)
+    result.buffer.seal()
+    result.call = cast[NativeCall](result.buffer.entry)
+    let origin = cast[int](result.buffer.entry)
+    result.table = newSeq[pointer](code.len + 1)
+    for index in 0 .. code.len:
+      result.table[index] = cast[pointer](origin + starts[index])
+
+proc tableAddress*(machine: Machine): pointer {.raises: [].} =
+  ## Returns the table of native addresses indexed by bytecode offset.
+  machine.table[0].addr
