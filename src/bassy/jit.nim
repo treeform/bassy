@@ -285,14 +285,32 @@ proc pooledConstants(code: seq[Instruction], start, stop, room: int):
     else:
       discard
 
+proc anyTarget(item: Instruction, target: var int32): bool {.raises: [].} =
+  ## Reports where an operation can send control, for every operation that
+  ## can send it anywhere. This is wider than the set the code generator
+  ## models: a subroutine call or a register test the generator refuses to
+  ## compile can still name an offset inside a loop it did compile.
+  case item.op
+  of JumpOp, GosubOp, ReturnLabelOp:
+    target = item.a
+    true
+  of JumpIfZeroOp:
+    target = item.b
+    true
+  else:
+    item.branchTarget(target)
+
 proc reachesOutside(code: seq[Instruction], start, stop: int): bool
     {.raises: [].} =
   ## Reports whether the loop can be entered anywhere but its first offset.
+  ## Compiled code proves its globals are integers and loads them into
+  ## registers on the way in, so arriving anywhere else would skip the
+  ## proof and read registers that were never filled.
   for index in 0 ..< code.len:
     if index >= start and index < stop:
       continue
     var target = 0'i32
-    if code[index].branchTarget(target):
+    if code[index].anyTarget(target):
       if int(target) > start and int(target) < stop:
         return true
   false
