@@ -227,6 +227,18 @@ block:
     compileRegion(code, 0, 4, Globals, Slots, far) == nil
   )
 
+block:
+  let code = @[
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: JumpIfZeroOp, a: int32(Slots), b: 4),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0)
+  ]
+  report(
+    "a jump-if-zero slot past the frame is refused",
+    compileRegion(code, 0, 4, Globals, Slots, @[]) == nil
+  )
+
 ## Scripts, down both paths
 
 type Outcome = object
@@ -531,6 +543,113 @@ while j < 63
   j = j + 1
 wend
 """)
+
+agrees("a loop that calls a subroutine", """
+sub bump(v)
+  total = total + v
+end sub
+i = 0
+total = 0
+while i < 200
+  bump(i)
+  bump(i)
+  i = i + 1
+wend
+""")
+
+agrees("a subroutine calling another", """
+sub inner(v)
+  total = total + v
+end sub
+sub outer(v)
+  inner(v)
+  inner(v)
+end sub
+i = 0
+total = 0
+while i < 200
+  outer(i)
+  i = i + 1
+wend
+""")
+
+agrees("recursion", """
+sub down(n)
+  if n > 0 then
+    hits = hits + 1
+    down(n - 1)
+  end if
+end sub
+i = 0
+hits = 0
+while i < 100
+  down(8)
+  i = i + 1
+wend
+""")
+
+agrees("recursion past the depth limit", """
+sub down(n)
+  hits = hits + 1
+  down(n + 1)
+end sub
+i = 0
+hits = 0
+while i < 3
+  down(1)
+  i = i + 1
+wend
+""")
+
+agrees("leaving a subroutine early", """
+sub maybe(v)
+  if v > 50 then
+    exit sub
+  end if
+  total = total + v
+end sub
+i = 0
+total = 0
+while i < 200
+  maybe(i)
+  i = i + 1
+wend
+""")
+
+agrees("a callee that reaches an array", """
+dim cells(63)
+sub store(n)
+  cells(n) = n * 2
+end sub
+i = 0
+while i < 64
+  store(i)
+  i = i + 1
+wend
+""")
+
+agrees("a callee doing something unmodelled", """
+sub shout(v)
+  print v
+end sub
+i = 0
+while i < 20
+  shout(i)
+  i = i + 1
+wend
+""")
+
+agrees("the budget running out inside a call", """
+sub bump(v)
+  total = total + v
+end sub
+i = 0
+total = 0
+while i < 100000
+  bump(i)
+  i = i + 1
+wend
+""", maximum = 977)
 
 ## Generated scripts
 

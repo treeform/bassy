@@ -20,6 +20,11 @@ const
   NativeArm64* = NativeCode and defined(arm64)
   NativeAmd64* = NativeCode and defined(amd64)
 
+  ## Calls are written for AArch64 so far. Everywhere else a region
+  ## containing one is simply not compiled, which is what happened before
+  ## they were written anywhere.
+  ModelsCalls* = NativeArm64
+
 when NativeArm64:
   import arm64
 elif NativeAmd64:
@@ -54,6 +59,19 @@ type
   NativeCall = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
 
+  RoutineExtent* = object
+    ## Where one routine's code sits, how many slots a call to it needs,
+    ## and how many of those the caller fills in.
+    entry*: int32
+    length*: int32
+    registers*: int32
+    parameters*: int32
+
+  CallLimits* = object
+    ## The two ceilings a call has to respect, read from the runtime.
+    frames*: int32
+    slots*: int32
+
   ArrayExtent* = object
     ## Where one array sits in the shared cell storage, and how long it is.
     base*: int32
@@ -66,6 +84,7 @@ type
     hoisted*: seq[int32]
     size*: int
     listing*: seq[byte]
+    returns: seq[pointer]
     returnTable*: pointer
     buffer: CodeBuffer
     call: NativeCall
@@ -108,6 +127,9 @@ const
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
   MaxChargeImmediate = 4095
+  ## A call clears the callee's slots one at a time, so a routine wanting
+  ## more than this keeps to the interpreter rather than growing the code.
+  MaxClearedSlots = 64
   FixedTag = 1
   FixedShift = 16
   FixedRounding = 1'i64 shl (FixedShift - 1)
@@ -206,6 +228,9 @@ proc isCompilable(item: Instruction): bool {.raises: [].} =
     true
   of ModuloOp:
     true
+  of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp,
+      CallOp, ReturnOp, ExitSubOp:
+    ModelsCalls
   of JumpUnlessGlobalModuloEqualZeroOp:
     # The interpreter raises on a zero divisor; refuse rather than model it.
     item.b != 0
@@ -235,6 +260,8 @@ proc touchedGlobals(item: Instruction, globals: var seq[int32])
     note(item.b)
   of StoreGlobalOp:
     note(item.a)
+  of SetArgumentGlobalOp:
+    note(item.b)
   of AddGlobalHostDataOp, AddGlobalRegisterOp:
     note(item.a)
   of ModuloGlobalImmediateOp:
@@ -279,7 +306,10 @@ proc touchedSlots(item: Instruction, slots: var seq[int32])
   case item.op
   of LoadImmediateOp, LoadGlobalOp:
     note(item.a)
-  of StoreGlobalOp, NegateOp, JumpIfZeroOp:
+  of JumpIfZeroOp:
+    # The slot tested is the first operand; the second is where to go.
+    note(item.a)
+  of StoreGlobalOp, NegateOp:
     note(item.b)
   of MoveOp:
     note(item.a)
@@ -291,7 +321,7 @@ proc touchedSlots(item: Instruction, slots: var seq[int32])
     note(item.c)
   of LoadFixedOp, LoadHostDataOp:
     note(item.a)
-  of AddGlobalRegisterOp:
+  of AddGlobalRegisterOp, SetArgumentOp:
     note(item.b)
   of ArrayGetOp:
     note(item.a)
@@ -466,6 +496,46 @@ proc anyTarget(item: Instruction, target: var int32): bool {.raises: [].} =
     true
   else:
     item.branchTarget(target)
+
+proc calledRoutine(item: Instruction, id: var int32): bool {.raises: [].} =
+  ## Reports whether an operation calls a routine, and which one.
+  if item.op == CallOp:
+    id = item.a
+    true
+  else:
+    false
+
+proc gatherCalled(code: seq[Instruction], members: var seq[int32],
+    covered: var seq[bool], routines: seq[RoutineExtent]): bool
+    {.raises: [].} =
+  ## Grows a region to take in the body of everything it calls, and the
+  ## bodies of everything those call in turn. Returns false if any of it
+  ## cannot be reached or would not fit.
+  var pending = 0
+  while pending < members.len:
+    let offset = int(members[pending])
+    inc pending
+    var id = 0'i32
+    if not code[offset].calledRoutine(id):
+      continue
+    if id < 0 or int(id) >= routines.len:
+      return false
+    let routine = routines[int(id)]
+    if routine.length <= 0 or routine.entry < 0:
+      return false
+    if int(routine.entry) + int(routine.length) > code.len:
+      return false
+    if covered[int(routine.entry)]:
+      continue
+    for step in 0 ..< int(routine.length):
+      let inside = int(routine.entry) + step
+      if covered[inside]:
+        # Two routines cannot share code, so an overlap means the table
+        # says something this does not understand.
+        return false
+      covered[inside] = true
+      members.add(int32(inside))
+  true
 
 proc reachesOutside(code: seq[Instruction], start, stop: int): bool
     {.raises: [].} =
@@ -1000,6 +1070,140 @@ when NativeArm64:
     emitter.storeByte(Scratch, RegistersBase, base)
     emitter.loadImmediate(Word32, ValueScratch[0], int64(bits))
     emitter.storeWord(ValueScratch[0], RegistersBase, base + ValuePayload)
+  ## Calls
+  ##
+  ## Nothing is called in the machine's sense: the frame goes into the
+  ## interpreter's own array, the base and depth into its own fields, and
+  ## control simply jumps to the callee's compiled code. Every piece of
+  ## state a call moves therefore stays where the interpreter looks for
+  ## it, so leaving part way through a call costs nothing to arrange.
+
+  proc stageArgumentFromSlot(emitter: var Assembler, index: int32,
+      slot: int32) {.raises: [BasicError].} =
+    ## Copies a slot into an argument, entire, whatever kind it holds.
+    emitter.loadDouble(Scratch, Context, ContextArguments)
+    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
+    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
+    emitter.copySlotToElement(slot)
+
+  proc stageArgumentWhole(emitter: var Assembler, index: int32,
+      value: int32) {.raises: [BasicError].} =
+    ## Writes a whole number straight into an argument.
+    emitter.loadDouble(Scratch, Context, ContextArguments)
+    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
+    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
+    emitter.storeByte(zeroRegister, Scratch, 0)
+    emitter.loadImmediate(Word32, ValueScratch[0], int64(value))
+    emitter.storeWord(ValueScratch[0], Scratch, ValuePayload)
+
+  proc stageArgumentFromHoisted(emitter: var Assembler, index: int32,
+      slot: int) {.raises: [BasicError].} =
+    ## Writes a hoisted global into an argument, always a whole number
+    ## because every hoisted global was proved to be one on the way in.
+    emitter.loadDouble(Scratch, Context, ContextArguments)
+    emitter.loadImmediate(Word32, OtherScratch, int64(index) * ValueStride)
+    emitter.addRegister(Word64, Scratch, Scratch, OtherScratch)
+    emitter.storeByte(zeroRegister, Scratch, 0)
+    emitter.storeWord(slotRegister(slot), Scratch, ValuePayload)
+
+  proc enterRoutine(emitter: var Assembler, callee: RoutineExtent,
+      calleeId, callerRegisters, resumeAt: int32, limits: CallLimits,
+      leave: Label) {.raises: [BasicError].} =
+    ## Pushes a frame and moves to the callee, refusing the same two
+    ## ceilings the interpreter refuses.
+    emitter.loadWord(Scratch, Context, ContextDepth)
+    emitter.loadImmediate(Word32, OtherScratch, int64(limits.frames) - 1)
+    emitter.compareRegister(Word32, Scratch, OtherScratch)
+    emitter.branchIf(GreaterEqualCondition, leave)
+
+    emitter.loadWord(OtherScratch, Context, ContextBase)
+    emitter.moveRegister(Word32, ValueScratch[0], OtherScratch)
+    if callerRegisters > 0:
+      emitter.addImmediate(Word32, ValueScratch[0], ValueScratch[0],
+        int(callerRegisters))
+    emitter.loadImmediate(Word32, ValueScratch[1],
+      int64(limits.slots) - int64(callee.registers))
+    emitter.compareRegister(Word32, ValueScratch[0], ValueScratch[1])
+    emitter.branchIf(GreaterCondition, leave)
+
+    # frames[depth] = { base, routine, resumeAt, SubFrame }
+    emitter.loadDouble(ValueScratch[1], Context, ContextFrames)
+    emitter.addRegister(Word64, ValueScratch[1], ValueScratch[1], Scratch, 4)
+    emitter.storeWord(OtherScratch, ValueScratch[1], FrameBase)
+    emitter.loadWord(OtherScratch, Context, ContextRoutine)
+    emitter.storeWord(OtherScratch, ValueScratch[1], FrameRoutine)
+    emitter.loadImmediate(Word32, OtherScratch, int64(resumeAt))
+    emitter.storeWord(OtherScratch, ValueScratch[1], FrameReturn)
+    emitter.storeWord(zeroRegister, ValueScratch[1], FrameTag)
+
+    emitter.addImmediate(Word32, Scratch, Scratch, 1)
+    emitter.storeWord(Scratch, Context, ContextDepth)
+    emitter.storeWord(ValueScratch[0], Context, ContextBase)
+    emitter.loadImmediate(Word32, OtherScratch, int64(calleeId))
+    emitter.storeWord(OtherScratch, Context, ContextRoutine)
+
+    emitter.loadDouble(OtherScratch, Context, ContextRegisterFile)
+    emitter.addRegister(Word64, RegistersBase, OtherScratch,
+      ValueScratch[0], 4)
+
+    # The interpreter clears the callee's slots and then lays the
+    # arguments over the first few, so this does the same in that order.
+    for slot in 0 ..< int(callee.registers):
+      emitter.storeDouble(zeroRegister, RegistersBase, slot * ValueStride)
+      emitter.storeDouble(zeroRegister, RegistersBase,
+        slot * ValueStride + ValuePayload)
+    if callee.parameters > 0:
+      emitter.loadDouble(Scratch, Context, ContextArguments)
+      for slot in 0 ..< int(callee.parameters):
+        emitter.loadDouble(ValueScratch[0], Scratch, slot * ValueStride)
+        emitter.loadDouble(ValueScratch[1], Scratch,
+          slot * ValueStride + ValuePayload)
+        emitter.storeDouble(ValueScratch[0], RegistersBase,
+          slot * ValueStride)
+        emitter.storeDouble(ValueScratch[1], RegistersBase,
+          slot * ValueStride + ValuePayload)
+
+  proc resumeAtStoredOffset(emitter: var Assembler,
+      hoistedFor: seq[int32]) {.raises: [BasicError].} =
+    ## Hands control back at the offset already written to the context,
+    ## which is where a return lands when this region did not compile it.
+    for slot, index in hoistedFor:
+      let base = int(index) * ValueStride
+      emitter.storeByte(zeroRegister, GlobalsBase, base)
+      emitter.storeWord(slotRegister(slot), GlobalsBase,
+        base + ValuePayload)
+    emitter.storeDouble(Instructions, Context, ContextInstructions)
+    emitter.storeDouble(Work, Context, ContextWork)
+    emitter.loadImmediate(Word32, Context, int64(ord(NativeCompleted)))
+    emitter.endRegion()
+
+  proc leaveRoutine(emitter: var Assembler, leave: Label)
+      {.raises: [BasicError].} =
+    ## Pops a frame and jumps to wherever it said to carry on. The table
+    ## sends any offset this region did not compile back to the
+    ## interpreter, so returning into interpreted code needs no test.
+    emitter.loadWord(Scratch, Context, ContextDepth)
+    emitter.branchIfZero(Word32, Scratch, leave)
+    emitter.subtractImmediate(Word32, Scratch, Scratch, 1)
+    emitter.storeWord(Scratch, Context, ContextDepth)
+
+    emitter.loadDouble(ValueScratch[1], Context, ContextFrames)
+    emitter.addRegister(Word64, ValueScratch[1], ValueScratch[1], Scratch, 4)
+    emitter.loadWord(OtherScratch, ValueScratch[1], FrameBase)
+    emitter.storeWord(OtherScratch, Context, ContextBase)
+    emitter.loadWord(ValueScratch[0], ValueScratch[1], FrameRoutine)
+    emitter.storeWord(ValueScratch[0], Context, ContextRoutine)
+    emitter.loadWord(ValueScratch[0], ValueScratch[1], FrameReturn)
+    emitter.storeWord(ValueScratch[0], Context, ContextOffset)
+
+    emitter.loadDouble(Scratch, Context, ContextRegisterFile)
+    emitter.addRegister(Word64, RegistersBase, Scratch, OtherScratch, 4)
+
+    emitter.loadDouble(Scratch, Context, ContextReturnTable)
+    emitter.addRegister(Word64, Scratch, Scratch, ValueScratch[0], 3)
+    emitter.loadDouble(Scratch, Scratch, 0)
+    emitter.jumpRegister(Scratch)
+
 
   proc hostDataAddress(emitter: var Assembler, index: int32)
       {.raises: [BasicError].} =
@@ -1416,7 +1620,8 @@ elif NativeAmd64:
 
 proc compileRegion*(code: seq[Instruction], start, stop, globals,
     slots: int, extents: seq[ArrayExtent], constants: seq[int32] = @[],
-    hostData = 0): Region {.raises: [BasicError].} =
+    hostData = 0, routines: seq[RoutineExtent] = @[],
+    limits = CallLimits()): Region {.raises: [BasicError].} =
   ## Compiles one loop, or returns nil when it is outside the modelled set.
   ##
   ## Generated code indexes global storage without checking, so every
@@ -1428,21 +1633,64 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     return nil
   else:
     if start < 0 or stop > code.len or start >= stop:
-      echo "nil range"
       return nil
     if code.reachesOutside(start, stop):
-      echo "nil outside"
       return nil
 
     if globals < 0 or slots < 0:
       return nil
     var usesSlots = false
+    var usesCalls = false
+
+    ## The offsets this region covers, and where each one's block sits.
+    ## A call brings the callee's whole body in with it.
+    var members: seq[int32]
+    var covered = newSeq[bool](code.len)
+    for index in start ..< stop:
+      members.add(int32(index))
+      covered[index] = true
+    if not gatherCalled(code, members, covered, routines):
+      return nil
+
+    ## Which routine each offset belongs to, since a call has to record
+    ## how many slots the caller was using. Routine zero is the program
+    ## itself, so every offset has an owner.
+    var ownerOf = newSeq[int32](code.len + 1)
+    for index in 0 ..< ownerOf.len:
+      ownerOf[index] = -1
+    for id, routine in routines:
+      if routine.entry < 0 or routine.length < 0:
+        return nil
+      for step in 0 ..< int(routine.length):
+        let offset = int(routine.entry) + step
+        if offset >= code.len:
+          return nil
+        ownerOf[offset] = int32(id)
+    # Only a call needs to know which routine it sits in, to record how
+    # many slots the caller was using.
+    for member in members:
+      if code[int(member)].op == CallOp and ownerOf[int(member)] < 0:
+        return nil
+    if limits.frames <= 0 or limits.slots <= 0:
+      for offset in members:
+        if code[int(offset)].op in {CallOp, ReturnOp, ExitSubOp}:
+          return nil
+    var placeOf = newSeq[int32](code.len + 1)
+    for index in 0 ..< placeOf.len:
+      placeOf[index] = -1
+    for place, offset in members:
+      placeOf[int(offset)] = int32(place)
+
+    proc covers(offset: int32): bool {.closure, raises: [].} =
+      ## Reports whether an offset is compiled into this region.
+      offset >= 0 and int(offset) < placeOf.len and placeOf[int(offset)] >= 0
+
 
     var hoisted: seq[int32]
-    for index in start ..< stop:
+    for member in members:
+      let index = int(member)
       let item = code[index]
       if not item.isCompilable:
-        echo "nil op ", item.op, " at ", index
         return nil
       item.touchedGlobals(hoisted)
       # Slots are read and written where they sit, so each index only has
@@ -1497,8 +1745,18 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         # interpreter stops, but never beyond it.
         if int(target) < 0 or int(target) > code.len:
           return nil
+      if item.op in {CallOp, ReturnOp, ExitSubOp}:
+        usesCalls = true
+        usesSlots = true
+      var calleeId = 0'i32
+      if item.calledRoutine(calleeId):
+        let callee = routines[int(calleeId)]
+        if callee.registers < 0 or callee.parameters < 0 or
+            callee.parameters > callee.registers:
+          return nil
+        if callee.registers > MaxClearedSlots:
+          return nil
     if hoisted.len == 0 or hoisted.len > MaxHoistedGlobals:
-      echo "nil hoisted ", hoisted.len
       return nil
     for index in hoisted:
       if index < 0 or int(index) >= globals:
@@ -1529,8 +1787,12 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
 
     const CountedLoops = NativeArm64
     let plan = planLoop(code, start, stop)
-    let counted = CountedLoops and plan.counted
-    let spending = CountedLoops and plan.spending and not plan.counted
+    # Both of those settle the budget by how far a pass has got through
+    # the loop, which stops meaning anything once a region takes in the
+    # body of something it calls. Such a region charges block by block.
+    let counted = CountedLoops and plan.counted and not usesCalls
+    let spending = CountedLoops and plan.spending and not plan.counted and
+      not usesCalls
     let pool =
       if MaxPooled > 0: pooledConstants(code, start, stop, MaxPooled)
       else: @[]
@@ -1541,20 +1803,6 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         if held == int64(value):
           return slot
       -1
-
-    ## The offsets this region covers, and where each one's block sits.
-    var members: seq[int32]
-    for index in start ..< stop:
-      members.add(int32(index))
-    var placeOf = newSeq[int32](code.len + 1)
-    for index in 0 ..< placeOf.len:
-      placeOf[index] = -1
-    for place, offset in members:
-      placeOf[int(offset)] = int32(place)
-
-    proc covers(offset: int32): bool {.closure, raises: [].} =
-      ## Reports whether an offset is compiled into this region.
-      offset >= 0 and int(offset) < placeOf.len and placeOf[int(offset)] >= 0
 
     var emitter = Assembler()
     var blocks: seq[Label]
@@ -1747,6 +1995,27 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
         emitter.setScratch(1, item.c)
         emitter.remainderScratch(0, 1)
         emitter.hoistedFromScratch(slotOf(item.a), 0)
+      of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp,
+          CallOp, ReturnOp, ExitSubOp:
+        when ModelsCalls:
+          case item.op
+          of SetArgumentOp:
+            emitter.stageArgumentFromSlot(item.a, item.b)
+          of SetArgumentImmediateOp:
+            emitter.stageArgumentWhole(item.a, item.b)
+          of SetArgumentGlobalOp:
+            emitter.stageArgumentFromHoisted(item.a, slotOf(item.b))
+          of CallOp:
+            let callee = routines[int(item.a)]
+            emitter.enterRoutine(
+              callee, item.a, routines[int(ownerOf[index])].registers,
+              int32(index + 1), limits, leaveHere
+            )
+            emitter.branch(blockAt(callee.entry))
+          else:
+            emitter.leaveRoutine(leaveHere)
+        else:
+          return nil
       of ArrayGetOp:
         emitter.readSlot(0, item.c, leaveHere)
         emitter.elementAddress(0, extents[int(item.b)], leaveHere)
@@ -1828,6 +2097,12 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
 
     ## Guard failure happens before any global is written, so the loop is
     ## simply handed back untouched for the interpreter to run.
+    var resumeElsewhere = emitter.label()
+    when ModelsCalls:
+      if usesCalls:
+        emitter.place(resumeElsewhere)
+        emitter.resumeAtStoredOffset(hoisted)
+
     emitter.place(guardFailed)
     emitter.guardExit(int32(start))
 
@@ -1839,6 +2114,11 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     result = Region(
       start: int32(start), stop: int32(stop), hoisted: hoisted, size: size
     )
+    ## Where every offset lands. Anything this region did not compile
+    ## goes to the one stub that hands the offset back, which is how a
+    ## return into interpreted code needs no test of its own.
+    if usesCalls:
+      result.returns = newSeq[pointer](code.len + 1)
     result.listing = newSeq[byte](size)
     if size > 0:
       copyMem(result.listing[0].addr, emitter.code[0].addr, size)
@@ -1846,6 +2126,17 @@ proc compileRegion*(code: seq[Instruction], start, stop, globals,
     result.buffer.write(emitter.code)
     result.buffer.seal()
     result.call = cast[NativeCall](result.buffer.entry)
+    if usesCalls:
+      let origin = cast[int](result.buffer.entry)
+      let elsewhere = origin +
+        emitter.offsetOf(resumeElsewhere) * sizeof(emitter.code[0])
+      for index in 0 ..< result.returns.len:
+        result.returns[index] = cast[pointer](elsewhere)
+      for place, offset in members:
+        result.returns[int(offset)] = cast[pointer](
+          origin + emitter.offsetOf(blocks[place]) * sizeof(emitter.code[0])
+        )
+      result.returnTable = result.returns[0].addr
 
 proc invoke*(region: Region, context: var NativeContext): NativeStatus
     {.raises: [].} =
@@ -1854,7 +2145,8 @@ proc invoke*(region: Region, context: var NativeContext): NativeStatus
 
 proc compileLoops*(code: seq[Instruction], globals, slots: int,
     extents: seq[ArrayExtent] = @[], constants: seq[int32] = @[],
-    hostData = 0): seq[Region]
+    hostData = 0, routines: seq[RoutineExtent] = @[],
+    limits = CallLimits()): seq[Region]
     {.raises: [BasicError].} =
   ## Compiles every backward-branching loop the code generator models.
   ## The result is indexed by bytecode offset, so the interpreter reaches
@@ -1873,7 +2165,7 @@ proc compileLoops*(code: seq[Instruction], globals, slots: int,
     try:
       region = compileRegion(
         code, int(target), index + 1, globals, slots, extents,
-        constants, hostData
+        constants, hostData, routines, limits
       )
     except BasicError:
       region = nil

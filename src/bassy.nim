@@ -3122,6 +3122,16 @@ proc instructions*(program: Program): int {.inline.} =
   ## Returns the number of metered register-machine instructions.
   program.code.len
 
+proc routineExtents*(program: Program): seq[RoutineExtent] =
+  ## Returns where each routine's code sits and what a call to it needs.
+  for routine in program.routines:
+    result.add(RoutineExtent(
+      entry: routine.entry,
+      length: routine.codeLength,
+      registers: routine.registerCount,
+      parameters: routine.parameterCount
+    ))
+
 proc frameLayoutMatches*(): bool =
   ## Confirms the frame layout compiled code would write by hand. These
   ## offsets were read off this Nim version, and compiled code pushes and
@@ -3173,7 +3183,12 @@ proc compileNative*(runtime: var Runtime): int =
     int(runtime.program.maxRegisters),
     extents,
     runtime.program.fixedConstants,
-    runtime.hostData.len
+    runtime.hostData.len,
+    runtime.program.routineExtents,
+    CallLimits(
+      frames: int32(runtime.frames.len),
+      slots: int32(runtime.registers.len)
+    )
   )
   runtime.nativeRegions
 

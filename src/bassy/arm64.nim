@@ -505,3 +505,7 @@ proc arithmeticShiftRight*(assembler: var Assembler, width: Width,
     base or (uint32(count) shl 16) or (uint32(last) shl 10) or
       (source.number shl 5) or destination.number
   )
+
+proc offsetOf*(assembler: Assembler, target: Label): int {.raises: [].} =
+  ## Returns where a label ended up, in instruction words.
+  assembler.targets[int(target)]

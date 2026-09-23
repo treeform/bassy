@@ -400,3 +400,7 @@ proc storeByteLow*(assembler: var Assembler, base: Register, offset: int,
     (base.number shr 3)))
   assembler.emit(0x88)
   assembler.memoryOperand(source, base, offset)
+
+proc offsetOf*(assembler: Assembler, target: Label): int {.raises: [].} =
+  ## Returns where a label ended up, in bytes.
+  assembler.targets[int(target)]
