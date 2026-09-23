@@ -356,11 +356,15 @@ proc setIfCondition*(assembler: var Assembler, target: Register,
   ## Writes one when the condition holds and zero otherwise.
   ## The low byte is set, so the register is cleared first; xor would
   ## disturb the flags, and movzx afterwards would need a second register.
-  assembler.prefix(Word32, Register(0), target)
+  ## A REX prefix is forced for the byte form, so rsp, rbp, rsi and rdi
+  ## name their low bytes rather than ah, ch, dh and bh.
+  let rex = byte(0x40'u32 or (target.number shr 3))
+  assembler.emit(rex)
   assembler.emit(0x0F)
   assembler.emit(byte(0x90'u32 + uint32(ord(condition))))
   assembler.directOperand(Register(0), target)
-  assembler.prefix(Word32, target, target)
+  assembler.emit(byte(0x40'u32 or ((target.number shr 3) shl 2) or
+    (target.number shr 3)))
   assembler.emit(0x0F)
   assembler.emit(0xB6)
   assembler.directOperand(target, target)

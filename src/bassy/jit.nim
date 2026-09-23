@@ -1002,6 +1002,163 @@ when NativeArm64:
       e.code.loadImmediate(Word32, temp(6), int64(bits))
       e.code.compareRegister(Word32, hoisted(slot), temp(6))
 
+  ## Values held in registers across a block
+  ##
+  ## A block's fast version keeps the slots and globals it touches in the
+  ## registers below. Nothing in the pool outlives the block: every held
+  ## value is written back before anything else could look at memory.
+
+  const
+    Pool* = [x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13]
+    FastScratch = x14
+
+  proc pooled(index: int): Register {.inline, raises: [].} =
+    ## Returns one pool register.
+    Pool[index]
+
+  proc fastLoad(e: var Emitter, payload, tag: int, place: Place,
+      deopt: Label) {.raises: [BasicError].} =
+    ## Reads a value's kind and payload, taking the deopt path unless it
+    ## is a number of either kind.
+    let (base, offset) = e.reach(place)
+    e.code.loadByte(pooled(tag), base, offset)
+    e.code.loadWord(pooled(payload), base, offset + ValuePayload)
+    e.code.compareImmediate(Word32, pooled(tag), FixedTag)
+    e.jumpWhen(UnsignedGreaterCondition, deopt)
+
+  proc fastStore(e: var Emitter, place: Place, payload, tag, kind: int)
+      {.raises: [BasicError].} =
+    ## Writes a value back: its kind from a register, or the known kind.
+    let (base, offset) = e.reach(place)
+    if tag >= 0:
+      e.code.storeByte(pooled(tag), base, offset)
+    elif kind == 0:
+      e.code.storeByte(zeroRegister, base, offset)
+    else:
+      e.code.loadImmediate(Word32, FastScratch, int64(kind))
+      e.code.storeByte(FastScratch, base, offset)
+    e.code.storeWord(pooled(payload), base, offset + ValuePayload)
+
+  proc fastMove(e: var Emitter, destination, source: int) {.raises: [].} =
+    ## Copies one pool register into another.
+    e.code.moveRegister(Word32, pooled(destination), pooled(source))
+
+  proc fastConstant(e: var Emitter, destination: int, bits: int32)
+      {.raises: [].} =
+    ## Loads a constant into a pool register.
+    e.code.loadImmediate(Word32, pooled(destination), int64(bits))
+
+  proc fastAdd(e: var Emitter, destination, source: int) {.raises: [].} =
+    ## Adds, wrapping.
+    e.code.addRegister(Word32, pooled(destination), pooled(destination),
+      pooled(source))
+
+  proc fastSubtract(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Subtracts, wrapping.
+    e.code.subtractRegister(Word32, pooled(destination),
+      pooled(destination), pooled(source))
+
+  proc fastMultiply(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Multiplies, wrapping.
+    e.code.multiply(Word32, pooled(destination), pooled(destination),
+      pooled(source))
+
+  proc fastMultiplyFixed(e: var Emitter, destination, source: int)
+      {.raises: [BasicError].} =
+    ## Multiplies two Q16.16 numbers, rounding as the library does.
+    let target = pooled(destination)
+    e.code.signedMultiplyLong(target, target, pooled(source))
+    e.code.loadImmediate(Word64, FastScratch, FixedRounding)
+    e.code.addRegister(Word64, target, target, FastScratch)
+    e.code.arithmeticShiftRight(Word64, target, target, FixedShift)
+    e.code.moveRegister(Word32, target, target)
+
+  proc fastNegate(e: var Emitter, destination: int) {.raises: [].} =
+    ## Negates, wrapping.
+    e.code.negate(Word32, pooled(destination), pooled(destination))
+
+  proc fastToFixed(e: var Emitter, destination: int, deopt: Label)
+      {.raises: [BasicError].} =
+    ## Turns a whole number into Q16.16 bits, or takes the deopt path when
+    ## it is outside the fixed-point range, which the interpreter refuses.
+    let target = pooled(destination)
+    e.code.loadImmediate(Word32, FastScratch, 32767)
+    e.code.compareRegister(Word32, target, FastScratch)
+    e.jumpWhen(GreaterCondition, deopt)
+    e.code.loadImmediate(Word32, FastScratch, -32768)
+    e.code.compareRegister(Word32, target, FastScratch)
+    e.jumpWhen(LessCondition, deopt)
+    e.code.shiftLeftImmediate(Word32, target, target, FixedShift)
+
+  proc fastCompare(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two pool registers.
+    e.code.compareRegister(Word32, pooled(left), pooled(right))
+
+  proc fastCompareWide(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two widened pool registers.
+    e.code.compareRegister(Word64, pooled(left), pooled(right))
+
+  proc fastCompareConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [BasicError].} =
+    ## Sets flags from a pool register against a constant.
+    if bits >= 0 and bits <= 4095:
+      e.code.compareImmediate(Word32, pooled(value), int(bits))
+    else:
+      e.code.loadImmediate(Word32, FastScratch, int64(bits))
+      e.code.compareRegister(Word32, pooled(value), FastScratch)
+
+  proc fastLoadWide(e: var Emitter, destination: int, bits: int64)
+      {.raises: [].} =
+    ## Loads a sixty-four bit constant into a pool register.
+    e.code.loadImmediate(Word64, pooled(destination), bits)
+
+  proc fastScaleWide(e: var Emitter, value, tag: int)
+      {.raises: [BasicError].} =
+    ## Widens a number to sixty-four bits on the fixed-point scale, its
+    ## kind read from a register.
+    let target = pooled(value)
+    let done = e.label()
+    e.code.signExtendWord(target, target)
+    e.jumpIfNotZero(pooled(tag), done)
+    e.code.shiftLeftImmediate(Word64, target, target, FixedShift)
+    e.place(done)
+
+  proc fastAnswer(e: var Emitter, destination: int, check: Check)
+      {.raises: [].} =
+    ## Writes BASIC's -1 for true and zero for false.
+    e.code.setOnCondition(Word32, pooled(destination),
+      nativeCondition(check))
+
+  proc fastJumpIfZero(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a pool register holds zero.
+    e.jumpIfZero(pooled(value), target)
+
+  proc fastJumpIfNotZero(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a pool register holds anything but zero.
+    e.jumpIfNotZero(pooled(value), target)
+
+  proc fastJumpIfDiffer(e: var Emitter, left, right: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when two pool registers differ.
+    e.code.compareRegister(Word32, pooled(left), pooled(right))
+    e.jumpWhen(NotEqualCondition, target)
+
+  proc fastCellAddress(e: var Emitter, index: int, extent: ArrayExtent,
+      deopt: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index held in the pool, leaving it untouched, and
+    ## leaves the cell's address in Cell.
+    let position = pooled(index)
+    e.code.loadImmediate(Word32, FastScratch, int64(extent.length))
+    e.code.compareRegister(Word32, position, FastScratch)
+    e.jumpWhen(CarrySetCondition, deopt)
+    e.code.loadImmediate(Word32, FastScratch, int64(extent.base))
+    e.code.addRegister(Word32, FastScratch, FastScratch, position)
+    e.code.addRegister(Word64, Cell, MemoryBase, FastScratch, 4)
+
   proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
     ## Publishes the budgets and where the program stopped, then returns.
     e.code.storeDouble(Instructions, Context, ContextInstructions)
@@ -1732,6 +1889,157 @@ elif NativeAmd64:
     ## Sets flags from a hoisted global against a constant.
     e.code.compareImmediate(Word32, hoisted(slot), bits)
 
+  ## Values held in registers across a block
+  ##
+  ## A block's fast version keeps the slots and globals it touches in the
+  ## registers below. Nothing in the pool outlives the block: every held
+  ## value is written back before anything else could look at memory. rax
+  ## and rdx stay out of the pool for the divide and as scratch.
+
+  const
+    Pool* = [rcx, rsi, rdi, r8, r9, r10, r14]
+    FastScratch = rax
+
+  proc pooled(index: int): Register {.inline, raises: [].} =
+    ## Returns one pool register.
+    Pool[index]
+
+  proc fastLoad(e: var Emitter, payload, tag: int, place: Place,
+      deopt: Label) {.raises: [BasicError].} =
+    ## Reads a value's kind and payload, taking the deopt path unless it
+    ## is a number of either kind.
+    let (base, offset) = e.reach(place)
+    e.code.loadByteZeroed(pooled(tag), base, offset)
+    e.code.loadWord(pooled(payload), base, offset + ValuePayload)
+    e.code.compareImmediate(Word32, pooled(tag), FixedTag)
+    e.jumpWhen(AboveCondition, deopt)
+
+  proc fastStore(e: var Emitter, place: Place, payload, tag, kind: int)
+      {.raises: [BasicError].} =
+    ## Writes a value back: its kind from a register, or the known kind.
+    let (base, offset) = e.reach(place)
+    if tag >= 0:
+      e.code.storeByteLow(base, offset, pooled(tag))
+    else:
+      e.code.storeByteImmediate(base, offset, byte(kind))
+    e.code.storeWord(pooled(payload), base, offset + ValuePayload)
+
+  proc fastMove(e: var Emitter, destination, source: int) {.raises: [].} =
+    ## Copies one pool register into another.
+    e.code.moveRegister(Word32, pooled(destination), pooled(source))
+
+  proc fastConstant(e: var Emitter, destination: int, bits: int32)
+      {.raises: [].} =
+    ## Loads a constant into a pool register.
+    e.code.loadImmediate(Word32, pooled(destination), int64(bits))
+
+  proc fastAdd(e: var Emitter, destination, source: int) {.raises: [].} =
+    ## Adds, wrapping.
+    e.code.addRegister(Word32, pooled(destination), pooled(source))
+
+  proc fastSubtract(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Subtracts, wrapping.
+    e.code.subtractRegister(Word32, pooled(destination), pooled(source))
+
+  proc fastMultiply(e: var Emitter, destination, source: int)
+      {.raises: [].} =
+    ## Multiplies, wrapping.
+    e.code.multiplyRegister(Word32, pooled(destination), pooled(source))
+
+  proc fastMultiplyFixed(e: var Emitter, destination, source: int)
+      {.raises: [BasicError].} =
+    ## Multiplies two Q16.16 numbers, rounding as the library does.
+    let target = pooled(destination)
+    e.code.signExtendDouble(target, target)
+    e.code.signExtendDouble(FastScratch, pooled(source))
+    e.code.multiplyRegister(Word64, target, FastScratch)
+    e.code.addImmediate(Word64, target, int32(FixedRounding))
+    e.code.shiftRightImmediate(Word64, target, FixedShift)
+    e.code.moveRegister(Word32, target, target)
+
+  proc fastNegate(e: var Emitter, destination: int) {.raises: [].} =
+    ## Negates, wrapping.
+    e.code.negateRegister(Word32, pooled(destination))
+
+  proc fastToFixed(e: var Emitter, destination: int, deopt: Label)
+      {.raises: [BasicError].} =
+    ## Turns a whole number into Q16.16 bits, or takes the deopt path when
+    ## it is outside the fixed-point range, which the interpreter refuses.
+    let target = pooled(destination)
+    e.code.compareImmediate(Word32, target, 32767)
+    e.jumpWhen(GreaterCondition, deopt)
+    e.code.compareImmediate(Word32, target, -32768)
+    e.jumpWhen(LessCondition, deopt)
+    e.code.shiftLeftImmediate(Word32, target, FixedShift)
+
+  proc fastCompare(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two pool registers.
+    e.code.compareRegister(Word32, pooled(left), pooled(right))
+
+  proc fastCompareWide(e: var Emitter, left, right: int) {.raises: [].} =
+    ## Sets flags from two widened pool registers.
+    e.code.compareRegister(Word64, pooled(left), pooled(right))
+
+  proc fastCompareConstant(e: var Emitter, value: int, bits: int32)
+      {.raises: [].} =
+    ## Sets flags from a pool register against a constant.
+    e.code.compareImmediate(Word32, pooled(value), bits)
+
+  proc fastLoadWide(e: var Emitter, destination: int, bits: int64)
+      {.raises: [].} =
+    ## Loads a sixty-four bit constant into a pool register.
+    e.code.loadImmediate(Word64, pooled(destination), bits)
+
+  proc fastScaleWide(e: var Emitter, value, tag: int)
+      {.raises: [BasicError].} =
+    ## Widens a number to sixty-four bits on the fixed-point scale, its
+    ## kind read from a register.
+    let target = pooled(value)
+    let done = e.label()
+    e.code.signExtendDouble(target, target)
+    e.code.testRegister(Word32, pooled(tag), pooled(tag))
+    e.jumpWhen(NotEqualCondition, done)
+    e.code.shiftLeftImmediate(Word64, target, FixedShift)
+    e.place(done)
+
+  proc fastAnswer(e: var Emitter, destination: int, check: Check)
+      {.raises: [].} =
+    ## Writes BASIC's -1 for true and zero for false.
+    e.code.setIfCondition(pooled(destination), nativeCondition(check))
+    e.code.negateRegister(Word32, pooled(destination))
+
+  proc fastJumpIfZero(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a pool register holds zero.
+    e.code.testRegister(Word32, pooled(value), pooled(value))
+    e.jumpWhen(EqualCondition, target)
+
+  proc fastJumpIfNotZero(e: var Emitter, value: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when a pool register holds anything but zero.
+    e.code.testRegister(Word32, pooled(value), pooled(value))
+    e.jumpWhen(NotEqualCondition, target)
+
+  proc fastJumpIfDiffer(e: var Emitter, left, right: int, target: Label)
+      {.raises: [].} =
+    ## Jumps when two pool registers differ.
+    e.code.compareRegister(Word32, pooled(left), pooled(right))
+    e.jumpWhen(NotEqualCondition, target)
+
+  proc fastCellAddress(e: var Emitter, index: int, extent: ArrayExtent,
+      deopt: Label) {.raises: [BasicError].} =
+    ## Bounds checks an index held in the pool, leaving it untouched, and
+    ## leaves the cell's address in Cell.
+    let position = pooled(index)
+    e.code.compareImmediate(Word32, position, extent.length)
+    e.jumpWhen(AboveEqualCondition, deopt)
+    e.code.moveRegister(Word32, FastScratch, position)
+    e.code.addImmediate(Word32, FastScratch, extent.base)
+    e.code.shiftLeftImmediate(Word64, FastScratch, 4)
+    e.contextField(Cell, ContextMemory)
+    e.code.addRegister(Word64, Cell, FastScratch)
+
   proc halt(e: var Emitter, offset: int32) {.raises: [BasicError].} =
     ## Publishes the budgets and where the program stopped, then returns.
     e.code.storeDouble(Instructions, Context, ContextInstructions)
@@ -1754,6 +2062,22 @@ proc invoke*(machine: Machine, context: var NativeContext): NativeStatus
   NativeStatus(machine.call(context.addr))
 
 type
+  Kind = enum
+    ## What the compiler knows of a held value's kind.
+    UnknownKind,
+    WholeKind,
+    FixedKind
+
+  Held = object
+    ## A slot or global a block's fast version keeps in registers. Its
+    ## kind is either known here or held in a register of its own, and it
+    ## is always a number: anything else never gets into a register.
+    place: Place
+    payload: int
+    tag: int
+    kind: Kind
+    dirty: bool
+
   Loop = object
     ## A loop whose globals can live in registers while it runs.
     ##
@@ -1925,6 +2249,15 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     for number, loop in loops:
       loopAt[loop.start] = number
       general[loop.start] = e.label()
+    # Every ordinary block starts at a meter, and its general version gets
+    # a label of its own, since its entry is the fast version.
+    var inLoop = newSeq[bool](code.len)
+    for loop in loops:
+      for index in loop.start ..< loop.stop:
+        inLoop[index] = true
+    for index in 0 ..< code.len:
+      if code[index].op == MeterOp and not inLoop[index]:
+        general[index] = e.label()
 
     e.prologue()
     e.jump(dispatchLabel)
@@ -2365,23 +2698,515 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         inside.add(e.label())
       loopCopies.add(inside)
 
-    for index in 0 ..< code.len:
-      e.place(blocks[index])
-      let number = loopAt[index]
-      if number >= 0:
-        # Entering a loop's head: prove its globals whole numbers and move
-        # them into registers, or run it in general code if any is not.
-        # Every tag is looked at before any register is filled, because
-        # one of those registers may be what general code reads through.
-        let loop = loops[number]
-        e.beginHoisting()
-        for which in loop.globals:
-          e.guardHoisted(which, general[loop.start])
-        for position, which in loop.globals:
-          e.loadHoisted(position, which)
-        e.jump(loopCopies[number][0])
+    ## Fast versions of ordinary blocks
+    ##
+    ## An ordinary block, one outside any specialised loop, also gets a
+    ## fast version that keeps the slots and globals it touches in pool
+    ## registers from one instruction to the next instead of in memory. A
+    ## value is read from memory once, written back once before anything
+    ## else could look, and between the two its kind is checked at most
+    ## once. Anything the fast version does not expect writes back what
+    ## was pending and goes on in the block's general version at that very
+    ## instruction, which does it the ordinary way.
+    ##
+    ## Registers are counted rather than guessed at. Before an instruction
+    ## emits anything that could leave, enough registers are freed for the
+    ## most it could need; within it none is handed out twice, so a way out
+    ## taken part way through still finds every pending value where it was.
+
+    var
+      held: seq[Held]
+      uses = newSeq[int](Pool.len)
+      pinned = newSeq[bool](Pool.len)
+      fastExits: seq[(Label, seq[Held], int)]
+
+    proc samePlace(a, b: Place): bool {.raises: [].} =
+      ## Reports whether two places name the same value.
+      a.home == b.home and a.index == b.index
+
+    template kindTag(kind: Kind): int =
+      ## Returns the tag byte for a known kind.
+      (if kind == FixedKind: FixedTag else: 0)
+
+    template writeBack(value: Held) =
+      ## Stores a held value where the interpreter keeps it.
+      e.fastStore(value.place, value.payload, value.tag, kindTag(value.kind))
+
+    template forget(position: int) =
+      ## Drops one held value, freeing its registers once nothing uses them.
+      dec uses[held[position].payload]
+      if held[position].tag >= 0:
+        dec uses[held[position].tag]
+      held.delete(position)
+
+    template flushAll() =
+      ## Writes every pending value back, keeping them held.
+      for position in 0 ..< held.len:
+        if held[position].dirty:
+          writeBack(held[position])
+          held[position].dirty = false
+
+    template clearAll() =
+      ## Writes every pending value back and holds nothing further.
+      flushAll()
+      held.setLen(0)
+      for register in 0 ..< Pool.len:
+        uses[register] = 0
+
+    template acquire(): int =
+      ## Hands out a free register for the rest of this instruction.
+      var found = -1
+      for register in 0 ..< Pool.len:
+        if uses[register] == 0 and not pinned[register]:
+          found = register
+          break
+      if found < 0:
+        raise newException(BasicError,
+          "BASIC native compiler ran out of registers")
+      pinned[found] = true
+      found
+
+    template pin(register: int) =
+      ## Keeps a register from being handed out for this instruction.
+      if register >= 0:
+        pinned[register] = true
+
+    template findHeld(target: Place): int =
+      ## Returns where a value is held, or -1.
+      var found = -1
+      for position in 0 ..< held.len:
+        if samePlace(held[position].place, target):
+          found = position
+      found
+
+    template makeRoom(operands: openArray[Place], extra: int) =
+      ## Frees enough registers for an instruction before it emits anything
+      ## that could leave: two for each operand not yet held, plus what it
+      ## needs of its own. Values it reads stay; the oldest others go,
+      ## clean ones before those that must be written back.
+      var needed = extra
+      var counted: seq[Place]
+      for operand in operands:
+        var seen = false
+        for earlier in counted:
+          if samePlace(earlier, operand):
+            seen = true
+        if not seen:
+          counted.add(operand)
+          if findHeld(operand) < 0:
+            needed += 2
+      for pass in 0 .. 1:
+        var position = 0
+        while position < held.len:
+          var free = 0
+          for register in 0 ..< Pool.len:
+            if uses[register] == 0:
+              inc free
+          if free >= needed:
+            break
+          var keep = false
+          for operand in operands:
+            if samePlace(held[position].place, operand):
+              keep = true
+          if keep or (pass == 0 and held[position].dirty):
+            inc position
+            continue
+          if held[position].dirty:
+            writeBack(held[position])
+          forget(position)
+
+    template leaveHere(offset: int): Label =
+      ## Names a way out of the fast version: write back what is pending
+      ## now, then do this instruction in general code.
+      var pending: seq[Held]
+      for value in held:
+        if value.dirty:
+          pending.add(value)
+      let exit = e.label()
+      fastExits.add((exit, pending, offset))
+      exit
+
+    template fetch(target: Place, offset: int): Held =
+      ## Returns a value in registers, reading it from memory if it is not
+      ## held yet. Only a number is held; anything else leaves.
+      var position = findHeld(target)
+      if position < 0:
+        let payload = acquire()
+        let tag = acquire()
+        e.fastLoad(payload, tag, target, leaveHere(offset))
+        held.add(Held(place: target, payload: payload, tag: tag,
+          kind: UnknownKind))
+        inc uses[payload]
+        inc uses[tag]
+        position = held.len - 1
+      pin(held[position].payload)
+      pin(held[position].tag)
+      held[position]
+
+    template bindValue(target: Place, valueRegister, kindRegister: int,
+        known: Kind) =
+      ## Holds a new value for a place, pending until written back.
+      let position = findHeld(target)
+      if position >= 0:
+        forget(position)
+      held.add(Held(place: target, payload: valueRegister,
+        tag: kindRegister, kind: known, dirty: true))
+      inc uses[valueRegister]
+      if kindRegister >= 0:
+        inc uses[kindRegister]
+
+    template tagOf(value: Held): int =
+      ## Returns a register holding a value's kind, loading a known kind.
+      var register = value.tag
+      if register < 0:
+        register = acquire()
+        e.fastConstant(register, int32(kindTag(value.kind)))
+      register
+
+    template requireWhole(value: Held, target: Place, exit: Label) =
+      ## Leaves unless a value is a whole number, and from here on knows
+      ## that it is.
+      case value.kind
+      of WholeKind:
+        discard
+      of FixedKind:
+        e.jump(exit)
+      of UnknownKind:
+        e.fastJumpIfNotZero(value.tag, exit)
+        let position = findHeld(target)
+        if position >= 0 and held[position].tag >= 0:
+          dec uses[held[position].tag]
+          held[position].tag = -1
+          held[position].kind = WholeKind
+
+    template fallsOnward(op: Op): bool =
+      ## Reports whether an operation can carry on to the next offset.
+      op notin {JumpOp, ReturnOp, ReturnLabelOp, ExitSubOp, HaltOp, CallOp,
+        GosubOp}
+
+    template emitFast(at: int): bool =
+      ## Emits one instruction into a fast version, or reports that it
+      ## has no fast form, so that it is done the general way instead.
+      let item = code[at]
+      let offset = at
+      var done = true
+      case item.op
+      of LoadImmediateOp, LoadFixedOp, StoreGlobalImmediateOp:
+        makeRoom(newSeq[Place](), 1)
+        let register = acquire()
+        let kind =
+          if item.op == LoadFixedOp: FixedKind
+          else: WholeKind
+        let bits =
+          if item.op == LoadFixedOp: constants[int(item.b)]
+          else: item.b
+        e.fastConstant(register, bits)
+        let target =
+          if item.op == StoreGlobalImmediateOp: global(item.a)
+          else: slot(item.a)
+        bindValue(target, register, -1, kind)
+      of MoveOp, LoadGlobalOp, StoreGlobalOp, MoveGlobalOp, LoadHostDataOp:
+        let (target, source) =
+          case item.op
+          of MoveOp: (slot(item.a), slot(item.b))
+          of LoadGlobalOp: (slot(item.a), global(item.b))
+          of StoreGlobalOp: (global(item.a), slot(item.b))
+          of MoveGlobalOp: (global(item.a), global(item.b))
+          else: (slot(item.a), host(item.b))
+        makeRoom([source], 0)
+        let value = fetch(source, offset)
+        bindValue(target, value.payload, value.tag, value.kind)
+      of SetArgumentOp, SetArgumentGlobalOp:
+        let source =
+          if item.op == SetArgumentOp: slot(item.b)
+          else: global(item.b)
+        makeRoom([source], 0)
+        let value = fetch(source, offset)
+        e.fastStore(argument(item.a), value.payload, value.tag,
+          kindTag(value.kind))
+      of SetArgumentImmediateOp:
+        e.writeConstant(argument(item.a), 0, item.b)
+      of AddGlobalImmediateOp, AddGlobalOp, AddGlobalRegisterOp,
+          AddGlobalHostDataOp:
+        let target = global(item.a)
+        let source =
+          case item.op
+          of AddGlobalOp: global(item.b)
+          of AddGlobalRegisterOp: slot(item.b)
+          of AddGlobalHostDataOp: host(item.b)
+          else: target
+        makeRoom([target, source], 2)
+        let total = fetch(target, offset)
+        let exit = leaveHere(offset)
+        requireWhole(total, target, exit)
+        let register = acquire()
+        e.fastMove(register, total.payload)
+        if item.op == AddGlobalImmediateOp:
+          let amount = acquire()
+          e.fastConstant(amount, item.b)
+          e.fastAdd(register, amount)
+        else:
+          let value = fetch(source, offset)
+          requireWhole(value, source, exit)
+          e.fastAdd(register, value.payload)
+        bindValue(target, register, -1, WholeKind)
+      of AddOp, SubtractOp, MultiplyOp:
+        when ModelsFixed:
+          let left = slot(item.b)
+          let right = slot(item.c)
+          var known = 0
+          for operand in [left, right]:
+            let position = findHeld(operand)
+            if position >= 0 and held[position].kind != UnknownKind:
+              inc known
+          makeRoom([left, right], 3 + known)
+          let b = fetch(left, offset)
+          let c = fetch(right, offset)
+          template operate(target, source: int, fixed: bool) =
+            ## Applies this instruction's operation to two registers.
+            case item.op
+            of AddOp:
+              e.fastAdd(target, source)
+            of SubtractOp:
+              e.fastSubtract(target, source)
+            else:
+              if fixed:
+                e.fastMultiplyFixed(target, source)
+              else:
+                e.fastMultiply(target, source)
+          if b.kind != UnknownKind and c.kind != UnknownKind:
+            let result = acquire()
+            if b.kind == c.kind:
+              e.fastMove(result, b.payload)
+              operate(result, c.payload, b.kind == FixedKind)
+            else:
+              # Kinds known to differ: the whole side becomes fixed point.
+              let exit = leaveHere(offset)
+              let widened = acquire()
+              if b.kind == WholeKind:
+                e.fastMove(widened, b.payload)
+                e.fastToFixed(widened, exit)
+                e.fastMove(result, widened)
+                operate(result, c.payload, true)
+              else:
+                e.fastMove(widened, c.payload)
+                e.fastToFixed(widened, exit)
+                e.fastMove(result, b.payload)
+                operate(result, widened, true)
+            let kind =
+              if b.kind == WholeKind and c.kind == WholeKind: WholeKind
+              else: FixedKind
+            bindValue(slot(item.a), result, -1, kind)
+          else:
+            let exit = leaveHere(offset)
+            let leftTag = tagOf(b)
+            let rightTag = tagOf(c)
+            let result = acquire()
+            let resultTag = acquire()
+            let widened = acquire()
+            let mixed = e.label()
+            let promoteRight = e.label()
+            let joined = e.label()
+            let finished = e.label()
+            e.fastJumpIfDiffer(leftTag, rightTag, mixed)
+            e.fastMove(result, b.payload)
+            e.fastMove(resultTag, leftTag)
+            if item.op == MultiplyOp:
+              let fixedWay = e.label()
+              e.fastJumpIfNotZero(leftTag, fixedWay)
+              operate(result, c.payload, false)
+              e.jump(finished)
+              e.place(fixedWay)
+              operate(result, c.payload, true)
+            else:
+              operate(result, c.payload, false)
+            e.jump(finished)
+            e.place(mixed)
+            e.fastJumpIfNotZero(leftTag, promoteRight)
+            e.fastMove(widened, b.payload)
+            e.fastToFixed(widened, exit)
+            e.fastMove(result, widened)
+            operate(result, c.payload, true)
+            e.jump(joined)
+            e.place(promoteRight)
+            e.fastMove(widened, c.payload)
+            e.fastToFixed(widened, exit)
+            e.fastMove(result, b.payload)
+            operate(result, widened, true)
+            e.place(joined)
+            e.fastConstant(resultTag, FixedTag)
+            e.place(finished)
+            bindValue(slot(item.a), result, resultTag, UnknownKind)
+        else:
+          done = false
+      of NegateOp:
+        when ModelsFixed:
+          makeRoom([slot(item.b)], 1)
+          let value = fetch(slot(item.b), offset)
+          let result = acquire()
+          e.fastMove(result, value.payload)
+          e.fastNegate(result)
+          bindValue(slot(item.a), result, value.tag, value.kind)
+        else:
+          done = false
+      of EqualOp, NotEqualOp, LessOp, LessEqualOp, GreaterOp,
+          GreaterEqualOp:
+        let left = slot(item.b)
+        let right = slot(item.c)
+        var known = 0
+        for operand in [left, right]:
+          let position = findHeld(operand)
+          if position >= 0 and held[position].kind != UnknownKind:
+            inc known
+        makeRoom([left, right], 3 + known)
+        let b = fetch(left, offset)
+        let c = fetch(right, offset)
+        if b.kind != UnknownKind and b.kind == c.kind:
+          e.fastCompare(b.payload, c.payload)
+        else:
+          # Kinds that differ compare on the widened fixed-point scale.
+          let leftTag = tagOf(b)
+          let rightTag = tagOf(c)
+          let wideLeft = acquire()
+          let wideRight = acquire()
+          let mixed = e.label()
+          let decided = e.label()
+          e.fastJumpIfDiffer(leftTag, rightTag, mixed)
+          e.fastCompare(b.payload, c.payload)
+          e.jump(decided)
+          e.place(mixed)
+          e.fastMove(wideLeft, b.payload)
+          e.fastScaleWide(wideLeft, leftTag)
+          e.fastMove(wideRight, c.payload)
+          e.fastScaleWide(wideRight, rightTag)
+          e.fastCompareWide(wideLeft, wideRight)
+          e.place(decided)
+        let result = acquire()
+        e.fastAnswer(result, comparisonCheck(item.op))
+        bindValue(slot(item.a), result, -1, WholeKind)
+      of JumpOp:
+        flushAll()
+        e.jump(blocks[int(item.a)])
+      of JumpIfZeroOp:
+        makeRoom([slot(item.a)], 0)
+        let value = fetch(slot(item.a), offset)
+        flushAll()
+        e.fastJumpIfZero(value.payload, blocks[int(item.b)])
+      of JumpUnlessGlobalEqualImmediateOp,
+          JumpUnlessGlobalNotEqualImmediateOp,
+          JumpUnlessGlobalLessImmediateOp,
+          JumpUnlessGlobalLessEqualImmediateOp,
+          JumpUnlessGlobalGreaterImmediateOp,
+          JumpUnlessGlobalGreaterEqualImmediateOp:
+        makeRoom([global(item.a)], 3)
+        let value = fetch(global(item.a), offset)
+        flushAll()
+        if value.kind == WholeKind:
+          e.fastCompareConstant(value.payload, item.b)
+        else:
+          # A fixed-point global meets the constant on the widened scale.
+          let tag = tagOf(value)
+          let wide = acquire()
+          let bound = acquire()
+          let whole = e.label()
+          let decided = e.label()
+          e.fastJumpIfZero(tag, whole)
+          e.fastMove(wide, value.payload)
+          e.fastScaleWide(wide, tag)
+          e.fastLoadWide(bound, int64(item.b) * 65536)
+          e.fastCompareWide(wide, bound)
+          e.jump(decided)
+          e.place(whole)
+          e.fastCompareConstant(value.payload, item.b)
+          e.place(decided)
+        e.jumpOn(takenOn(item.op), blocks[int(item.c)])
+      of ArrayGetOp:
+        makeRoom([slot(item.c)], 2)
+        let index = fetch(slot(item.c), offset)
+        let exit = leaveHere(offset)
+        requireWhole(index, slot(item.c), exit)
+        e.fastCellAddress(index.payload, extents[int(item.b)], exit)
+        let payload = acquire()
+        let tag = acquire()
+        e.fastLoad(payload, tag, cell(), exit)
+        bindValue(slot(item.a), payload, tag, UnknownKind)
+      of ArraySetOp:
+        makeRoom([slot(item.b), slot(item.c)], 0)
+        let index = fetch(slot(item.b), offset)
+        let value = fetch(slot(item.c), offset)
+        let exit = leaveHere(offset)
+        requireWhole(index, slot(item.b), exit)
+        e.fastCellAddress(index.payload, extents[int(item.a)], exit)
+        e.fastStore(cell(), value.payload, value.tag, kindTag(value.kind))
+      else:
+        done = false
+      for register in 0 ..< Pool.len:
+        pinned[register] = false
+      done
+
+    template emitFastBlock(start, stop: int) =
+      ## Emits one block's fast version, then its ways out.
+      held.setLen(0)
+      for register in 0 ..< Pool.len:
+        uses[register] = 0
+        pinned[register] = false
+      for at in start ..< stop:
+        if not emitFast(at):
+          clearAll()
+          emitInstruction(at, false, Loop(), @[], noExits)
+      if fallsOnward(code[stop - 1].op):
+        flushAll()
+        e.jump(blocks[stop])
+      for (exit, pending, offset) in fastExits:
+        e.place(exit)
+        for value in pending:
+          writeBack(value)
+        e.jump(general[offset])
+      fastExits.setLen(0)
+      if stubs.len > 0:
+        for stub in stubs:
+          e.place(stub.label)
+          e.callSlow(stub.offset, slowLabel)
+          case stub.carry
+          of ToNext:
+            e.jump(blocks[int(stub.offset) + 1])
+          of ToOffset:
+            e.jump(dispatchLabel)
+        stubs.setLen(0)
+
+    var index = 0
+    while index < code.len:
+      var stop = index + 1
+      while stop < code.len and code[stop].op != MeterOp:
+        inc stop
+      if code[index].op == MeterOp and not inLoop[index]:
+        e.place(blocks[index])
+        emitFastBlock(index, stop)
         e.place(general[index])
-      emitInstruction(index, false, Loop(), @[], noExits)
+        for at in index ..< stop:
+          if at > index:
+            e.place(blocks[at])
+          emitInstruction(at, false, Loop(), @[], noExits)
+      else:
+        for at in index ..< stop:
+          e.place(blocks[at])
+          let number = loopAt[at]
+          if number >= 0:
+            # Entering a loop's head: prove its globals whole numbers and
+            # move them into registers, or run it in general code if any
+            # is not. Every tag is looked at before any register is
+            # filled, because one of those registers may be what general
+            # code reads through.
+            let loop = loops[number]
+            e.beginHoisting()
+            for which in loop.globals:
+              e.guardHoisted(which, general[loop.start])
+            for position, which in loop.globals:
+              e.loadHoisted(position, which)
+            e.jump(loopCopies[number][0])
+            e.place(general[at])
+          emitInstruction(at, false, Loop(), @[], noExits)
+      index = stop
 
     # Each loop's own copy, after all the general code.
     for number, loop in loops:
@@ -2589,8 +3414,12 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
         limits, false)
     except BasicError:
       # Some branch could not reach; every branch then goes the long way.
-      emitted = emitProgram(code, routines, ownerOf, extents, constants,
-        limits, true)
+      # Should that fail too, the program is left to the interpreter.
+      try:
+        emitted = emitProgram(code, routines, ownerOf, extents, constants,
+          limits, true)
+      except BasicError:
+        return nil
     let (bytes, starts) = emitted
     if bytes.len > MaxProgramBytes:
       return nil

@@ -129,6 +129,12 @@ encodes "setl al\n\tmovzx eax, al":
   assembler.setIfCondition(rax, LessCondition)
 encodes "sete dl\n\tmovzx edx, dl":
   assembler.setIfCondition(rdx, EqualCondition)
+encodes "setne sil\n\tmovzx esi, sil":
+  assembler.setIfCondition(rsi, NotEqualCondition)
+encodes "setg dil\n\tmovzx edi, dil":
+  assembler.setIfCondition(rdi, GreaterCondition)
+encodes "setle r9b\n\tmovzx r9d, r9b":
+  assembler.setIfCondition(r9, LessEqualCondition)
 
 encodes "shl rax, 4":
   assembler.shiftLeftImmediate(Word64, rax, 4)
