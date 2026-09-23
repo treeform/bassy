@@ -343,3 +343,24 @@ proc storeWordImmediate*(assembler: var Assembler, base: Register,
   assembler.emit(0xC7)
   assembler.memoryOperand(Register(0), base, offset)
   assembler.emitDouble(value)
+
+proc negateRegister*(assembler: var Assembler, width: Width,
+    target: Register) {.raises: [].} =
+  ## Replaces a register with its two's complement negation.
+  assembler.prefix(width, Register(3), target)
+  assembler.emit(0xF7)
+  assembler.directOperand(Register(3), target)
+
+proc setIfCondition*(assembler: var Assembler, target: Register,
+    condition: Condition) {.raises: [].} =
+  ## Writes one when the condition holds and zero otherwise.
+  ## The low byte is set, so the register is cleared first; xor would
+  ## disturb the flags, and movzx afterwards would need a second register.
+  assembler.prefix(Word32, Register(0), target)
+  assembler.emit(0x0F)
+  assembler.emit(byte(0x90'u32 + uint32(ord(condition))))
+  assembler.directOperand(Register(0), target)
+  assembler.prefix(Word32, target, target)
+  assembler.emit(0x0F)
+  assembler.emit(0xB6)
+  assembler.directOperand(target, target)

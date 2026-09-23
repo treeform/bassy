@@ -36,7 +36,9 @@ report(
 
 ## Bytecode the language could not produce
 
-const Globals = 4
+const
+  Globals = 4
+  Slots = 8
 
 proc countingLoop(globalIndex: int32, target: int32): seq[Instruction] =
   ## A minimal loop, parameterised so it can be made malformed.
@@ -55,14 +57,14 @@ block:
   let code = countingLoop(1, 4)
   report(
     "a well formed loop still compiles",
-    (not jitSupported()) or compileRegion(code, 0, 4, Globals) != nil
+    (not jitSupported()) or compileRegion(code, 0, 4, Globals, Slots) != nil
   )
 
 block:
   let code = countingLoop(Globals, 4)
   report(
     "a global one past the end is refused",
-    compileRegion(code, 0, 4, Globals) == nil,
+    compileRegion(code, 0, 4, Globals, Slots) == nil,
     "an out of range index would become a fixed offset store"
   )
 
@@ -70,14 +72,14 @@ block:
   let code = countingLoop(1_000_000, 4)
   report(
     "a far out of range global is refused",
-    compileRegion(code, 0, 4, Globals) == nil
+    compileRegion(code, 0, 4, Globals, Slots) == nil
   )
 
 block:
   let code = countingLoop(-1, 4)
   report(
     "a negative global is refused",
-    compileRegion(code, 0, 4, Globals) == nil,
+    compileRegion(code, 0, 4, Globals, Slots) == nil,
     "a negative index would address below the globals"
   )
 
@@ -85,28 +87,28 @@ block:
   let code = countingLoop(1, 99)
   report(
     "a branch past the end of the code is refused",
-    compileRegion(code, 0, 4, Globals) == nil
+    compileRegion(code, 0, 4, Globals, Slots) == nil
   )
 
 block:
   let code = countingLoop(1, -5)
   report(
     "a negative branch target is refused",
-    compileRegion(code, 0, 4, Globals) == nil
+    compileRegion(code, 0, 4, Globals, Slots) == nil
   )
 
 block:
   let code = countingLoop(1, 4)
   report(
     "a region reaching past the code is refused",
-    compileRegion(code, 0, 99, Globals) == nil
+    compileRegion(code, 0, 99, Globals, Slots) == nil
   )
 
 block:
   let code = countingLoop(1, 4)
   report(
     "a region with no storage behind it is refused",
-    compileRegion(code, 0, 4, 0) == nil
+    compileRegion(code, 0, 4, 0, Slots) == nil
   )
 
 block:
@@ -120,7 +122,7 @@ block:
   ]
   report(
     "a zero divisor is refused",
-    compileRegion(code, 0, 4, Globals) == nil
+    compileRegion(code, 0, 4, Globals, Slots) == nil
   )
 
 block:
@@ -137,7 +139,7 @@ block:
   ]
   var raised = false
   try:
-    discard compileRegion(code, 0, 5, Globals)
+    discard compileRegion(code, 0, 5, Globals, Slots)
   except BasicError:
     raised = true
   # Falling back to the per-block check is a fine outcome here. Refusing
@@ -159,7 +161,7 @@ block:
   ]
   var survived = false
   try:
-    discard compileLoops(code, Globals)
+    discard compileLoops(code, Globals, Slots)
     survived = true
   except BasicError:
     survived = false
@@ -171,7 +173,31 @@ block:
   let code = countingLoop(high(int32) div 8, 4)
   report(
     "a global whose offset would not fit is refused",
-    compileRegion(code, 0, 4, high(int32)) == nil
+    compileRegion(code, 0, 4, high(int32), Slots) == nil
+  )
+
+block:
+  let code = @[
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: LoadGlobalOp, a: int32(Slots), b: 1),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0)
+  ]
+  report(
+    "a register slot past the frame is refused",
+    compileRegion(code, 0, 4, Globals, Slots) == nil
+  )
+
+block:
+  let code = @[
+    Instruction(op: MeterOp, a: 4, b: 2),
+    Instruction(op: LoadGlobalOp, a: -1, b: 1),
+    Instruction(op: AddGlobalImmediateOp, a: 1, b: 1),
+    Instruction(op: JumpOp, a: 0)
+  ]
+  report(
+    "a negative register slot is refused",
+    compileRegion(code, 0, 4, Globals, Slots) == nil
   )
 
 ## Scripts, down both paths

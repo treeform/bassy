@@ -3137,7 +3137,9 @@ proc compileNative*(runtime: var Runtime): int =
   if not jitSupported():
     return 0
   runtime.regionAt = compileLoops(
-    runtime.program.code, runtime.globals.len
+    runtime.program.code,
+    runtime.globals.len,
+    int(runtime.program.maxRegisters)
   )
   runtime.nativeRegions
 
@@ -3531,6 +3533,9 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
         if region != nil:
           var context = NativeContext(
             globals: runtime.globals[0].addr,
+            registers:
+              if runtime.registers.len == 0: nil
+              else: runtime.registers[int(runtime.base)].addr,
             remainingInstructions: runtime.remainingInstructions,
             remainingWork: runtime.remainingWork,
             pc: runtime.pc

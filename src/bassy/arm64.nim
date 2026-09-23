@@ -65,6 +65,7 @@ const
   x14* = Register(14)
   x15* = Register(15)
   x16* = Register(16)
+  x17* = Register(17)
   x19* = Register(19)
   x20* = Register(20)
   x21* = Register(21)

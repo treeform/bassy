@@ -116,6 +116,15 @@ encodes "idiv r11d":
 encodes "idiv ecx":
   assembler.signedDivide(Word32, rcx)
 
+encodes "neg eax":
+  assembler.negateRegister(Word32, rax)
+encodes "neg r11d":
+  assembler.negateRegister(Word32, r11)
+encodes "setl al\n\tmovzx eax, al":
+  assembler.setIfCondition(rax, LessCondition)
+encodes "sete dl\n\tmovzx edx, dl":
+  assembler.setIfCondition(rdx, EqualCondition)
+
 ## Stack and control flow
 
 encodes "push rbx":
