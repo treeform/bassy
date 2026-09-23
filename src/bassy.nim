@@ -673,9 +673,9 @@ proc isKeyword(token: Token, word: string): bool
   ## Returns whether a token is a normalized keyword.
   token.kind == IdentifierToken and token.text == word
 
-proc isReserved(name: string): bool =
-  ## Returns whether a name is reserved by the BASIC grammar.
-  if textFunction(name) != NoTextFunction:
+proc isReserved(name: string, functions = true): bool =
+  ## Checks grammar keywords and optionally built-in function names.
+  if functions and textFunction(name) != NoTextFunction:
     return true
   case name
   of "and", "call", "case", "dim", "do", "else", "elseif", "end", "eqv",
@@ -986,8 +986,9 @@ proc collectDeclarations(compiler: var Compiler) =
       if compiler.tokens[pos].kind != RightParenToken:
         while true:
           let parameter = compiler.tokens[pos]
-          if parameter.kind != IdentifierToken or isReserved(parameter.text):
-            fail(parameter, "expected a parameter name")
+          if parameter.kind != IdentifierToken or
+            isReserved(parameter.text, functions = false):
+              fail(parameter, "expected a parameter name")
           if parameterIds.getOrDefault(parameter.text, false):
             fail(parameter, "duplicate subroutine parameter")
           if parameters.len >= compiler.limits.maxParameters:
@@ -1187,7 +1188,7 @@ proc globalId(
       compiler.program.routineIds.getOrDefault(name, -1'i32) >= 0 or
       compiler.program.hostDataIds.getOrDefault(name, -1'i32) >= 0 or
       compiler.program.hostFunctionIds.getOrDefault(name, -1'i32) >= 0 or
-      isReserved(name):
+      isReserved(name, functions = false):
     fail(token, "name '" & name & "' is not a scalar variable")
   if compiler.program.globalNames.len >= compiler.limits.maxGlobals:
     fail(token, "global count exceeds the configured limit")
@@ -1363,8 +1364,9 @@ proc parsePrimary(parser: var Parser): Expr =
       return constant(-1)
     if token.text == "false":
       return constant(0)
-    if textFunction(token.text) != NoTextFunction:
-      return parser.parseTextCall(token)
+    if textFunction(token.text) != NoTextFunction and
+      parser.current.kind == LeftParenToken:
+        return parser.parseTextCall(token)
     let hostData =
       parser.compiler[].program.hostDataIds.getOrDefault(
         token.text,
