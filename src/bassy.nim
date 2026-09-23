@@ -3122,6 +3122,25 @@ proc instructions*(program: Program): int {.inline.} =
   ## Returns the number of metered register-machine instructions.
   program.code.len
 
+proc frameLayoutMatches*(): bool =
+  ## Confirms the frame layout compiled code would write by hand. These
+  ## offsets were read off this Nim version, and compiled code pushes and
+  ## pops frames the interpreter then reads, so a quiet change here would
+  ## corrupt the call stack rather than merely slow something down.
+  if sizeof(Frame) != FrameStride:
+    return false
+  var probe: Frame
+  let origin = cast[int](probe.addr)
+  if cast[int](probe.base.addr) - origin != FrameBase:
+    return false
+  if cast[int](probe.routine.addr) - origin != FrameRoutine:
+    return false
+  if cast[int](probe.returnPc.addr) - origin != FrameReturn:
+    return false
+  if cast[int](probe.kind.addr) - origin != FrameTag:
+    return false
+  ord(SubFrame) == 0
+
 proc fixedConstants*(program: Program): seq[int32] =
   ## Returns the raw bits of every fixed-point constant the code names.
   for value in program.fixedValues:
@@ -3140,6 +3159,10 @@ proc compileNative*(runtime: var Runtime): int =
   runtime.bypass = -1
   runtime.regionAt = @[]
   if not jitSupported():
+    return 0
+  if not frameLayoutMatches():
+    # Compiled code pushes and pops frames the interpreter then reads, so
+    # a layout it does not recognise means nothing may be compiled.
     return 0
   var extents = newSeq[ArrayExtent](runtime.program.arrays.len)
   for index, item in runtime.program.arrays:
@@ -3561,6 +3584,19 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
             hostData:
               if runtime.hostData.len == 0: nil
               else: runtime.hostData[0].addr,
+            frames:
+              if runtime.frames.len == 0: nil
+              else: runtime.frames[0].addr,
+            arguments:
+              if runtime.arguments.len == 0: nil
+              else: runtime.arguments[0].addr,
+            registerFile:
+              if runtime.registers.len == 0: nil
+              else: runtime.registers[0].addr,
+            returnTable: region.returnTable,
+            base: runtime.base,
+            depth: runtime.depth,
+            routine: runtime.routine,
             remainingInstructions: runtime.remainingInstructions,
             remainingWork: runtime.remainingWork,
             pc: runtime.pc
@@ -3569,6 +3605,9 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
           runtime.remainingInstructions = context.remainingInstructions
           runtime.remainingWork = context.remainingWork
           runtime.pc = context.pc
+          runtime.base = context.base
+          runtime.depth = context.depth
+          runtime.routine = context.routine
           case status
           of NativeCompleted:
             runtime.bypass = -1

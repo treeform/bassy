@@ -43,6 +43,13 @@ type
     registers*: pointer
     memory*: pointer
     hostData*: pointer
+    frames*: pointer
+    arguments*: pointer
+    registerFile*: pointer
+    returnTable*: pointer
+    base*: int32
+    depth*: int32
+    routine*: int32
 
   NativeCall = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -59,6 +66,7 @@ type
     hoisted*: seq[int32]
     size*: int
     listing*: seq[byte]
+    returnTable*: pointer
     buffer: CodeBuffer
     call: NativeCall
 
@@ -80,6 +88,23 @@ const
   ContextRegisters = 32
   ContextMemory = 40
   ContextHostData = 48
+  ContextFrames = 56
+  ContextArguments = 64
+  ContextRegisterFile = 72
+  ContextReturnTable = 80
+  ContextBase = 88
+  ContextDepth = 92
+  ContextRoutine = 96
+
+  ## One frame as the interpreter lays it out: where the caller's slots
+  ## start, which routine it was in, where to carry on, and whether it
+  ## came from a call or from a GOSUB. The host checks these against the
+  ## real thing before any of it is compiled.
+  FrameStride* = 16
+  FrameBase* = 0
+  FrameRoutine* = 4
+  FrameReturn* = 8
+  FrameTag* = 12
   MaxHoistedGlobals* = 7
   MaxRegionBytes = 32 * 1024
   MaxChargeImmediate = 4095
@@ -139,6 +164,20 @@ proc layoutMatches*(): bool {.raises: [].} =
   if cast[int](context.memory.addr) - origin != ContextMemory:
     return false
   if cast[int](context.hostData.addr) - origin != ContextHostData:
+    return false
+  if cast[int](context.frames.addr) - origin != ContextFrames:
+    return false
+  if cast[int](context.arguments.addr) - origin != ContextArguments:
+    return false
+  if cast[int](context.registerFile.addr) - origin != ContextRegisterFile:
+    return false
+  if cast[int](context.returnTable.addr) - origin != ContextReturnTable:
+    return false
+  if cast[int](context.base.addr) - origin != ContextBase:
+    return false
+  if cast[int](context.depth.addr) - origin != ContextDepth:
+    return false
+  if cast[int](context.routine.addr) - origin != ContextRoutine:
     return false
   true
 
