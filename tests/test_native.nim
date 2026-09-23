@@ -75,7 +75,9 @@ proc observe(source: string, native: bool, limits: Limits,
         "the whole program should compile"
       inc compiled
   for run in 0 ..< runs:
-    if run > 0:
+    # The second run carries on from wherever the first stopped, which
+    # after a failure is part way through a block; the third restarts.
+    if run == 2:
       runtime.restart
     var events: seq[string]
     let print = proc(event: PrintEvent) =
@@ -106,7 +108,7 @@ proc observe(source: string, native: bool, limits: Limits,
     handed += runtime.handedBack
   transcript.join("\n")
 
-proc agree(name, source: string, limits = defaultLimits(), runs = 2) =
+proc agree(name, source: string, limits = defaultLimits(), runs = 3) =
   ## Requires both paths to leave exactly the same trail.
   let plain = observe(source, false, limits, runs)
   let fast = observe(source, true, limits, runs)
@@ -350,6 +352,40 @@ third:
   h = 3
 """)
 
+block:
+  # A host function that writes the script's own state from inside a run
+  # must be seen at once, by both paths, including inside a loop.
+  proc pokeRun(native: bool): string =
+    var host = makeHost()
+    var target: Runtime
+    discard host.addFunction("poke", 1,
+      proc(arguments: openArray[int32]): int32 =
+        target.setGlobal("a", arguments[0] *% 3)
+        target.setArray("cells", 0, arguments[0])
+        0
+    )
+    let program = compile(Preamble & """
+while b < 50
+  b = b + 1
+  a = a + b
+  c = c + a + cells(0)
+  if b mod 7 = 0 then d = poke(b)
+wend
+""", host)
+    target = initRuntime(program, host)
+    if native:
+      discard target.compileNative()
+    discard target.run()
+    $target.getGlobal("a") & " " & $target.getGlobal("c") & " " &
+      $target.getArray("cells", 0)
+  let plain = pokeRun(false)
+  let fast = pokeRun(true)
+  if plain == fast:
+    echo "  ok  host code writing globals mid-run"
+  else:
+    inc failures
+    echo &"FAIL  host code writing globals mid-run: {plain} then {fast}"
+
 ## Generated programs
 
 type Generator = object
@@ -543,13 +579,13 @@ for seed in 1'i64 .. 1500'i64:
   except BasicError:
     continue
   inc tried
-  let plain = observe(source, false, limits, 2)
+  let plain = observe(source, false, limits, 3)
   for line in plain.splitLines:
     if line.startsWith("raised "):
       outcomes.inc(line[0 ..< min(line.len, 60)])
     elif line.startsWith("stats "):
       outcomes.inc("finished")
-  let fast = observe(source, true, limits, 2)
+  let fast = observe(source, true, limits, 3)
   if plain != fast:
     inc disagreed
     if disagreed <= 2:
