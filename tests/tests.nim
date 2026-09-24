@@ -1,7 +1,8 @@
 import
   std/strutils,
   bassy,
-  test_controls, test_fixed, test_booleans, test_strings, test_determinism
+  test_controls, test_fixed, test_booleans, test_strings, test_determinism,
+  test_data
 
 proc errorContains(
     action: proc() {.closure.},
@@ -71,6 +72,28 @@ ADDSCORE(5, 9)
   doAssert runtime.getArray("scores", 2) == 7
   doAssert runtime.getGlobal("accepted") == 1
   doAssert runtime.getGlobal("rejected") == 1
+
+echo "Testing scalar names shared with string functions"
+block:
+  let program = compile("""
+len = 7
+asc = 8
+instr = 9
+sub measure(len, asc, instr)
+  localTotal = len + asc + instr
+  textTotal = len("abc") + asc("A") + instr("abc", "b")
+  len = len + 1
+  adjusted = len
+end sub
+measure(2, 3, 4)
+globalTotal = len + asc + instr
+""")
+  var runtime = initRuntime(program)
+  discard runtime.run
+  doAssert runtime.getGlobal("localTotal") == 9
+  doAssert runtime.getGlobal("textTotal") == 70
+  doAssert runtime.getGlobal("adjusted") == 3
+  doAssert runtime.getGlobal("globalTotal") == 24
 
 echo "Testing BASIC recursion and exit sub"
 block:
