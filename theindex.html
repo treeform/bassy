@@ -63,6 +63,14 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `==`(left, right: Value): bool" href="bassy/numbers.html#%3D%3D%2CValue%2CValue">numbers: proc `==`(left, right: Value): bool</a></li>
           </ul></dd>
+<dt><a name="%60%5B%5D%3D%60" href="#%60%5B%5D%3D%60"><span>`[]=`:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc `[]=`(view: ArrayView; index: int; value: Value)" href="bassy.html#%5B%5D%3D%2CArrayView%2Cint%2CValue">bassy: proc `[]=`(view: ArrayView; index: int; value: Value)</a></li>
+          </ul></dd>
+<dt><a name="%60%5B%5D%60" href="#%60%5B%5D%60"><span>`[]`:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc `[]`(view: ArrayView; index: int): Value" href="bassy.html#%5B%5D%2CArrayView%2Cint">bassy: proc `[]`(view: ArrayView; index: int): Value</a></li>
+          </ul></dd>
 <dt><a name="%60and%60" href="#%60and%60"><span>`and`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `and`(left, right: Value): Value" href="bassy/numbers.html#and%2CValue%2CValue">numbers: proc `and`(left, right: Value): Value</a></li>
@@ -95,6 +103,10 @@
           </ul></dd>
 <dt><a name="addFunction" href="#addFunction"><span>addFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="bassy: proc addFunction(host: var Host; name: string; parameters: int;
+            callback: ContextHostProc; workUnits = 16): int32" href="bassy.html#addFunction%2CHost%2Cstring%2Cint%2CContextHostProc%2Cint">bassy: proc addFunction(host: var Host; name: string; parameters: int;
+            callback: ContextHostProc; workUnits = 16): int32</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="bassy: proc addFunction(host: var Host; name: string; parameters: int; callback: HostProc;
             workUnits = 16): int32" href="bassy.html#addFunction%2CHost%2Cstring%2Cint%2CHostProc%2Cint">bassy: proc addFunction(host: var Host; name: string; parameters: int; callback: HostProc;
             workUnits = 16): int32</a></li>
@@ -114,6 +126,14 @@
 <dt><a name="arrays" href="#arrays"><span>arrays:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc arrays(program: Program): int" href="bassy.html#arrays%2CProgram">bassy: proc arrays(program: Program): int</a></li>
+          </ul></dd>
+<dt><a name="ArrayView" href="#ArrayView"><span>ArrayView:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: object ArrayView" href="bassy.html#ArrayView">bassy: object ArrayView</a></li>
+          </ul></dd>
+<dt><a name="arrayView" href="#arrayView"><span>arrayView:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc arrayView(runtime: Runtime; handle: Value; writable = false): ArrayView" href="bassy.html#arrayView%2CRuntime%2CValue">bassy: proc arrayView(runtime: Runtime; handle: Value; writable = false): ArrayView</a></li>
           </ul></dd>
 <dt><a name="asBool" href="#asBool"><span>asBool:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -149,6 +169,14 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.CharacterFunction" href="bassy/texts.html#CharacterFunction">texts: TextFunction.CharacterFunction</a></li>
           </ul></dd>
+<dt><a name="chargeOperations" href="#chargeOperations"><span>chargeOperations:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc chargeOperations(runtime: Runtime; cost: int64)" href="bassy.html#chargeOperations%2CRuntime%2Cint64">bassy: proc chargeOperations(runtime: Runtime; cost: int64)</a></li>
+          </ul></dd>
+<dt><a name="chargeWork" href="#chargeWork"><span>chargeWork:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc chargeWork(runtime: Runtime; cost: int64)" href="bassy.html#chargeWork%2CRuntime%2Cint64">bassy: proc chargeWork(runtime: Runtime; cost: int64)</a></li>
+          </ul></dd>
 <dt><a name="CodeFunction" href="#CodeFunction"><span>CodeFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.CodeFunction" href="bassy/texts.html#CodeFunction">texts: TextFunction.CodeFunction</a></li>
@@ -166,6 +194,10 @@
 <dt><a name="concat" href="#concat"><span>concat:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc concat(storage: var TextStorage; left, right: Value): Value" href="bassy/texts.html#concat%2CTextStorage%2CValue%2CValue">texts: proc concat(storage: var TextStorage; left, right: Value): Value</a></li>
+          </ul></dd>
+<dt><a name="ContextHostProc" href="#ContextHostProc"><span>ContextHostProc:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: type ContextHostProc" href="bassy.html#ContextHostProc">bassy: type ContextHostProc</a></li>
           </ul></dd>
 <dt><a name="count" href="#count"><span>count:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -405,6 +437,10 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.LeftTrimFunction" href="bassy/texts.html#LeftTrimFunction">texts: TextFunction.LeftTrimFunction</a></li>
           </ul></dd>
+<dt><a name="len" href="#len"><span>len:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc len(view: ArrayView): int" href="bassy.html#len%2CArrayView">bassy: proc len(view: ArrayView): int</a></li>
+          </ul></dd>
 <dt><a name="length" href="#length"><span>length:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc length(storage: TextStorage; value: Value): int" href="bassy/texts.html#length%2CTextStorage%2CValue">texts: proc length(storage: TextStorage; value: Value): int</a></li>
@@ -464,6 +500,10 @@
 <dt><a name="NumericHostProc" href="#NumericHostProc"><span>NumericHostProc:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: type NumericHostProc" href="bassy.html#NumericHostProc">bassy: type NumericHostProc</a></li>
+          </ul></dd>
+<dt><a name="overlaps" href="#overlaps"><span>overlaps:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc overlaps(left, right: ArrayView): bool" href="bassy.html#overlaps%2CArrayView%2CArrayView">bassy: proc overlaps(left, right: ArrayView): bool</a></li>
           </ul></dd>
 <dt><a name="PrintEvent" href="#PrintEvent"><span>PrintEvent:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -665,7 +705,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-23 15:28:53 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-24 18:22:32 UTC</small>
       </div>
     </div>
   </div>
