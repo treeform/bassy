@@ -34,7 +34,7 @@ const
   MaximumFixedLiteralBytes* = 128
   MaximumFixedExponent* = 512
   LogicalFrameBytes = 16'i64
-  LogicalHostCallbackBytes = 32'i64
+  LogicalHostCallbackBytes = 48'i64
   LogicalValueBytes = 16'i64
   NotPrecedence = 6
   EmptyArguments: array[0, int32] = []
@@ -82,7 +82,13 @@ type
 
   NumericHostProc* = proc(arguments: openArray[Value]): Value {.closure.}
 
+  ContextHostProc* = proc(
+    runtime: Runtime,
+    arguments: openArray[Value]
+  ): Value {.closure.}
+
   HostCallback = object
+    context: ContextHostProc
     integer: HostProc
     numeric: NumericHostProc
 
@@ -210,6 +216,7 @@ type
     name: string
     base: int32
     length: int32
+    initial: seq[Value]
 
   Routine = object
     name: string
@@ -224,6 +231,7 @@ type
     parameterCount: int32
 
   HostFunctionSpec = object
+    context: bool
     numeric: bool
     name: string
     parameters: int32
@@ -283,6 +291,12 @@ type
     printedEvents: int64
     allocatedBytes: int64
     finished: bool
+
+  ArrayView* = object
+    runtime: Runtime
+    base: int32
+    length: int32
+    writable: bool
 
   Expr = object
     text: bool
@@ -678,7 +692,7 @@ proc isReserved(name: string, functions = true): bool =
   if functions and textFunction(name) != NoTextFunction:
     return true
   case name
-  of "and", "call", "case", "dim", "do", "else", "elseif", "end", "eqv",
+  of "and", "call", "case", "data", "dim", "do", "else", "elseif", "end", "eqv",
       "exit", "false", "for", "gosub", "goto", "if", "imp", "is", "let",
       "loop", "mod", "next", "not", "on", "or", "print", "rem",
       "return", "select", "step", "stop", "sub", "then", "to", "true",
@@ -688,14 +702,23 @@ proc isReserved(name: string, functions = true): bool =
     false
 
 proc prepareTokens(tokens: seq[Token]): seq[Token] =
-  ## Recognizes labels and expands comma-separated NEXT counter lists.
-  var i = 0
+  ## Joins continued lines, recognizes labels, and expands NEXT lists.
+  var
+    i = 0
+    continued = false
   while i < tokens.len:
     var token = tokens[i]
+    if token.isKeyword("_") and i + 1 < tokens.len and
+      tokens[i + 1].kind == NewlineToken and tokens[i + 1].text != ":":
+        i += 2
+        continued = true
+        continue
     let
       statementStart = i == 0 or tokens[i - 1].kind == NewlineToken or
         (result.len > 0 and result[^1].kind == LabelToken)
-      physicalStart = i == 0 or tokens[i - 1].line < token.line
+      physicalStart = not continued and
+        (i == 0 or tokens[i - 1].line < token.line)
+    continued = false
     if physicalStart and token.kind == IntegerToken:
       if token.value > high(int32):
         fail(token, "line number is outside the int32 range")
@@ -790,8 +813,9 @@ proc addHostFunction(
     fail("BASIC host function work cost must be a positive int32")
   if key.stringName and callback.integer != nil:
     fail("BASIC string callbacks require NumericHostProc")
-  if callback.integer == nil and callback.numeric == nil:
-    fail("BASIC host function callback cannot be nil")
+  if callback.integer == nil and callback.numeric == nil and
+    callback.context == nil:
+      fail("BASIC host function callback cannot be nil")
   result = int32(host.functions.len)
   host.functionIds[key] = result
   host.functions.add HostFunction(
@@ -828,6 +852,21 @@ proc addFunction*(
     name,
     parameters,
     HostCallback(numeric: callback),
+    workUnits
+  )
+
+proc addFunction*(
+    host: var Host,
+    name: string,
+    parameters: int,
+    callback: ContextHostProc,
+    workUnits = 16
+): int32 =
+  ## Exposes a trusted callback with array access and dynamic work charging.
+  host.addHostFunction(
+    name,
+    parameters,
+    HostCallback(context: callback),
     workUnits
   )
 
@@ -960,6 +999,99 @@ proc skipNewlines(tokens: seq[Token], pos: var int) =
   while tokens[pos].kind in {NewlineToken, LabelToken}:
     inc pos
 
+proc fixedLiteral(token: Token, negative = false): Value =
+  ## Expands bounded decimal exponents before Fixxy's integer-only parser.
+  let
+    text = token.text.toLowerAscii.replace('d', 'e')
+    exponentAt = text.find('e')
+    mantissa =
+      if exponentAt < 0:
+        text
+      else:
+        text[0 ..< exponentAt]
+    exponent =
+      if exponentAt < 0:
+        0
+      else:
+        parseInt(text[exponentAt + 1 .. ^1])
+    point = mantissa.find('.')
+    digits = mantissa.replace(".", "")
+    decimalAt =
+      (if point < 0: mantissa.len else: point) + exponent
+    expanded =
+      if decimalAt <= 0:
+        "0." & "0".repeat(-decimalAt) & digits
+      elif decimalAt >= digits.len:
+        digits & "0".repeat(decimalAt - digits.len)
+      else:
+        digits[0 ..< decimalAt] & "." & digits[decimalAt .. ^1]
+  try:
+    return toValue(parseFixed((if negative: "-" else: "") & expanded))
+  except FixxyError as error:
+    fail(token, error.msg)
+
+proc collectData(compiler: var Compiler, pos: var int) =
+  ## Registers a bounded, immutable array of numeric literal values.
+  inc pos
+  let name = compiler.tokens[pos]
+  if name.kind != IdentifierToken or name.text.stringName:
+    fail(name, "DATA requires a numeric array name")
+  inc pos
+  var representation = ""
+  if compiler.tokens[pos].isKeyword("as"):
+    inc pos
+    representation = compiler.tokens[pos].text
+    if representation notin ["int32", "fixed32"]:
+      fail(compiler.tokens[pos], "DATA type must be int32 or fixed32")
+    if representation == "fixed32" and compiler.limits.disableFixed:
+      fail(name, "BASIC fixed-point DATA is disabled")
+    inc pos
+  if compiler.tokens[pos].kind != EqualToken:
+    fail(compiler.tokens[pos], "expected '=' after DATA name")
+  inc pos
+  var values: seq[Value]
+  while true:
+    var negative = false
+    if compiler.tokens[pos].kind in {MinusToken, PlusToken}:
+      negative = compiler.tokens[pos].kind == MinusToken
+      inc pos
+    let token = compiler.tokens[pos]
+    var value: Value
+    case token.kind
+    of IntegerToken:
+      let integer = if negative: -token.value else: token.value
+      if integer < low(int32) or integer > high(int32):
+        fail(token, "DATA integer is outside the int32 range")
+      value = toValue(int32(integer))
+    of FixedToken:
+      value = fixedLiteral(token, negative)
+    else:
+      fail(token, "DATA requires numeric literals")
+    try:
+      case representation
+      of "int32":
+        value = toValue(value.asInt)
+      of "fixed32":
+        value = toValue(value.asFixed)
+      else:
+        discard
+    except BasicError as error:
+      fail(token, error.msg)
+    let cells = int64(compiler.program.arrayCells) + int64(values.len) + 1
+    if cells > int64(compiler.limits.maxArrayElements):
+      fail(token, "DATA exceeds the configured element limit")
+    if cells > compiler.limits.maxMemoryBytes div LogicalValueBytes:
+      fail(token, "DATA exceeds the configured memory limit")
+    values.add value
+    inc pos
+    if compiler.tokens[pos].kind != CommaToken:
+      break
+    inc pos
+  if not compiler.tokens.declarationLineEnd(pos):
+    fail(compiler.tokens[pos], "expected a new line after DATA")
+  compiler.addArray(name.text, int64(values.len - 1), name)
+  compiler.program.arrays[^1].initial = move(values)
+
 proc collectDeclarations(compiler: var Compiler) =
   ## Collects global arrays and subroutine ranges before code generation.
   compiler.program.routines.add Routine(name: "main")
@@ -1030,6 +1162,8 @@ proc collectDeclarations(compiler: var Compiler) =
         pos,
         nameToken
       )
+    elif compiler.tokens[pos].isKeyword("data"):
+      compiler.collectData(pos)
     elif compiler.tokens[pos].isKeyword("dim"):
       inc pos
       let nameToken = compiler.tokens[pos]
@@ -1306,37 +1440,6 @@ proc parseHostCall(
 proc parseTextCall(parser: var Parser, name: Token): Expr
   ## Parses a built-in string operation with checked argument types.
 
-proc fixedLiteral(token: Token, negative = false): Value =
-  ## Expands bounded decimal exponents before Fixxy's integer-only parser.
-  let
-    text = token.text.toLowerAscii.replace('d', 'e')
-    exponentAt = text.find('e')
-    mantissa =
-      if exponentAt < 0:
-        text
-      else:
-        text[0 ..< exponentAt]
-    exponent =
-      if exponentAt < 0:
-        0
-      else:
-        parseInt(text[exponentAt + 1 .. ^1])
-    point = mantissa.find('.')
-    digits = mantissa.replace(".", "")
-    decimalAt =
-      (if point < 0: mantissa.len else: point) + exponent
-    expanded =
-      if decimalAt <= 0:
-        "0." & "0".repeat(-decimalAt) & digits
-      elif decimalAt >= digits.len:
-        digits & "0".repeat(decimalAt - digits.len)
-      else:
-        digits[0 ..< decimalAt] & "." & digits[decimalAt .. ^1]
-  try:
-    return toValue(parseFixed((if negative: "-" else: "") & expanded))
-  except FixxyError as error:
-    fail(token, error.msg)
-
 proc parsePrimary(parser: var Parser): Expr =
   ## Parses a literal, scalar, array access, or parenthesized expression.
   let token = parser.advance
@@ -1392,6 +1495,11 @@ proc parsePrimary(parser: var Parser): Expr =
     let arrayId =
       parser.compiler[].program.arrayIds.getOrDefault(token.text, -1'i32)
     if arrayId >= 0:
+      if parser.current.kind != LeftParenToken:
+        return constant(arrayId)
+      if parser.peek(1).kind == RightParenToken:
+        parser.pos += 2
+        return constant(arrayId)
       discard parser.expectKind(
         LeftParenToken,
         "expected '(' after array name"
@@ -1501,6 +1609,15 @@ proc parseDim(parser: var Parser) =
   discard parser.expectKind(LeftParenToken, "expected '(' after array name")
   discard parser.expectKind(IntegerToken, "expected an array upper bound")
   discard parser.expectKind(RightParenToken, "expected ')' after array bound")
+  parser.lineEnd
+
+proc parseData(parser: var Parser) =
+  ## Consumes a DATA declaration already checked by declaration discovery.
+  let keyword = parser.advance
+  if parser.routineId != 0 or parser.syntaxDepth != 0:
+    fail(keyword, "DATA can only be declared at top level")
+  while parser.current.kind notin {NewlineToken, EndToken}:
+    inc parser.pos
   parser.lineEnd
 
 proc fusesAdd(
@@ -1774,6 +1891,8 @@ proc parseAssignment(parser: var Parser, name: Token) =
   if parser.current.kind == LeftParenToken:
     if arrayId < 0:
       fail(name, "only arrays can be indexed")
+    if parser.compiler[].program.arrays[int(arrayId)].initial.len > 0:
+      fail(name, "DATA arrays are read-only")
     let assignmentStart = parser.code.len
     inc parser.pos
     var index = parser.parseExpression
@@ -1971,7 +2090,7 @@ proc parseHostCall(
     name,
     int(function.parameters),
     "host function",
-    legacyLiterals = not function.numeric
+    legacyLiterals = not function.numeric and not function.context
   )
   parser.emitArguments(arguments)
   let destination =
@@ -2529,6 +2648,8 @@ proc parseStatement(parser: var Parser) =
       return
   if parser.atKeyword("dim"):
     parser.parseDim
+  elif parser.atKeyword("data"):
+    parser.parseData
   elif parser.atKeyword("if"):
     parser.parseIf
   elif parser.atKeyword("while"):
@@ -2878,10 +2999,14 @@ proc verify(program: Program) =
         requireRegister(item.c)
       of ArraySetOp:
         requireArray(item.a)
+        if program.arrays[int(item.a)].initial.len > 0:
+          fail("compiler produced a write to DATA")
         requireRegister(item.b)
         requireRegister(item.c)
       of ArrayAddGlobalsOp:
         requireArray(item.a)
+        if program.arrays[int(item.a)].initial.len > 0:
+          fail("compiler produced a write to DATA")
         requireGlobal(item.b)
         requireGlobal(item.c)
       of SetArgumentOp:
@@ -2943,6 +3068,7 @@ proc configureHost(
       fail("BASIC host function parameter count exceeds the configured limit")
     program.hostFunctionIds[function.name] = int32(i)
     program.hostFunctions.add HostFunctionSpec(
+      context: function.callback.context != nil,
       numeric: function.callback.numeric != nil,
       name: function.name,
       parameters: function.parameters,
@@ -3039,7 +3165,9 @@ proc initRuntimeState(
     if binding.parameters != function.parameters or
         binding.workUnits != function.workUnits or
         (binding.callback.numeric != nil) != function.numeric or
-        (binding.callback.integer == nil and binding.callback.numeric == nil):
+        (binding.callback.context != nil) != function.context or
+        (binding.callback.integer == nil and binding.callback.numeric == nil and
+          binding.callback.context == nil):
       fail("incompatible BASIC host function binding '" & function.name & "'")
   let
     registerCells =
@@ -3053,6 +3181,11 @@ proc initRuntimeState(
   var allocatedBytes =
     int64(limits.maxCallDepth) * LogicalFrameBytes + hostCallbackBytes +
     argumentCells * 4
+  for array in program.arrays:
+    let cells = int64(array.initial.len)
+    if cells > (limits.maxMemoryBytes - allocatedBytes) div LogicalValueBytes:
+      fail("BASIC DATA exceeds the configured memory limit")
+    allocatedBytes += cells * LogicalValueBytes
   if program.usesStrings:
     allocatedBytes += storageBytes(limits.maxStrings, limits.maxStringBytes) +
       int64(program.literals.len) * 4
@@ -3110,6 +3243,9 @@ proc initRuntimeState(
       if array.name.stringName:
         for i in int(array.base) ..< int(array.base + array.length):
           result.memory[i] = result.strings.empty
+  for array in program.arrays:
+    for i, value in array.initial:
+      result.memory[int(array.base) + i] = value
   for i, name in program.hostDataNames:
     let id = host.dataIds.getOrDefault(name, -1'i32)
     result.hostData[i] =
@@ -3135,9 +3271,12 @@ proc initRuntime*(
   initRuntimeState(program, host, limits)
 
 proc reset*(runtime: var Runtime) =
-  ## Restores a runtime to its initial zero-filled program state.
+  ## Restores zeroed variables and the program's immutable DATA values.
   runtime.globals.clear
   runtime.memory.clear
+  for array in runtime.program.arrays:
+    for i, value in array.initial:
+      runtime.memory[int(array.base) + i] = value
   runtime.registers.clear
   runtime.arguments.clear
   if runtime.program.usesStrings:
@@ -3330,9 +3469,59 @@ proc setArray*(
   let id = runtime.program.findArray(name)
   if id < 0:
     fail("unknown BASIC array '" & name & "'")
+  if runtime.program.arrays[int(id)].initial.len > 0:
+    fail("DATA arrays are read-only")
   runtime.requireValue(value)
   requireType(name, value)
   runtime.memory[runtime.checkedArrayIndex(id, index)] = value
+
+proc arrayView*(
+    runtime: Runtime,
+    handle: Value,
+    writable = false
+): ArrayView =
+  ## Resolves a program-local numeric array handle without allocating.
+  let id = handle.asInt
+  if id < 0 or int(id) >= runtime.program.arrays.len:
+    fail("invalid BASIC array handle")
+  let array = runtime.program.arrays[int(id)]
+  if array.name.stringName:
+    fail("native math requires numeric arrays")
+  if writable and array.initial.len > 0:
+    fail("DATA arrays are read-only")
+  ArrayView(
+    runtime: runtime,
+    base: array.base,
+    length: array.length,
+    writable: writable
+  )
+
+proc len*(view: ArrayView): int {.inline.} =
+  ## Returns the number of elements in a checked numeric view.
+  int(view.length)
+
+proc overlaps*(left, right: ArrayView): bool {.inline.} =
+  ## Tests whether two views share any backing array storage.
+  left.runtime == right.runtime and
+    left.base < right.base + right.length and
+    right.base < left.base + left.length
+
+proc `[]`*(view: ArrayView, index: int): Value {.inline.} =
+  ## Reads one element with bounds checks even in release builds.
+  if index < 0 or index >= view.len:
+    fail("native array index is outside the array")
+  view.runtime.memory[int(view.base) + index]
+
+proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
+  ## Writes a numeric element after checking bounds and mutability.
+  if not view.writable:
+    fail("native array view is read-only")
+  if index < 0 or index >= view.len:
+    fail("native array index is outside the array")
+  if value.kind == StringValue:
+    fail("native math requires numeric values")
+  view.runtime.requireValue(value)
+  view.runtime.memory[int(view.base) + index] = value
 
 proc getString*(runtime: Runtime, value: Value): string =
   ## Reads owned text without exposing raw arena handles.
@@ -3392,10 +3581,19 @@ proc stringBytes*(runtime: Runtime): int =
   ## Returns native string bytes occupied since the last reset.
   runtime.strings.bytesUsed
 
-proc chargeWork(runtime: var Runtime, cost: int64) =
-  ## Charges size-dependent string work before performing the operation.
+proc chargeWork*(runtime: Runtime, cost: int64) =
+  ## Charges dynamic native work before performing a bounded operation.
   if cost < 0 or cost > runtime.remainingWork:
     fail("BASIC work limit exceeded")
+  runtime.remainingWork -= cost
+
+proc chargeOperations*(runtime: Runtime, cost: int64) =
+  ## Reserves native operations against both budgets before execution.
+  if cost < 0 or cost > runtime.remainingInstructions:
+    fail("BASIC instruction limit exceeded")
+  if cost > runtime.remainingWork:
+    fail("BASIC work limit exceeded")
+  runtime.remainingInstructions -= cost
   runtime.remainingWork -= cost
 
 proc addValue(runtime: var Runtime, left, right: Value): Value =
@@ -3764,7 +3962,15 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
         )
         callback = runtime.hostCallbacks[functionId]
       var value: Value
-      if callback.numeric != nil:
+      if callback.context != nil:
+        if count == 0:
+          value = callback.context(runtime, [])
+        else:
+          value = callback.context(
+            runtime,
+            runtime.arguments.toOpenArray(0, count - 1)
+          )
+      elif callback.numeric != nil:
         if count == 0:
           value = callback.numeric([])
         else:
