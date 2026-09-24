@@ -114,6 +114,20 @@ proc get*(storage: TextStorage, value: Value): string =
   if view.length > 0:
     result = storage.arena[int(view.start) ..< int(view.start + view.length)]
 
+template withText*(
+  storage: var TextStorage, value: Value, text, body: untyped
+) =
+  ## Borrows validated bytes until the storage is next modified.
+  block:
+    let
+      source = addr storage
+      view = source[].span(value)
+    template text: untyped =
+      source[].arena.toOpenArray(
+        int(view.start), int(view.start + view.length) - 1
+      )
+    body
+
 proc count*(storage: TextStorage): int {.raises: [].} =
   ## Returns the number of occupied string slots including the empty string.
   storage.spans.len
