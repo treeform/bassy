@@ -15,7 +15,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os:
+          - ubuntu-latest      # x86-64 Linux, native backend
+          - ubuntu-24.04-arm   # arm64 Linux, native backend
+          - macos-latest       # arm64 macOS, native backend
+          - windows-latest     # x86-64 Windows, native backend
+          # macOS is arm only here. Intel runners are not covered.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -46,6 +51,33 @@ jobs:
         run: nim r -d:fixedChecks tests/tests.nim
       - name: Test C++ determinism
         run: nim cpp -r -d:release tests/tests.nim
+      - name: Test the machine code encoders against the system assembler
+        run: |
+          nim r -d:release tests/test_arm64.nim
+          nim r -d:release tests/test_amd64.nim
+      - name: Test compiled programs against the interpreter
+        run: |
+          nim r -d:release tests/test_jit.nim
+          nim r -d:release tests/test_native.nim
+          nim r -d:danger tests/test_native.nim
+          nim r -d:fixedChecks tests/test_native.nim
+      - name: Run the whole suite as machine code
+        run: |
+          nim r -d:release -d:bassyNative tests/tests.nim
+          nim r -d:danger -d:bassyNative tests/tests.nim
+          nim r -d:fixedChecks -d:bassyNative tests/tests.nim
+      - name: Test that compiled programs cannot outrun the sandbox
+        run: |
+          nim r -d:release tests/test_jit_safety.nim
+          nim r -d:danger tests/test_jit_safety.nim
+      - name: Test the same scripts with the interpreter forced
+        run: nim r -d:release -d:bassyNoJit tests/test_jit.nim
+      - name: Render the BASIC raytracer and check cross-platform determinism
+        run: nim r -d:release tests/bench_raytracer.nim
+      - name: Run the BASIC text workload and check cross-platform determinism
+        run: nim r -d:release tests/bench_strings.nim
+      - name: Report native compilation speedups
+        run: nim r -d:release tests/bench_jit.nim
       - name: Run examples
         run: |
           nim r examples/hello.nim

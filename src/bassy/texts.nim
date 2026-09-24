@@ -319,3 +319,37 @@ proc reset*(storage: var TextStorage, roots: var seq[Value]) =
   swap(storage.arena, storage.scratch)
   swap(storage.spans, storage.scratchSpans)
   storage.owner = owner
+
+## Direct access for compiled code
+
+proc ownerAddress*(storage: var TextStorage): pointer {.raises: [].} =
+  ## Returns where the current generation's owner is kept.
+  storage.owner.addr
+
+proc spansAddress*(storage: var TextStorage): pointer {.raises: [].} =
+  ## Returns the span table itself, so its length and buffer are read
+  ## fresh each time, surviving the swap a reset makes.
+  storage.spans.addr
+
+proc arenaAddress*(storage: var TextStorage): pointer {.raises: [].} =
+  ## Returns the arena itself, read fresh each time for the same reason.
+  storage.arena.addr
+
+proc textLayoutMatches*(): bool {.raises: [].} =
+  ## Confirms the layout compiled code reads strings through: a span is a
+  ## start then a length, both thirty-two bits, and a sequence or string
+  ## is a length then a pointer to a capacity followed by the items.
+  var spans = newSeqOfCap[TextSpan](2)
+  spans.add TextSpan(start: 3, length: 5)
+  var arena = newStringOfCap(4)
+  arena.add "ab"
+  let spanOrigin = cast[int](spans[0].addr)
+  if sizeof(TextSpan) != 8 or
+      cast[int](spans[0].length.addr) - spanOrigin != 4:
+    return false
+  let spanFields = cast[ptr array[2, int]](spans.addr)
+  if spanFields[0] != spans.len or spanFields[1] + 8 != spanOrigin:
+    return false
+  let arenaFields = cast[ptr array[2, int]](arena.addr)
+  arenaFields[0] == arena.len and
+    arenaFields[1] + 8 == cast[int](arena[0].addr)

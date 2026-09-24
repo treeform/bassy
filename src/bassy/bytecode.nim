@@ -1,0 +1,73 @@
+## Defines the register bytecode shared by the interpreter and the
+## native compiler. Opcodes carry up to three operands, whose meaning
+## depends on the operation.
+
+type
+  Op* = enum
+    MeterOp,
+    LoadImmediateOp,
+    LoadFixedOp,
+    LoadStringOp,
+    TextCallOp,
+    MoveOp,
+    LoadGlobalOp,
+    LoadHostDataOp,
+    StoreGlobalOp,
+    StoreGlobalImmediateOp,
+    MoveGlobalOp,
+    AddGlobalImmediateOp,
+    AddGlobalOp,
+    AddGlobalHostDataOp,
+    AddGlobalRegisterOp,
+    ModuloGlobalImmediateOp,
+    AddGlobalArrayGlobalIndexOp,
+    AddOp,
+    SubtractOp,
+    MultiplyOp,
+    DivideOp,
+    IntegerDivideOp,
+    ModuloOp,
+    NegateOp,
+    EqualOp,
+    NotEqualOp,
+    LessOp,
+    LessEqualOp,
+    GreaterOp,
+    GreaterEqualOp,
+    AndOp,
+    OrOp,
+    XorOp,
+    EqvOp,
+    ImpOp,
+    NotOp,
+    JumpOp,
+    JumpIfZeroOp,
+    JumpUnlessGlobalEqualImmediateOp,
+    JumpUnlessGlobalNotEqualImmediateOp,
+    JumpUnlessGlobalLessImmediateOp,
+    JumpUnlessGlobalLessEqualImmediateOp,
+    JumpUnlessGlobalGreaterImmediateOp,
+    JumpUnlessGlobalGreaterEqualImmediateOp,
+    JumpUnlessGlobalModuloEqualZeroOp,
+    ArrayGetOp,
+    ArraySetOp,
+    ArrayAddGlobalsOp,
+    SetArgumentOp,
+    SetArgumentImmediateOp,
+    SetArgumentGlobalOp,
+    HostCallOp,
+    CallOp,
+    GosubOp,
+    ReturnOp,
+    ReturnLabelOp,
+    ExitSubOp,
+    HaltOp,
+    PrintTextOp,
+    PrintValueOp,
+    PrintNewlineOp
+
+  Instruction* = object
+    op*: Op
+    a*: int32
+    b*: int32
+    c*: int32
