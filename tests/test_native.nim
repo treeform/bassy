@@ -19,6 +19,7 @@ const
   Texts = ["s$", "t$"]
   Cells = 6
   TextCells = 3
+  TableCells = 6
 
 var
   failures = 0
@@ -60,6 +61,25 @@ proc makeHost(): Host =
     proc(arguments: openArray[int32]): int32 =
       if arguments[0] > arguments[1]: arguments[0] else: arguments[1]
   , 3)
+  # Runtime-aware callbacks: one reads an array through a checked view,
+  # charging per cell, and writes the total into the first cell of
+  # another; the other burns work. Either can refuse part way.
+  let gather: ContextHostProc = proc(runtime: Runtime,
+      arguments: openArray[Value]): Value =
+    let source = runtime.arrayView(arguments[0])
+    let target = runtime.arrayView(arguments[1], writable = true)
+    runtime.chargeOperations(int64(source.len))
+    var total = toValue(0'i32)
+    for index in 0 ..< source.len:
+      total = total + source[index]
+    target[0] = total
+    toValue(int32(source.len))
+  discard result.addFunction("gather", 2, gather)
+  let burn: ContextHostProc = proc(runtime: Runtime,
+      arguments: openArray[Value]): Value =
+    runtime.chargeWork(int64(arguments[0].asInt))
+    arguments[0]
+  discard result.addFunction("burn", 1, burn)
 
 proc observe(source: string, native: bool, limits: Limits,
     runs: int): string =
@@ -104,6 +124,9 @@ proc observe(source: string, native: bool, limits: Limits,
     for index in 0 ..< TextCells:
       transcript.add(&"text {index} " &
         runtime.render(runtime.getArrayValue("words$", int32(index))))
+    for index in 0 ..< TableCells:
+      transcript.add(&"table {index} " &
+        runtime.render(runtime.getArrayValue("table", int32(index))))
   if native:
     handed += runtime.handedBack
   transcript.join("\n")
@@ -132,6 +155,8 @@ proc agree(name, source: string, limits = defaultLimits(), runs = 3) =
 const Preamble = """
 dim cells(5)
 dim words$(2)
+data table = 3, -1, 0.5, 2147483647, -7.25, 13
+data weights as fixed32 = 0.5, 1.25, -3
 """
 
 agree("arithmetic of every kind", Preamble & """
@@ -327,6 +352,34 @@ y = -32768
 y = y - 0.5
 """)
 
+agree("DATA read in a loop kept in registers", Preamble & """
+a = 0
+b = 0
+while a < 6
+  b = b + table(a)
+  a = a + 1
+wend
+c = weights(0) * table(2) + weights(2)
+""")
+
+agree("DATA handed to host code", Preamble & """
+a = gather(table, cells())
+b = gather(weights, cells)
+c = burn(40)
+d = gather(cells, table())
+e = 1
+""")
+
+block:
+  var limits = defaultLimits()
+  limits.maxInstructions = 400
+  agree("host code charging operations until the budget runs out",
+    Preamble & """
+while 1
+  a = a + gather(table, cells())
+wend
+""", limits)
+
 agree("select, for, do, and on-goto", Preamble & """
 for i = 1 to 10 step 3
   select case i
@@ -420,10 +473,11 @@ proc whole(g: var Generator): string =
   inc g.depth
   defer: dec g.depth
   if g.depth > 3 or g.chance(35):
-    case g.random.rand(0 .. 6)
+    case g.random.rand(0 .. 7)
     of 0, 1: return $g.random.rand(-20 .. 20)
     of 2: return $g.pick([0, 1, -1, 2147483647, -2147483647, 13, 65536])
     of 3, 4, 5: return g.pick(Scalars)
+    of 6: return "table(" & $g.random.rand(0 ..< TableCells) & ")"
     else: return "cells(" & $g.random.rand(0 ..< Cells) & ")"
   case g.random.rand(0 .. 11)
   of 0 .. 3:
@@ -461,10 +515,14 @@ proc numeric(g: var Generator): string =
   inc g.depth
   defer: dec g.depth
   if g.depth > 3 or g.chance(30):
-    case g.random.rand(0 .. 5)
+    case g.random.rand(0 .. 6)
     of 0, 1: return g.literal()
     of 2, 3: return g.pick(Scalars)
     of 4: return g.pick(Decimals)
+    of 5:
+      if g.chance(50):
+        return "table(" & g.cellIndex() & ")"
+      return "weights(" & $g.random.rand(0 .. 3) & ")"
     else: return "cells(" & g.cellIndex() & ")"
   case g.random.rand(0 .. 16)
   of 0 .. 4:
@@ -536,7 +594,9 @@ proc statement(g: var Generator, indent: string, room: int): string =
     indent & "print " & g.numeric() & "; " & g.text() & "\n"
   of 9:
     indent & g.pick(["bump(" & g.whole() & ")", "gosub tally",
-      "a = a + 1", "b = b - 1"]) & "\n"
+      "a = a + 1", "b = b - 1", "c = gather(table, cells())",
+      "d = gather(weights, cells)", "a = burn(" & g.whole() & ")",
+      "b = gather(cells, table())"]) & "\n"
   of 10 .. 12:
     let condition = g.numeric()
     var text = indent & "if " & condition & " then\n" &
