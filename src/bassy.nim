@@ -3241,12 +3241,19 @@ proc initRuntimeState(
   for i, function in program.hostFunctions:
     let id = host.functionIds.getOrDefault(function.name, -1'i32)
     result.hostCallbacks[i] = host.functions[int(id)].callback
-  when defined(bassyNative):
-    # Every runtime runs as machine code, so a whole test suite checks the
-    # two paths agree. A program the compiler refuses fails loudly here.
+  when defined(bassyNative) or defined(bassyNativeStrict):
+    # Every runtime runs as machine code wherever the compiler accepts it,
+    # and anything it refuses stays on the interpreter, as usual.
     if jitSupported():
-      doAssert result.compileNative() == program.code.len,
-        "native compilation refused this program"
+      let compiled = result.compileNative()
+      when defined(bassyNativeStrict):
+        # For test suites only: a refusal fails the whole run, and not as a
+        # BasicError a test expecting one could mistake for its own, so a
+        # suite proves every program it holds really ran as machine code.
+        if compiled != program.code.len:
+          raiseAssert("native compilation refused this program")
+      else:
+        discard compiled
 
 proc initRuntime*(program: Program, limits = defaultLimits()): Runtime =
   ## Allocates a runtime for a program without host bindings.

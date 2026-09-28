@@ -63,9 +63,9 @@ jobs:
           nim r -d:fixedChecks tests/test_native.nim
       - name: Run the whole suite as machine code
         run: |
-          nim r -d:release -d:bassyNative tests/tests.nim
-          nim r -d:danger -d:bassyNative tests/tests.nim
-          nim r -d:fixedChecks -d:bassyNative tests/tests.nim
+          nim r -d:release -d:bassyNativeStrict tests/tests.nim
+          nim r -d:danger -d:bassyNativeStrict tests/tests.nim
+          nim r -d:fixedChecks -d:bassyNativeStrict tests/tests.nim
       - name: Test that compiled programs cannot outrun the sandbox
         run: |
           nim r -d:release tests/test_jit_safety.nim
