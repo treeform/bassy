@@ -617,7 +617,9 @@ proc statement(g: var Generator, indent: string, room: int): string =
     indent & g.pick(["bump(" & g.whole() & ")", "gosub tally",
       "a = a + 1", "b = b - 1", "c = gather(table, cells())",
       "d = gather(weights, cells)", "a = burn(" & g.whole() & ")",
-      "b = gather(cells, table())"]) & "\n"
+      "b = gather(cells, table())",
+      "wide(" & g.whole() & ", 1, 2, 3, 4, " & g.whole() &
+        ", 6, 7, 8, " & g.whole() & ", 10)"]) & "\n"
   of 10 .. 12:
     let condition = g.numeric()
     var text = indent & "if " & condition & " then\n" &
@@ -651,6 +653,13 @@ proc generated(seed: int64): string =
   result.add("tally:\n  c = c + " & g.literal() & "\n  return\n")
   result.add("sub bump(n)\n  d = d + n\n" & g.body("  ", 1) &
     "  if n < 3 then bump(n + 1)\nend sub\n")
+  # More parameters than a return copies in straight-line code, handed
+  # back and forth through GOSUB, which shares them with the caller.
+  result.add("sub wide(p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)\n" &
+    "  gosub widen\n  gosub widen\n" &
+    "  c = c + p0 + p3 + p7 + p10\n  exit sub\n" &
+    "widen:\n  p0 = p0 + 1\n  p10 = p10 + p9\n  p5 = p5 - p1\n" &
+    "  return\nend sub\n")
 
 var
   tried = 0
