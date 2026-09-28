@@ -3251,7 +3251,9 @@ proc initRuntimeState(
         # For test suites only: a refusal fails the whole run, and not as a
         # BasicError a test expecting one could mistake for its own, so a
         # suite proves every program it holds really ran as machine code.
-        if compiled != program.code.len:
+        # The one refusal by design is a runtime made from inside compiled
+        # code, which must stay interpreted.
+        if compiled != program.code.len and not runningCompiledCode():
           raiseAssert("native compilation refused this program")
       else:
         discard compiled
