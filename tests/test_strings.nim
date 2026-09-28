@@ -187,7 +187,8 @@ saved$(1) = answer$
   doAssert runtime.getStringGlobal("message$") == "host global"
   runtime.setData("mail$", "new mail")
   runtime.restart
-  doAssert runtime.getString(value) == "ok"
+  doAssert runtime.getStringGlobal("answer$") == "ok"
+  doAssert errorContains(proc() = discard runtime.getString(value), "stale")
   var other = initRuntime(program, host)
   doAssert errorContains(proc() = other.setGlobal("answer$", value), "stale")
   doAssert errorContains(proc() = runtime.setGlobal("answer$", 1), "type")
@@ -311,5 +312,48 @@ c$ = right$(a$, 4)
   runtime.reset
   doAssert runtime.stringBytes == 6
   doAssert runtime.getStringData("second$") == "cdef"
+
+echo "Testing repeated string restarts and borrowed host access"
+block:
+  var host = initHost()
+  discard host.addData("incoming$", "host value")
+  var runtime: Runtime
+  let inspect: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Borrows a substring without constructing a Nim string.
+    runtime.withString(args[0], text):
+      doAssert text.len == 4 and text[0] == 'e' and text[3] == 'i'
+    toValue(1)
+  discard host.addFunction("inspect", 1, inspect)
+  let program = compile("""
+dim saved$(2)
+if turns = 0 then
+  saved$(0) = "persistent text"
+  saved$(1) = mid$(saved$(0), 2, 4)
+end if
+turns = turns + 1
+message$ = "turn " + str$(turns) + incoming$
+saved$(2) = message$
+ok = inspect(saved$(1))
+""", host)
+  runtime = initRuntime(program, host)
+  for i in 1 .. 1000:
+    runtime.restart()
+    discard runtime.run()
+    doAssert runtime.getGlobal("turns") == i
+    doAssert runtime.getStringArray("saved$", 0) == "persistent text"
+    doAssert runtime.getStringArray("saved$", 1) == "ersi"
+    doAssert runtime.getStringArray("saved$", 2) ==
+      "turn  " & $i & "host value"
+    doAssert runtime.getStringData("incoming$") == "host value"
+    doAssert runtime.stringCount < 32
+    doAssert runtime.stringBytes < 256
+  let empty = runtime.putString("")
+  runtime.withString(empty, text):
+    doAssert text.len == 0
+  runtime.reset()
+  doAssert errorContains(proc() =
+    runtime.withString(empty, text):
+      discard text.len
+  , "stale")
 
 echo "Native string tests passed"
