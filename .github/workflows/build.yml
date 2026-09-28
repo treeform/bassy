@@ -16,11 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest      # x86-64 Linux, native backend
-          - ubuntu-24.04-arm   # arm64 Linux, native backend
           - macos-latest       # arm64 macOS, native backend
+          - ubuntu-latest      # x86-64 Linux, native backend
           - windows-latest     # x86-64 Windows, native backend
-          # macOS is arm only here. Intel runners are not covered.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
