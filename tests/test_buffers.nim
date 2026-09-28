@@ -146,3 +146,47 @@ next i
 """, host), host, limits)
   discard runtime.run()
   doAssert runtime.nativeMemoryBytes < 1024
+
+echo "Testing nested calls and host roots across collection and reset"
+block:
+  var host = makeHost()
+  discard host.addData("held", 0)
+  let program = compile("""
+dim data(1)
+sub inspect(array)
+  noise = results(data)
+  nested = results(results(array))
+  kept = array(0)
+  answer = nested(0)
+end sub
+data(0) = 7
+res = results(data)
+inspect(res)
+res = 0
+noise = 0
+nested = 0
+""", host)
+  var runtime = initRuntime(program, host)
+  discard runtime.run()
+  doAssert runtime.getGlobal("kept") == 7
+  doAssert runtime.getGlobal("answer") == 7
+  let held = runtime.createBlob()
+  runtime.putBlob(held, "root")
+  runtime.setData("held", held)
+  runtime.restart()
+  runtime.collectBuffers()
+  doAssert runtime.getBlob(held) == "root"
+  runtime.reset()
+  doAssert runtime.getData("held") == 0
+  discard runtime.run()
+  doAssert fails(proc() = discard runtime.getBlob(held))
+
+block:
+  let host = makeHost()
+  var limits = defaultLimits()
+  limits.disableFixed = true
+  var runtime = initRuntime(compile("state = blobCreate()\n", host, limits),
+    host, limits)
+  doAssert fails(proc() = discard runtime.putArray([toValue(1.5'fx)]))
+  let array = runtime.putArray([toValue(1)])
+  doAssert fails(proc() = discard runtime.arrayView(array)[1])

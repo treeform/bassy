@@ -3322,6 +3322,9 @@ proc initRuntime*(
 proc reset*(runtime: var Runtime) =
   ## Restores zeroed variables and the program's immutable DATA values.
   runtime.buffers.reset
+  for value in runtime.hostData.mitems:
+    if value.kind in {ArrayValue, BlobValue}:
+      value = Value()
   runtime.globals.clear
   runtime.memory.clear
   for array in runtime.program.arrays:
