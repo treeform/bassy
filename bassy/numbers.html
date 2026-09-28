@@ -63,9 +63,9 @@
   case
   of IntegerValue:
   of FixedValue:
-  of StringValue:">Value</a></li>
+  of StringValue, ArrayValue, BlobValue:">Value</a></li>
 <li><a class="reference" href="#ValueKind" title="ValueKind = enum
-  IntegerValue, FixedValue, StringValue">ValueKind</a></li>
+  IntegerValue, FixedValue, StringValue, ArrayValue, BlobValue">ValueKind</a></li>
 
     </ul>
   </details>
@@ -121,6 +121,18 @@
 </ul>
 <ul class="simple nested-toc-section">asInt
   <li><a class="reference" href="#asInt%2CValue" title="asInt(value: Value): int32">asInt(value: Value): int32</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">bufferOwner
+  <li><a class="reference" href="#bufferOwner%2CValue" title="bufferOwner(value: Value): uint32">bufferOwner(value: Value): uint32</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">bufferSlot
+  <li><a class="reference" href="#bufferSlot%2CValue" title="bufferSlot(value: Value): int32">bufferSlot(value: Value): int32</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">bufferValue
+  <li><a class="reference" href="#bufferValue%2CValueKind%2Cuint32%2Cint32" title="bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value">bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">div
@@ -215,18 +227,18 @@
   <span class="Keyword">case</span>
   <span class="Keyword">of</span> <span class="Identifier">IntegerValue</span><span class="Other">:</span>
   <span class="Keyword">of</span> <span class="Identifier">FixedValue</span><span class="Other">:</span>
-  <span class="Keyword">of</span> <span class="Identifier">StringValue</span><span class="Other">:</span></pre></dt>
+  <span class="Keyword">of</span> <span class="Identifier">StringValue</span><span class="Other">,</span> <span class="Identifier">ArrayValue</span><span class="Other">,</span> <span class="Identifier">BlobValue</span><span class="Other">:</span></pre></dt>
   <dd>
     
     A number or owned string reference, with an integer zero default.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L13" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L13" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L15" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L15" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
 <div id="ValueKind">
   <dt><pre><a href="#ValueKind"><span class="Identifier">ValueKind</span></a> <span class="Other">=</span> <span class="Keyword">enum</span>
-  <span class="Identifier">IntegerValue</span><span class="Other">,</span> <span class="Identifier">FixedValue</span><span class="Other">,</span> <span class="Identifier">StringValue</span></pre></dt>
+  <span class="Identifier">IntegerValue</span><span class="Other">,</span> <span class="Identifier">FixedValue</span><span class="Other">,</span> <span class="Identifier">StringValue</span><span class="Other">,</span> <span class="Identifier">ArrayValue</span><span class="Other">,</span> <span class="Identifier">BlobValue</span></pre></dt>
   <dd>
     
     
@@ -247,8 +259,8 @@
   <dd>
     
     Formats a numeric value using its stored representation.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L98" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L98" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L125" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L125" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -261,8 +273,8 @@
   <dd>
     
     Multiplies integers with wrapping or promotes operands to Fixed.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L129" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L129" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L156" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L156" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -275,8 +287,8 @@
   <dd>
     
     Adds integers with wrapping or promotes mixed operands to Fixed.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L115" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L115" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L142" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L142" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -289,8 +301,8 @@
   <dd>
     
     Subtracts integers with wrapping or promotes operands to Fixed.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L122" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L122" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L149" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L149" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -300,8 +312,8 @@
   <dd>
     
     Negates a fixed-point value or integer with defined wrapping.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L136" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L136" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L163" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L163" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -314,8 +326,8 @@
   <dd>
     
     Divides as Q16.16 with Fixxy rounding and rejects zero divisors.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L146" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L146" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L173" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L173" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -328,8 +340,8 @@
   <dd>
     
     Orders numbers exactly across the full int32 and Q16.16 ranges.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L230" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L230" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L257" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L257" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -342,8 +354,8 @@
   <dd>
     
     Compares numeric values inclusively without changing their types.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L237" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L237" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L264" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L264" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -356,8 +368,8 @@
   <dd>
     
     Compares numbers exactly across the full int32 and Q16.16 ranges.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L223" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L223" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L250" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L250" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -370,8 +382,8 @@
   <dd>
     
     Intersects the bits of two rounded int32 operands.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L193" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L193" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L220" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L220" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -384,8 +396,8 @@
   <dd>
     
     Tests a BASIC condition, where every nonzero numeric value is true.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L76" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L76" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L103" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L103" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -398,8 +410,8 @@
   <dd>
     
     Reads fixed-point data or converts an integer within the Q16.16 range.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L61" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L61" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L88" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L88" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -412,8 +424,50 @@
   <dd>
     
     Reads an integer, rejecting fractional fixed-point values.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L86" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L86" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L113" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L113" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="bufferOwner-procs-all">
+  <div id="bufferOwner,Value">
+  <dt><pre><span class="Keyword">proc</span> <a href="#bufferOwner%2CValue"><span class="Identifier">bufferOwner</span></a><span class="Other">(</span><span class="Identifier">value</span><span class="Other">:</span> <a href="#Value"><span class="Identifier">Value</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">uint32</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Reads the generation of an opaque array or blob reference.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L58" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L58" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="bufferSlot-procs-all">
+  <div id="bufferSlot,Value">
+  <dt><pre><span class="Keyword">proc</span> <a href="#bufferSlot%2CValue"><span class="Identifier">bufferSlot</span></a><span class="Other">(</span><span class="Identifier">value</span><span class="Other">:</span> <a href="#Value"><span class="Identifier">Value</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int32</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                       <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Reads the slot of an opaque array or blob reference.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L64" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L64" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="bufferValue-procs-all">
+  <div id="bufferValue,ValueKind,uint32,int32">
+  <dt><pre><span class="Keyword">proc</span> <a href="#bufferValue%2CValueKind%2Cuint32%2Cint32"><span class="Identifier">bufferValue</span></a><span class="Other">(</span><span class="Identifier">kind</span><span class="Other">:</span> <a href="#ValueKind"><span class="Identifier">ValueKind</span></a><span class="Other">;</span> <span class="Identifier">owner</span><span class="Other">:</span> <span class="Identifier">uint32</span><span class="Other">;</span> <span class="Identifier">slot</span><span class="Other">:</span> <span class="Identifier">int32</span><span class="Other">)</span><span class="Other">:</span> <a href="#Value"><span class="Identifier">Value</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Constructs a typed reference for a trusted native buffer store.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L45" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L45" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -426,8 +480,8 @@
   <dd>
     
     Divides exact int32 operands toward zero with defined overflow.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L153" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L153" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L180" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L180" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -440,8 +494,8 @@
   <dd>
     
     Returns the matching bits of two rounded int32 operands.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L205" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L205" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L232" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L232" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -454,8 +508,8 @@
   <dd>
     
     Computes bitwise implication between two rounded int32 operands.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L209" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L209" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L236" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L236" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -467,8 +521,8 @@
   <dd>
     
     Returns the stored type of a value.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L23" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L23" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L25" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L25" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -481,8 +535,8 @@
   <dd>
     
     Computes the remainder of exact int32 operands with defined overflow.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L164" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L164" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L191" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L191" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -495,8 +549,8 @@
   <dd>
     
     Complements every bit of a rounded int32 operand.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L189" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L189" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L216" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L216" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -509,8 +563,8 @@
   <dd>
     
     Unites the bits of two rounded int32 operands.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L197" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L197" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L224" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L224" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -523,8 +577,8 @@
   <dd>
     
     Reads a string slot after checking its type.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L37" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L37" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L39" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L39" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -537,8 +591,8 @@
   <dd>
     
     Reads the owner of a string reference after checking its type.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L31" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L31" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L33" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L33" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -551,8 +605,8 @@
   <dd>
     
     Constructs an opaque reference for the runtime string store.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L27" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L27" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L29" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L29" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -565,8 +619,8 @@
   <dd>
     
     Returns the bits present in exactly one rounded int32 operand.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L201" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L201" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L228" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L228" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -585,8 +639,8 @@
   <dd>
     
     Converts a Nim Boolean to BASIC's integer -1 or zero.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L47" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L47" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L74" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L74" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -596,8 +650,8 @@
   <dd>
     
     Wraps a Q16.16 number without changing its stored bits.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L57" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L57" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L84" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L84" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -607,8 +661,8 @@
   <dd>
     
     Converts a native integer after checking the portable int32 range.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L51" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L51" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L78" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L78" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -618,8 +672,8 @@
   <dd>
     
     Wraps an integer without changing its representation.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L43" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L43" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/numbers.nim#L70" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/numbers.nim#L70" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -635,7 +689,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:06:20 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:10:26 UTC</small>
       </div>
     </div>
   </div>

@@ -3,35 +3,40 @@ nim	BasicError	bassy/numbers.html#BasicError	object BasicError		6
 nim	IntegerValue	bassy/numbers.html#IntegerValue	ValueKind.IntegerValue		8
 nim	FixedValue	bassy/numbers.html#FixedValue	ValueKind.FixedValue		8
 nim	StringValue	bassy/numbers.html#StringValue	ValueKind.StringValue		8
+nim	ArrayValue	bassy/numbers.html#ArrayValue	ValueKind.ArrayValue		8
+nim	BlobValue	bassy/numbers.html#BlobValue	ValueKind.BlobValue		8
 nim	ValueKind	bassy/numbers.html#ValueKind	enum ValueKind		8
-nim	Value	bassy/numbers.html#Value	object Value		13
-nim	kind	bassy/numbers.html#kind,Value	proc kind(value: Value): ValueKind		23
-nim	stringValue	bassy/numbers.html#stringValue,uint32,int32	proc stringValue(owner: uint32; handle: int32): Value		27
-nim	stringOwner	bassy/numbers.html#stringOwner,Value	proc stringOwner(value: Value): uint32		31
-nim	stringHandle	bassy/numbers.html#stringHandle,Value	proc stringHandle(value: Value): int32		37
-nim	toValue	bassy/numbers.html#toValue.c,int32	converter toValue(value: int32): Value		43
-nim	toValue	bassy/numbers.html#toValue.c,bool	converter toValue(value: bool): Value		47
-nim	toValue	bassy/numbers.html#toValue.c,int	converter toValue(value: int): Value		51
-nim	toValue	bassy/numbers.html#toValue.c,Fixed	converter toValue(value: Fixed): Value		57
-nim	asFixed	bassy/numbers.html#asFixed,Value	proc asFixed(value: Value): Fixed		61
-nim	asBool	bassy/numbers.html#asBool,Value	proc asBool(value: Value): bool		76
-nim	asInt	bassy/numbers.html#asInt,Value	proc asInt(value: Value): int32		86
-nim	`$`	bassy/numbers.html#$,Value	proc `$`(value: Value): string		98
-nim	`+`	bassy/numbers.html#+,Value,Value	proc `+`(left, right: Value): Value		115
-nim	`-`	bassy/numbers.html#-,Value,Value	proc `-`(left, right: Value): Value		122
-nim	`*`	bassy/numbers.html#*,Value,Value	proc `*`(left, right: Value): Value		129
-nim	`-`	bassy/numbers.html#-,Value	proc `-`(value: Value): Value		136
-nim	`/`	bassy/numbers.html#/,Value,Value	proc `/`(left, right: Value): Value		146
-nim	`div`	bassy/numbers.html#div,Value,Value	proc `div`(left, right: Value): Value		153
-nim	`mod`	bassy/numbers.html#mod,Value,Value	proc `mod`(left, right: Value): Value		164
-nim	`not`	bassy/numbers.html#not,Value	proc `not`(value: Value): Value		189
-nim	`and`	bassy/numbers.html#and,Value,Value	proc `and`(left, right: Value): Value		193
-nim	`or`	bassy/numbers.html#or,Value,Value	proc `or`(left, right: Value): Value		197
-nim	`xor`	bassy/numbers.html#xor,Value,Value	proc `xor`(left, right: Value): Value		201
-nim	eqv	bassy/numbers.html#eqv,Value,Value	proc eqv(left, right: Value): Value		205
-nim	imp	bassy/numbers.html#imp,Value,Value	proc imp(left, right: Value): Value		209
-nim	`==`	bassy/numbers.html#==,Value,Value	proc `==`(left, right: Value): bool		223
-nim	`<`	bassy/numbers.html#<,Value,Value	proc `<`(left, right: Value): bool		230
-nim	`<=`	bassy/numbers.html#<=,Value,Value	proc `<=`(left, right: Value): bool		237
-nimgrp	-	bassy/numbers.html#--procs-all	proc		122
-nimgrp	tovalue	bassy/numbers.html#toValue-converters-all	converter		43
+nim	Value	bassy/numbers.html#Value	object Value		15
+nim	kind	bassy/numbers.html#kind,Value	proc kind(value: Value): ValueKind		25
+nim	stringValue	bassy/numbers.html#stringValue,uint32,int32	proc stringValue(owner: uint32; handle: int32): Value		29
+nim	stringOwner	bassy/numbers.html#stringOwner,Value	proc stringOwner(value: Value): uint32		33
+nim	stringHandle	bassy/numbers.html#stringHandle,Value	proc stringHandle(value: Value): int32		39
+nim	bufferValue	bassy/numbers.html#bufferValue,ValueKind,uint32,int32	proc bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value		45
+nim	bufferOwner	bassy/numbers.html#bufferOwner,Value	proc bufferOwner(value: Value): uint32		58
+nim	bufferSlot	bassy/numbers.html#bufferSlot,Value	proc bufferSlot(value: Value): int32		64
+nim	toValue	bassy/numbers.html#toValue.c,int32	converter toValue(value: int32): Value		70
+nim	toValue	bassy/numbers.html#toValue.c,bool	converter toValue(value: bool): Value		74
+nim	toValue	bassy/numbers.html#toValue.c,int	converter toValue(value: int): Value		78
+nim	toValue	bassy/numbers.html#toValue.c,Fixed	converter toValue(value: Fixed): Value		84
+nim	asFixed	bassy/numbers.html#asFixed,Value	proc asFixed(value: Value): Fixed		88
+nim	asBool	bassy/numbers.html#asBool,Value	proc asBool(value: Value): bool		103
+nim	asInt	bassy/numbers.html#asInt,Value	proc asInt(value: Value): int32		113
+nim	`$`	bassy/numbers.html#$,Value	proc `$`(value: Value): string		125
+nim	`+`	bassy/numbers.html#+,Value,Value	proc `+`(left, right: Value): Value		142
+nim	`-`	bassy/numbers.html#-,Value,Value	proc `-`(left, right: Value): Value		149
+nim	`*`	bassy/numbers.html#*,Value,Value	proc `*`(left, right: Value): Value		156
+nim	`-`	bassy/numbers.html#-,Value	proc `-`(value: Value): Value		163
+nim	`/`	bassy/numbers.html#/,Value,Value	proc `/`(left, right: Value): Value		173
+nim	`div`	bassy/numbers.html#div,Value,Value	proc `div`(left, right: Value): Value		180
+nim	`mod`	bassy/numbers.html#mod,Value,Value	proc `mod`(left, right: Value): Value		191
+nim	`not`	bassy/numbers.html#not,Value	proc `not`(value: Value): Value		216
+nim	`and`	bassy/numbers.html#and,Value,Value	proc `and`(left, right: Value): Value		220
+nim	`or`	bassy/numbers.html#or,Value,Value	proc `or`(left, right: Value): Value		224
+nim	`xor`	bassy/numbers.html#xor,Value,Value	proc `xor`(left, right: Value): Value		228
+nim	eqv	bassy/numbers.html#eqv,Value,Value	proc eqv(left, right: Value): Value		232
+nim	imp	bassy/numbers.html#imp,Value,Value	proc imp(left, right: Value): Value		236
+nim	`==`	bassy/numbers.html#==,Value,Value	proc `==`(left, right: Value): bool		250
+nim	`<`	bassy/numbers.html#<,Value,Value	proc `<`(left, right: Value): bool		257
+nim	`<=`	bassy/numbers.html#<=,Value,Value	proc `<=`(left, right: Value): bool		264
+nimgrp	-	bassy/numbers.html#--procs-all	proc		149
+nimgrp	tovalue	bassy/numbers.html#toValue-converters-all	converter		70

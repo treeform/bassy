@@ -23,103 +23,114 @@ nim	DefaultMaxPrintEvents	bassy.html#DefaultMaxPrintEvents	const DefaultMaxPrint
 nim	MaximumFixedLiteralBytes	bassy.html#MaximumFixedLiteralBytes	const MaximumFixedLiteralBytes		34
 nim	MaximumFixedExponent	bassy.html#MaximumFixedExponent	const MaximumFixedExponent		35
 nim	Limits	bassy.html#Limits	object Limits		43
-nim	TextPrint	bassy.html#TextPrint	PrintKind.TextPrint		66
-nim	ValuePrint	bassy.html#ValuePrint	PrintKind.ValuePrint		66
-nim	FixedPrint	bassy.html#FixedPrint	PrintKind.FixedPrint		66
-nim	NewlinePrint	bassy.html#NewlinePrint	PrintKind.NewlinePrint		66
-nim	PrintKind	bassy.html#PrintKind	enum PrintKind		66
-nim	PrintEvent	bassy.html#PrintEvent	object PrintEvent		72
-nim	PrintProc	bassy.html#PrintProc	type PrintProc		78
-nim	HostProc	bassy.html#HostProc	type HostProc		80
-nim	NumericHostProc	bassy.html#NumericHostProc	type NumericHostProc		83
-nim	ContextHostProc	bassy.html#ContextHostProc	type ContextHostProc		85
-nim	Host	bassy.html#Host	object Host		101
-nim	RunStats	bassy.html#RunStats	object RunStats		109
-nim	Program	bassy.html#Program	type Program		240
-nim	Runtime	bassy.html#Runtime	type Runtime		271
-nim	ArrayView	bassy.html#ArrayView	object ArrayView		296
-nim	defaultLimits	bassy.html#defaultLimits	proc defaultLimits(): Limits		351
-nim	initHost	bassy.html#initHost	proc initHost(): Host		751
-nim	addData	bassy.html#addData,Host,string	proc addData(host: var Host; name: string; value = Value()): int32		779
-nim	addData	bassy.html#addData,Host,string,string	proc addData(host: var Host; name: string; value: string): int32		791
-nim	addFunction	bassy.html#addFunction,Host,string,int,HostProc,int	proc addFunction(host: var Host; name: string; parameters: int; callback: HostProc;\n            workUnits = 16): int32		829
-nim	addFunction	bassy.html#addFunction,Host,string,int,NumericHostProc,int	proc addFunction(host: var Host; name: string; parameters: int;\n            callback: NumericHostProc; workUnits = 16): int32		844
-nim	addFunction	bassy.html#addFunction,Host,string,int,ContextHostProc,int	proc addFunction(host: var Host; name: string; parameters: int;\n            callback: ContextHostProc; workUnits = 16): int32		859
-nim	getDataValue	bassy.html#getDataValue,Host,string	proc getDataValue(host: Host; name: string): Value		878
-nim	getData	bassy.html#getData,Host,string	proc getData(host: Host; name: string): int32		887
-nim	setData	bassy.html#setData,Host,string,Value	proc setData(host: var Host; name: string; value: Value)		891
-nim	getStringData	bassy.html#getStringData,Host,string	proc getStringData(host: Host; name: string): string		901
-nim	setData	bassy.html#setData,Host,string,string	proc setData(host: var Host; name: string; value: string)		908
-nim	compile	bassy.html#compile,string	proc compile(source: string; limits = defaultLimits()): Program		3109
-nim	compile	bassy.html#compile,string,Host	proc compile(source: string; host: Host; limits = defaultLimits()): Program		3114
-nim	initRuntime	bassy.html#initRuntime,Program	proc initRuntime(program: Program; limits = defaultLimits()): Runtime		3268
-nim	initRuntime	bassy.html#initRuntime,Program,Host	proc initRuntime(program: Program; host: Host; limits = defaultLimits()): Runtime		3273
-nim	reset	bassy.html#reset,Runtime	proc reset(runtime: var Runtime)		3281
-nim	restart	bassy.html#restart,Runtime	proc restart(runtime: var Runtime)		3311
-nim	memoryBytes	bassy.html#memoryBytes,Runtime	proc memoryBytes(runtime: Runtime): int64		3353
-nim	workUsed	bassy.html#workUsed,Runtime	proc workUsed(runtime: Runtime): int64		3357
-nim	instructionsUsed	bassy.html#instructionsUsed,Runtime	proc instructionsUsed(runtime: Runtime): int64		3361
-nim	instructions	bassy.html#instructions,Program	proc instructions(program: Program): int		3365
-nim	globals	bassy.html#globals,Program	proc globals(program: Program): int		3369
-nim	arrays	bassy.html#arrays,Program	proc arrays(program: Program): int		3373
-nim	routines	bassy.html#routines,Program	proc routines(program: Program): int		3377
-nim	literalCount	bassy.html#literalCount,Program	proc literalCount(program: Program): int		3381
-nim	literal	bassy.html#literal,Program,int32	proc literal(program: Program; id: int32): string		3385
-nim	hostDataIndex	bassy.html#hostDataIndex,Program,string	proc hostDataIndex(program: Program; name: string): int32		3403
-nim	getDataValue	bassy.html#getDataValue,Runtime,string	proc getDataValue(runtime: Runtime; name: string): Value		3407
-nim	getData	bassy.html#getData,Runtime,string	proc getData(runtime: Runtime; name: string): int32		3414
-nim	setData	bassy.html#setData,Runtime,int32,Value	proc setData(runtime: var Runtime; id: int32; value: Value)		3425
-nim	setData	bassy.html#setData,Runtime,string,Value	proc setData(runtime: var Runtime; name: string; value: Value)		3433
-nim	getGlobalValue	bassy.html#getGlobalValue,Runtime,string	proc getGlobalValue(runtime: Runtime; name: string): Value		3442
-nim	getGlobal	bassy.html#getGlobal,Runtime,string	proc getGlobal(runtime: Runtime; name: string): int32		3449
-nim	setGlobal	bassy.html#setGlobal,Runtime,string,Value	proc setGlobal(runtime: var Runtime; name: string; value: Value)		3453
-nim	arrayLength	bassy.html#arrayLength,Runtime,string	proc arrayLength(runtime: Runtime; name: string): int32		3462
-nim	getArrayValue	bassy.html#getArrayValue,Runtime,string,int32	proc getArrayValue(runtime: Runtime; name: string; index: int32): Value		3487
-nim	getArray	bassy.html#getArray,Runtime,string,int32	proc getArray(runtime: Runtime; name: string; index: int32): int32		3494
-nim	setArray	bassy.html#setArray,Runtime,string,int32,Value	proc setArray(runtime: var Runtime; name: string; index: int32; value: Value)		3498
-nim	arrayView	bassy.html#arrayView,Runtime,Value	proc arrayView(runtime: Runtime; handle: Value; writable = false): ArrayView		3514
-nim	len	bassy.html#len,ArrayView	proc len(view: ArrayView): int		3535
-nim	overlaps	bassy.html#overlaps,ArrayView,ArrayView	proc overlaps(left, right: ArrayView): bool		3539
-nim	`[]`	bassy.html#[],ArrayView,int	proc `[]`(view: ArrayView; index: int): Value		3545
-nim	`[]=`	bassy.html#[]=,ArrayView,int,Value	proc `[]=`(view: ArrayView; index: int; value: Value)		3551
-nim	getString	bassy.html#getString,Runtime,Value	proc getString(runtime: Runtime; value: Value): string		3562
-nim	withString	bassy.html#withString.t,Runtime,Value,untyped,untyped	template withString(runtime: Runtime; value: Value; text, body: untyped)		3566
-nim	putString	bassy.html#putString,Runtime,string	proc putString(runtime: var Runtime; value: string): Value		3573
-nim	getStringGlobal	bassy.html#getStringGlobal,Runtime,string	proc getStringGlobal(runtime: Runtime; name: string): string		3577
-nim	getStringData	bassy.html#getStringData,Runtime,string	proc getStringData(runtime: Runtime; name: string): string		3581
-nim	getStringArray	bassy.html#getStringArray,Runtime,string,int32	proc getStringArray(runtime: Runtime; name: string; index: int32): string		3585
-nim	setGlobal	bassy.html#setGlobal,Runtime,string,string	proc setGlobal(runtime: var Runtime; name: string; value: string)		3589
-nim	setData	bassy.html#setData,Runtime,int32,string	proc setData(runtime: var Runtime; id: int32; value: string)		3595
-nim	setData	bassy.html#setData,Runtime,string,string	proc setData(runtime: var Runtime; name: string; value: string)		3602
-nim	setArray	bassy.html#setArray,Runtime,string,int32,string	proc setArray(runtime: var Runtime; name: string; index: int32; value: string)		3606
-nim	stringCount	bassy.html#stringCount,Runtime	proc stringCount(runtime: Runtime): int		3619
-nim	stringBytes	bassy.html#stringBytes,Runtime	proc stringBytes(runtime: Runtime): int		3623
-nim	chargeWork	bassy.html#chargeWork,Runtime,int64	proc chargeWork(runtime: Runtime; cost: int64)		3627
-nim	chargeOperations	bassy.html#chargeOperations,Runtime,int64	proc chargeOperations(runtime: Runtime; cost: int64)		3633
-nim	run	bassy.html#run,Runtime,PrintProc	proc run(runtime: var Runtime; print: PrintProc = nil): RunStats		3784
-nim	EmptyHandle	bassy.html#EmptyHandle	const EmptyHandle		4171
-nim	StringLimits	bassy.html#StringLimits	object StringLimits		4175
-nim	StringPool	bassy.html#StringPool	type StringPool		4184
-nim	defaultStringLimits	bassy.html#defaultStringLimits	proc defaultStringLimits(): StringLimits		4191
-nim	reset	bassy.html#reset,StringPool	proc reset(pool: StringPool)		4212
-nim	initStringPool	bassy.html#initStringPool	proc initStringPool(limits = defaultStringLimits()): StringPool		4222
-nim	bindProgram	bassy.html#bindProgram,StringPool,Program	proc bindProgram(pool: StringPool; program: Program)		4232
-nim	stringCount	bassy.html#stringCount,StringPool	proc stringCount(pool: StringPool): int		4239
-nim	bytesUsed	bassy.html#bytesUsed,StringPool	proc bytesUsed(pool: StringPool): int		4243
-nim	getString	bassy.html#getString,StringPool,int32	proc getString(pool: StringPool; handle: int32): string		4254
-nim	putString	bassy.html#putString,StringPool,openArray[char]	proc putString(pool: StringPool; text: openArray[char]): int32		4277
-nim	addStringFunctions	bassy.html#addStringFunctions,Host,StringPool	proc addStringFunctions(host: var Host; pool: StringPool)		4425
-nimgrp	getstring	bassy.html#getString-procs-all	proc		3562
-nimgrp	getdatavalue	bassy.html#getDataValue-procs-all	proc		878
-nimgrp	getdata	bassy.html#getData-procs-all	proc		887
-nimgrp	compile	bassy.html#compile-procs-all	proc		3109
-nimgrp	reset	bassy.html#reset-procs-all	proc		3281
-nimgrp	putstring	bassy.html#putString-procs-all	proc		3573
-nimgrp	getstringdata	bassy.html#getStringData-procs-all	proc		901
-nimgrp	adddata	bassy.html#addData-procs-all	proc		779
-nimgrp	initruntime	bassy.html#initRuntime-procs-all	proc		3268
-nimgrp	stringcount	bassy.html#stringCount-procs-all	proc		3619
-nimgrp	setglobal	bassy.html#setGlobal-procs-all	proc		3453
-nimgrp	setarray	bassy.html#setArray-procs-all	proc		3498
-nimgrp	addfunction	bassy.html#addFunction-procs-all	proc		829
-nimgrp	setdata	bassy.html#setData-procs-all	proc		891
+nim	TextPrint	bassy.html#TextPrint	PrintKind.TextPrint		67
+nim	ValuePrint	bassy.html#ValuePrint	PrintKind.ValuePrint		67
+nim	FixedPrint	bassy.html#FixedPrint	PrintKind.FixedPrint		67
+nim	NewlinePrint	bassy.html#NewlinePrint	PrintKind.NewlinePrint		67
+nim	PrintKind	bassy.html#PrintKind	enum PrintKind		67
+nim	PrintEvent	bassy.html#PrintEvent	object PrintEvent		73
+nim	PrintProc	bassy.html#PrintProc	type PrintProc		79
+nim	HostProc	bassy.html#HostProc	type HostProc		81
+nim	NumericHostProc	bassy.html#NumericHostProc	type NumericHostProc		84
+nim	ContextHostProc	bassy.html#ContextHostProc	type ContextHostProc		86
+nim	Host	bassy.html#Host	object Host		102
+nim	RunStats	bassy.html#RunStats	object RunStats		110
+nim	Program	bassy.html#Program	type Program		243
+nim	Runtime	bassy.html#Runtime	type Runtime		274
+nim	ArrayView	bassy.html#ArrayView	object ArrayView		300
+nim	defaultLimits	bassy.html#defaultLimits	proc defaultLimits(): Limits		356
+nim	initHost	bassy.html#initHost	proc initHost(): Host		758
+nim	addData	bassy.html#addData,Host,string	proc addData(host: var Host; name: string; value = Value()): int32		786
+nim	addData	bassy.html#addData,Host,string,string	proc addData(host: var Host; name: string; value: string): int32		798
+nim	addFunction	bassy.html#addFunction,Host,string,int,HostProc,int	proc addFunction(host: var Host; name: string; parameters: int; callback: HostProc;\n            workUnits = 16): int32		836
+nim	addFunction	bassy.html#addFunction,Host,string,int,NumericHostProc,int	proc addFunction(host: var Host; name: string; parameters: int;\n            callback: NumericHostProc; workUnits = 16): int32		851
+nim	addFunction	bassy.html#addFunction,Host,string,int,ContextHostProc,int	proc addFunction(host: var Host; name: string; parameters: int;\n            callback: ContextHostProc; workUnits = 16): int32		866
+nim	getDataValue	bassy.html#getDataValue,Host,string	proc getDataValue(host: Host; name: string): Value		885
+nim	getData	bassy.html#getData,Host,string	proc getData(host: Host; name: string): int32		894
+nim	setData	bassy.html#setData,Host,string,Value	proc setData(host: var Host; name: string; value: Value)		898
+nim	getStringData	bassy.html#getStringData,Host,string	proc getStringData(host: Host; name: string): string		908
+nim	setData	bassy.html#setData,Host,string,string	proc setData(host: var Host; name: string; value: string)		915
+nim	compile	bassy.html#compile,string	proc compile(source: string; limits = defaultLimits()): Program		3145
+nim	compile	bassy.html#compile,string,Host	proc compile(source: string; host: Host; limits = defaultLimits()): Program		3150
+nim	initRuntime	bassy.html#initRuntime,Program	proc initRuntime(program: Program; limits = defaultLimits()): Runtime		3309
+nim	initRuntime	bassy.html#initRuntime,Program,Host	proc initRuntime(program: Program; host: Host; limits = defaultLimits()): Runtime		3314
+nim	reset	bassy.html#reset,Runtime	proc reset(runtime: var Runtime)		3322
+nim	restart	bassy.html#restart,Runtime	proc restart(runtime: var Runtime)		3356
+nim	memoryBytes	bassy.html#memoryBytes,Runtime	proc memoryBytes(runtime: Runtime): int64		3398
+nim	workUsed	bassy.html#workUsed,Runtime	proc workUsed(runtime: Runtime): int64		3402
+nim	instructionsUsed	bassy.html#instructionsUsed,Runtime	proc instructionsUsed(runtime: Runtime): int64		3406
+nim	instructions	bassy.html#instructions,Program	proc instructions(program: Program): int		3410
+nim	globals	bassy.html#globals,Program	proc globals(program: Program): int		3414
+nim	arrays	bassy.html#arrays,Program	proc arrays(program: Program): int		3418
+nim	routines	bassy.html#routines,Program	proc routines(program: Program): int		3422
+nim	literalCount	bassy.html#literalCount,Program	proc literalCount(program: Program): int		3426
+nim	literal	bassy.html#literal,Program,int32	proc literal(program: Program; id: int32): string		3430
+nim	hostDataIndex	bassy.html#hostDataIndex,Program,string	proc hostDataIndex(program: Program; name: string): int32		3448
+nim	getDataValue	bassy.html#getDataValue,Runtime,string	proc getDataValue(runtime: Runtime; name: string): Value		3452
+nim	getData	bassy.html#getData,Runtime,string	proc getData(runtime: Runtime; name: string): int32		3459
+nim	setData	bassy.html#setData,Runtime,int32,Value	proc setData(runtime: var Runtime; id: int32; value: Value)		3472
+nim	setData	bassy.html#setData,Runtime,string,Value	proc setData(runtime: var Runtime; name: string; value: Value)		3480
+nim	getGlobalValue	bassy.html#getGlobalValue,Runtime,string	proc getGlobalValue(runtime: Runtime; name: string): Value		3489
+nim	getGlobal	bassy.html#getGlobal,Runtime,string	proc getGlobal(runtime: Runtime; name: string): int32		3496
+nim	setGlobal	bassy.html#setGlobal,Runtime,string,Value	proc setGlobal(runtime: var Runtime; name: string; value: Value)		3500
+nim	arrayLength	bassy.html#arrayLength,Runtime,string	proc arrayLength(runtime: Runtime; name: string): int32		3509
+nim	getArrayValue	bassy.html#getArrayValue,Runtime,string,int32	proc getArrayValue(runtime: Runtime; name: string; index: int32): Value		3534
+nim	getArray	bassy.html#getArray,Runtime,string,int32	proc getArray(runtime: Runtime; name: string; index: int32): int32		3541
+nim	setArray	bassy.html#setArray,Runtime,string,int32,Value	proc setArray(runtime: var Runtime; name: string; index: int32; value: Value)		3545
+nim	arrayView	bassy.html#arrayView,Runtime,Value	proc arrayView(runtime: Runtime; handle: Value; writable = false): ArrayView		3561
+nim	len	bassy.html#len,ArrayView	proc len(view: ArrayView): int		3589
+nim	overlaps	bassy.html#overlaps,ArrayView,ArrayView	proc overlaps(left, right: ArrayView): bool		3593
+nim	`[]`	bassy.html#[],ArrayView,int	proc `[]`(view: ArrayView; index: int): Value		3603
+nim	`[]=`	bassy.html#[]=,ArrayView,int,Value	proc `[]=`(view: ArrayView; index: int; value: Value)		3611
+nim	collectBuffers	bassy.html#collectBuffers,Runtime	proc collectBuffers(runtime: Runtime)		3625
+nim	nativeMemoryBytes	bassy.html#nativeMemoryBytes,Runtime	proc nativeMemoryBytes(runtime: Runtime): int64		3634
+nim	checkNativeMemory	bassy.html#checkNativeMemory,Runtime,int64	proc checkNativeMemory(runtime: Runtime; bytes: int64)		3638
+nim	reserveNativeMemory	bassy.html#reserveNativeMemory,Runtime,int64	proc reserveNativeMemory(runtime: Runtime; bytes: int64)		3642
+nim	releaseNativeMemory	bassy.html#releaseNativeMemory,Runtime,int64	proc releaseNativeMemory(runtime: Runtime; bytes: int64)		3647
+nim	putArray	bassy.html#putArray,Runtime,openArray[Value]	proc putArray(runtime: Runtime; values: openArray[Value]): Value		3653
+nim	createBlob	bassy.html#createBlob,Runtime	proc createBlob(runtime: Runtime): Value		3659
+nim	getBlob	bassy.html#getBlob,Runtime,Value	proc getBlob(runtime: Runtime; value: Value): string		3663
+nim	blobBinding	bassy.html#blobBinding,Runtime,Value	proc blobBinding(runtime: Runtime; value: Value): string		3667
+nim	putBlob	bassy.html#putBlob,Runtime,Value,string,string	proc putBlob(runtime: Runtime; value: Value; bytes: string; binding = "")		3671
+nim	addBufferFunctions	bassy.html#addBufferFunctions,Host	proc addBufferFunctions(host: var Host)		3684
+nim	getString	bassy.html#getString,Runtime,Value	proc getString(runtime: Runtime; value: Value): string		3689
+nim	withString	bassy.html#withString.t,Runtime,Value,untyped,untyped	template withString(runtime: Runtime; value: Value; text, body: untyped)		3693
+nim	putString	bassy.html#putString,Runtime,string	proc putString(runtime: var Runtime; value: string): Value		3700
+nim	getStringGlobal	bassy.html#getStringGlobal,Runtime,string	proc getStringGlobal(runtime: Runtime; name: string): string		3704
+nim	getStringData	bassy.html#getStringData,Runtime,string	proc getStringData(runtime: Runtime; name: string): string		3708
+nim	getStringArray	bassy.html#getStringArray,Runtime,string,int32	proc getStringArray(runtime: Runtime; name: string; index: int32): string		3712
+nim	setGlobal	bassy.html#setGlobal,Runtime,string,string	proc setGlobal(runtime: var Runtime; name: string; value: string)		3716
+nim	setData	bassy.html#setData,Runtime,int32,string	proc setData(runtime: var Runtime; id: int32; value: string)		3722
+nim	setData	bassy.html#setData,Runtime,string,string	proc setData(runtime: var Runtime; name: string; value: string)		3729
+nim	setArray	bassy.html#setArray,Runtime,string,int32,string	proc setArray(runtime: var Runtime; name: string; index: int32; value: string)		3733
+nim	stringCount	bassy.html#stringCount,Runtime	proc stringCount(runtime: Runtime): int		3746
+nim	stringBytes	bassy.html#stringBytes,Runtime	proc stringBytes(runtime: Runtime): int		3750
+nim	chargeWork	bassy.html#chargeWork,Runtime,int64	proc chargeWork(runtime: Runtime; cost: int64)		3754
+nim	chargeOperations	bassy.html#chargeOperations,Runtime,int64	proc chargeOperations(runtime: Runtime; cost: int64)		3760
+nim	run	bassy.html#run,Runtime,PrintProc	proc run(runtime: var Runtime; print: PrintProc = nil): RunStats		3911
+nim	EmptyHandle	bassy.html#EmptyHandle	const EmptyHandle		4311
+nim	StringLimits	bassy.html#StringLimits	object StringLimits		4315
+nim	StringPool	bassy.html#StringPool	type StringPool		4324
+nim	defaultStringLimits	bassy.html#defaultStringLimits	proc defaultStringLimits(): StringLimits		4331
+nim	reset	bassy.html#reset,StringPool	proc reset(pool: StringPool)		4352
+nim	initStringPool	bassy.html#initStringPool	proc initStringPool(limits = defaultStringLimits()): StringPool		4362
+nim	bindProgram	bassy.html#bindProgram,StringPool,Program	proc bindProgram(pool: StringPool; program: Program)		4372
+nim	stringCount	bassy.html#stringCount,StringPool	proc stringCount(pool: StringPool): int		4379
+nim	bytesUsed	bassy.html#bytesUsed,StringPool	proc bytesUsed(pool: StringPool): int		4383
+nim	getString	bassy.html#getString,StringPool,int32	proc getString(pool: StringPool; handle: int32): string		4394
+nim	putString	bassy.html#putString,StringPool,openArray[char]	proc putString(pool: StringPool; text: openArray[char]): int32		4417
+nim	addStringFunctions	bassy.html#addStringFunctions,Host,StringPool	proc addStringFunctions(host: var Host; pool: StringPool)		4565
+nimgrp	getstring	bassy.html#getString-procs-all	proc		3689
+nimgrp	getdatavalue	bassy.html#getDataValue-procs-all	proc		885
+nimgrp	getdata	bassy.html#getData-procs-all	proc		894
+nimgrp	compile	bassy.html#compile-procs-all	proc		3145
+nimgrp	reset	bassy.html#reset-procs-all	proc		3322
+nimgrp	putstring	bassy.html#putString-procs-all	proc		3700
+nimgrp	getstringdata	bassy.html#getStringData-procs-all	proc		908
+nimgrp	adddata	bassy.html#addData-procs-all	proc		786
+nimgrp	initruntime	bassy.html#initRuntime-procs-all	proc		3309
+nimgrp	stringcount	bassy.html#stringCount-procs-all	proc		3746
+nimgrp	setglobal	bassy.html#setGlobal-procs-all	proc		3500
+nimgrp	setarray	bassy.html#setArray-procs-all	proc		3545
+nimgrp	addfunction	bassy.html#addFunction-procs-all	proc		836
+nimgrp	setdata	bassy.html#setData-procs-all	proc		898

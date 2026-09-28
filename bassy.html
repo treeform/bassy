@@ -83,6 +83,7 @@
   maxRegisters*: int
   maxSyntaxDepth*: int
   maxCallDepth*: int
+  maxNativeMemoryBytes*: int64
   maxMemoryBytes*: int64
   maxInstructions*: int64
   maxWorkUnits*: int64
@@ -157,6 +158,10 @@
   <li><a class="reference" href="#%5B%5D%3D%2CArrayView%2Cint%2CValue" title="`[]=`(view: ArrayView; index: int; value: Value)">`[]=`(view: ArrayView; index: int; value: Value)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">addBufferFunctions
+  <li><a class="reference" href="#addBufferFunctions%2CHost" title="addBufferFunctions(host: var Host)">addBufferFunctions(host: var Host)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">addData
   <li><a class="reference" href="#addData%2CHost%2Cstring" title="addData(host: var Host; name: string; value = Value()): int32">addData(host: var Host; name: string; value = Value()): int32</a></li>
 <li><a class="reference" href="#addData%2CHost%2Cstring%2Cstring" title="addData(host: var Host; name: string; value: string): int32">addData(host: var Host; name: string; value: string): int32</a></li>
@@ -194,6 +199,10 @@
   <li><a class="reference" href="#bindProgram%2CStringPool%2CProgram" title="bindProgram(pool: StringPool; program: Program)">bindProgram(pool: StringPool; program: Program)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">blobBinding
+  <li><a class="reference" href="#blobBinding%2CRuntime%2CValue" title="blobBinding(runtime: Runtime; value: Value): string">blobBinding(runtime: Runtime; value: Value): string</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">bytesUsed
   <li><a class="reference" href="#bytesUsed%2CStringPool" title="bytesUsed(pool: StringPool): int">bytesUsed(pool: StringPool): int</a></li>
 
@@ -206,9 +215,21 @@
   <li><a class="reference" href="#chargeWork%2CRuntime%2Cint64" title="chargeWork(runtime: Runtime; cost: int64)">chargeWork(runtime: Runtime; cost: int64)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">checkNativeMemory
+  <li><a class="reference" href="#checkNativeMemory%2CRuntime%2Cint64" title="checkNativeMemory(runtime: Runtime; bytes: int64)">checkNativeMemory(runtime: Runtime; bytes: int64)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">collectBuffers
+  <li><a class="reference" href="#collectBuffers%2CRuntime" title="collectBuffers(runtime: Runtime)">collectBuffers(runtime: Runtime)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">compile
   <li><a class="reference" href="#compile%2Cstring%2CHost" title="compile(source: string; host: Host; limits = defaultLimits()): Program">compile(source: string; host: Host; limits = defaultLimits()): Program</a></li>
 <li><a class="reference" href="#compile%2Cstring" title="compile(source: string; limits = defaultLimits()): Program">compile(source: string; limits = defaultLimits()): Program</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">createBlob
+  <li><a class="reference" href="#createBlob%2CRuntime" title="createBlob(runtime: Runtime): Value">createBlob(runtime: Runtime): Value</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">defaultLimits
@@ -225,6 +246,10 @@
 </ul>
 <ul class="simple nested-toc-section">getArrayValue
   <li><a class="reference" href="#getArrayValue%2CRuntime%2Cstring%2Cint32" title="getArrayValue(runtime: Runtime; name: string; index: int32): Value">getArrayValue(runtime: Runtime; name: string; index: int32): Value</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getBlob
+  <li><a class="reference" href="#getBlob%2CRuntime%2CValue" title="getBlob(runtime: Runtime; value: Value): string">getBlob(runtime: Runtime; value: Value): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getData
@@ -308,13 +333,33 @@
   <li><a class="reference" href="#memoryBytes%2CRuntime" title="memoryBytes(runtime: Runtime): int64">memoryBytes(runtime: Runtime): int64</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">nativeMemoryBytes
+  <li><a class="reference" href="#nativeMemoryBytes%2CRuntime" title="nativeMemoryBytes(runtime: Runtime): int64">nativeMemoryBytes(runtime: Runtime): int64</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">overlaps
   <li><a class="reference" href="#overlaps%2CArrayView%2CArrayView" title="overlaps(left, right: ArrayView): bool">overlaps(left, right: ArrayView): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">putArray
+  <li><a class="reference" href="#putArray%2CRuntime%2CopenArray%5BValue%5D" title="putArray(runtime: Runtime; values: openArray[Value]): Value">putArray(runtime: Runtime; values: openArray[Value]): Value</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">putBlob
+  <li><a class="reference" href="#putBlob%2CRuntime%2CValue%2Cstring%2Cstring" title="putBlob(runtime: Runtime; value: Value; bytes: string; binding = &quot;&quot;)">putBlob(runtime: Runtime; value: Value; bytes: string; binding = &quot;&quot;)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">putString
   <li><a class="reference" href="#putString%2CStringPool%2CopenArray%5Bchar%5D" title="putString(pool: StringPool; text: openArray[char]): int32">putString(pool: StringPool; text: openArray[char]): int32</a></li>
 <li><a class="reference" href="#putString%2CRuntime%2Cstring" title="putString(runtime: var Runtime; value: string): Value">putString(runtime: var Runtime; value: string): Value</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">releaseNativeMemory
+  <li><a class="reference" href="#releaseNativeMemory%2CRuntime%2Cint64" title="releaseNativeMemory(runtime: Runtime; bytes: int64)">releaseNativeMemory(runtime: Runtime; bytes: int64)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">reserveNativeMemory
+  <li><a class="reference" href="#reserveNativeMemory%2CRuntime%2Cint64" title="reserveNativeMemory(runtime: Runtime; bytes: int64)">reserveNativeMemory(runtime: Runtime; bytes: int64)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">reset
@@ -404,7 +449,7 @@
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
   <dl class="item">
-    <a class="reference external" href="bassy/numbers.html">bassy/numbers</a>, <a class="reference external" href="bassy/texts.html">bassy/texts</a>
+    <a class="reference external" href="bassy/numbers.html">bassy/numbers</a>, <a class="reference external" href="bassy/texts.html">bassy/texts</a>, <a class="reference external" href="bassy/buffers.html">bassy/buffers</a>
   </dl>
 </div>
 <div class="section" id="7">
@@ -415,8 +460,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L296" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L296" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L300" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L300" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -426,8 +471,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L85" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L85" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L86" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L86" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -436,8 +481,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L101" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L101" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L102" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L102" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -446,8 +491,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L80" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L80" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L81" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L81" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -469,6 +514,7 @@
   <span class="Identifier">maxRegisters</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">maxSyntaxDepth</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">maxCallDepth</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
+  <span class="Identifier">maxNativeMemoryBytes</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
   <span class="Identifier">maxMemoryBytes</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
   <span class="Identifier">maxInstructions</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
   <span class="Identifier">maxWorkUnits</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
@@ -487,8 +533,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L83" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L83" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L84" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L84" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -501,8 +547,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L72" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L72" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L73" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L73" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -512,8 +558,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L66" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L66" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L67" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L67" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -522,8 +568,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L78" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L78" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L79" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L79" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -532,8 +578,8 @@
   <dd>
     
     A ref so sharing a program copies the handle, not the bytecode.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L240" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L240" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L243" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L243" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -546,8 +592,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L109" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L109" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L110" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L110" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -556,8 +602,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L271" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L271" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L274" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L274" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -569,8 +615,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4175" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4175" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4315" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4315" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -579,8 +625,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4184" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4184" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4324" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4324" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -795,8 +841,8 @@
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4171" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4171" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4311" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4311" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -843,8 +889,8 @@
   <dd>
     
     Reads one element with bounds checks even in release builds.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3545" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3545" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3603" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3603" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -857,8 +903,22 @@
   <dd>
     
     Writes a numeric element after checking bounds and mutability.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3551" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3551" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3611" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3611" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="addBufferFunctions-procs-all">
+  <div id="addBufferFunctions,Host">
+  <dt><pre><span class="Keyword">proc</span> <a href="#addBufferFunctions%2CHost"><span class="Identifier">addBufferFunctions</span></a><span class="Other">(</span><span class="Identifier">host</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#Host"><span class="Identifier">Host</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Enables explicit mutable state construction and reset in BASIC.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3684" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3684" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -871,8 +931,8 @@
   <dd>
     
     Exposes one read-only numeric host value to BASIC.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L779" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L779" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L786" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L786" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -882,8 +942,8 @@
   <dd>
     
     Exposes a string copied into each runtime's bounded storage.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L791" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L791" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L798" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L798" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -897,8 +957,8 @@
   <dd>
     
     Exposes a trusted callback with array access and dynamic work charging.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L859" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L859" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L866" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L866" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -909,8 +969,8 @@
   <dd>
     
     Exposes a callback that accepts and returns mixed numeric values.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L844" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L844" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L851" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L851" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -921,8 +981,8 @@
   <dd>
     
     Exposes an integer callback with exact int32 argument conversion.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L829" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L829" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L836" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L836" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -935,8 +995,8 @@
   <dd>
     
     Registers the bounded string toolkit onto a host. Work costs are computed from the pool limits, so the compile-time schema host and each player's live host must be built with identical limits or <tt class="docutils literal"><span class="pre"><span class="Identifier">initRuntime</span></span></tt> rejects the binding.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4425" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4425" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4565" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4565" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -949,8 +1009,8 @@
   <dd>
     
     Returns an array's element count, including its zero index.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3462" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3462" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3509" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3509" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -962,8 +1022,8 @@
   <dd>
     
     Returns the number of declared global arrays.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3373" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3373" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3418" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3418" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -975,9 +1035,9 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Resolves a program-local numeric array handle without allocating.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3514" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3514" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    Resolves a program-local or returned numeric array without allocating.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3561" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3561" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -990,8 +1050,22 @@
   <dd>
     
     Attaches the compiled program whose interned literals strNew copies. Bind after <tt class="docutils literal"><span class="pre"><span class="Identifier">compile</span></span></tt> and before the first run; binding resets the pool.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4232" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4232" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4372" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4372" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="blobBinding-procs-all">
+  <div id="blobBinding,Runtime,Value">
+  <dt><pre><span class="Keyword">proc</span> <a href="#blobBinding%2CRuntime%2CValue"><span class="Identifier">blobBinding</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">value</span><span class="Other">:</span> <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Reads the host-defined model identity attached to state.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3667" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3667" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1003,8 +1077,8 @@
   <dd>
     
     Returns the arena bytes used since the last reset.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4243" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4243" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4383" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4383" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1017,8 +1091,8 @@
   <dd>
     
     Reserves native operations against both budgets before execution.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3633" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3633" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3760" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3760" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1031,8 +1105,36 @@
   <dd>
     
     Charges dynamic native work before performing a bounded operation.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3627" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3627" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3754" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3754" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="checkNativeMemory-procs-all">
+  <div id="checkNativeMemory,Runtime,int64">
+  <dt><pre><span class="Keyword">proc</span> <a href="#checkNativeMemory%2CRuntime%2Cint64"><span class="Identifier">checkNativeMemory</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int64</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Checks temporary or retained native capacity without charging it.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3638" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3638" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="collectBuffers-procs-all">
+  <div id="collectBuffers,Runtime">
+  <dt><pre><span class="Keyword">proc</span> <a href="#collectBuffers%2CRuntime"><span class="Identifier">collectBuffers</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                        <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Reclaims buffers unreachable from VM values between native calls.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3625" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3625" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1045,8 +1147,8 @@
   <dd>
     
     Compiles BASIC source with named host data and native functions.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3114" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3114" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3150" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3150" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1056,8 +1158,22 @@
   <dd>
     
     Compiles BASIC source without host data or native functions.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3109" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3109" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3145" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3145" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="createBlob-procs-all">
+  <div id="createBlob,Runtime">
+  <dt><pre><span class="Keyword">proc</span> <a href="#createBlob%2CRuntime"><span class="Identifier">createBlob</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">)</span><span class="Other">:</span> <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Creates an empty mutable binary state value.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3659" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3659" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1069,8 +1185,8 @@
   <dd>
     
     Returns conservative defaults suitable for untrusted scripts.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L351" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L351" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L356" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L356" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1082,8 +1198,8 @@
   <dd>
     
     Returns conservative defaults suitable for untrusted scripts.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4191" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4191" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4331" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4331" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1096,8 +1212,8 @@
   <dd>
     
     Reads one array element as an exact int32.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3494" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3494" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3541" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3541" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1110,8 +1226,22 @@
   <dd>
     
     Reads one global array element with an explicit bounds check.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3487" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3487" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3534" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3534" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="getBlob-procs-all">
+  <div id="getBlob,Runtime,Value">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getBlob%2CRuntime%2CValue"><span class="Identifier">getBlob</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">value</span><span class="Other">:</span> <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Reads opaque bytes for a transactional host computation.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3663" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3663" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1124,8 +1254,8 @@
   <dd>
     
     Reads host data as an exact int32, rejecting fractional values.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L887" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L887" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L894" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L894" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1135,8 +1265,8 @@
   <dd>
     
     Reads runtime host data as an exact int32.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3414" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3414" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3459" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3459" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1149,8 +1279,8 @@
   <dd>
     
     Reads a configured host data value before runtime creation.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L878" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L878" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L885" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L885" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1160,8 +1290,8 @@
   <dd>
     
     Reads one host data value currently visible to BASIC.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3407" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3407" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3452" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3452" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1174,8 +1304,8 @@
   <dd>
     
     Reads a scalar global as an exact int32.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3449" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3449" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3496" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3496" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1188,8 +1318,8 @@
   <dd>
     
     Reads a scalar global after case-insensitive name resolution.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3442" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3442" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3489" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3489" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1202,8 +1332,8 @@
   <dd>
     
     Reads one pooled string for host-side use, such as outgoing mail.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4254" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4254" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4394" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4394" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1213,8 +1343,8 @@
   <dd>
     
     Reads owned text without exposing raw arena handles.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3562" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3562" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3689" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3689" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1227,8 +1357,8 @@
   <dd>
     
     Reads one string array element as Nim text.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3585" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3585" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3712" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3712" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1241,8 +1371,8 @@
   <dd>
     
     Reads a configured host string before runtime creation.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L901" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L901" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L908" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L908" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1252,8 +1382,8 @@
   <dd>
     
     Reads one bound host string as Nim text.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3581" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3581" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3708" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3708" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1266,8 +1396,8 @@
   <dd>
     
     Reads one named string global as Nim text.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3577" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3577" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3704" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3704" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1279,8 +1409,8 @@
   <dd>
     
     Returns the number of implicitly declared scalar globals.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3369" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3369" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3414" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3414" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1293,8 +1423,8 @@
   <dd>
     
     Returns a host data slot, or -1 when the name is unbound.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3403" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3403" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3448" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3448" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1306,8 +1436,8 @@
   <dd>
     
     Creates an empty host interface for data and native functions.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L751" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L751" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L758" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L758" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1320,8 +1450,8 @@
   <dd>
     
     Allocates a runtime and binds named host data and functions.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3273" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3273" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3314" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3314" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1331,8 +1461,8 @@
   <dd>
     
     Allocates a runtime for a program without host bindings.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3268" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3268" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3309" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3309" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1345,8 +1475,8 @@
   <dd>
     
     Preallocates a bounded pool; handle 0 is always the empty string.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4222" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4222" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4362" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4362" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1359,8 +1489,8 @@
   <dd>
     
     Returns the number of metered register-machine instructions.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3365" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3365" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3410" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3410" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1373,8 +1503,8 @@
   <dd>
     
     Returns executable VM instructions charged since the last reset.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3361" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3361" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3406" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3406" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1386,8 +1516,8 @@
   <dd>
     
     Returns the number of elements in a checked numeric view.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3535" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3535" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3589" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3589" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1400,8 +1530,8 @@
   <dd>
     
     Returns one interned print or call-argument literal by its id.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3385" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3385" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3430" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3430" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1414,8 +1544,8 @@
   <dd>
     
     Returns the number of interned compile-time string literals.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3381" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3381" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3426" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3426" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1428,8 +1558,22 @@
   <dd>
     
     Returns the logical bytes preallocated for runtime state.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3353" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3353" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3398" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3398" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="nativeMemoryBytes-procs-all">
+  <div id="nativeMemoryBytes,Runtime">
+  <dt><pre><span class="Keyword">proc</span> <a href="#nativeMemoryBytes%2CRuntime"><span class="Identifier">nativeMemoryBytes</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int64</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Returns live buffer and externally reserved native storage bytes.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3634" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3634" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1437,13 +1581,41 @@
 </div>
 <div id="overlaps-procs-all">
   <div id="overlaps,ArrayView,ArrayView">
-  <dt><pre><span class="Keyword">proc</span> <a href="#overlaps%2CArrayView%2CArrayView"><span class="Identifier">overlaps</span></a><span class="Other">(</span><span class="Identifier">left</span><span class="Other">,</span> <span class="Identifier">right</span><span class="Other">:</span> <a href="#ArrayView"><span class="Identifier">ArrayView</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#overlaps%2CArrayView%2CArrayView"><span class="Identifier">overlaps</span></a><span class="Other">(</span><span class="Identifier">left</span><span class="Other">,</span> <span class="Identifier">right</span><span class="Other">:</span> <a href="#ArrayView"><span class="Identifier">ArrayView</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Tests whether two views share any backing array storage.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3539" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3539" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3593" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3593" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="putArray-procs-all">
+  <div id="putArray,Runtime,openArray[Value]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#putArray%2CRuntime%2CopenArray%5BValue%5D"><span class="Identifier">putArray</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">values</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Returns a fresh owned numeric array from a native callback.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3653" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3653" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="putBlob-procs-all">
+  <div id="putBlob,Runtime,Value,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#putBlob%2CRuntime%2CValue%2Cstring%2Cstring"><span class="Identifier">putBlob</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">value</span><span class="Other">:</span> <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">binding</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Commits validated state bytes and their host-defined binding together.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3671" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3671" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1456,8 +1628,8 @@
   <dd>
     
     Copies host text, such as incoming mail or an LLM reply, into the pool, truncating to the single-string length cap. Handle and byte exhaustion still fail, so hosts should inject bounded batches.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4277" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4277" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4417" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4417" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1467,8 +1639,36 @@
   <dd>
     
     Copies host text into bounded storage for a string-valued callback.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3573" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3573" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3700" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3700" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="releaseNativeMemory-procs-all">
+  <div id="releaseNativeMemory,Runtime,int64">
+  <dt><pre><span class="Keyword">proc</span> <a href="#releaseNativeMemory%2CRuntime%2Cint64"><span class="Identifier">releaseNativeMemory</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int64</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Releases a previous host reservation without accepting underflow.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3647" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3647" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="reserveNativeMemory-procs-all">
+  <div id="reserveNativeMemory,Runtime,int64">
+  <dt><pre><span class="Keyword">proc</span> <a href="#reserveNativeMemory%2CRuntime%2Cint64"><span class="Identifier">reserveNativeMemory</span></a><span class="Other">(</span><span class="Identifier">runtime</span><span class="Other">:</span> <a href="#Runtime"><span class="Identifier">Runtime</span></a><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int64</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Charges host model or scratch storage before allocation.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3642" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3642" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1480,8 +1680,8 @@
   <dd>
     
     Discards every handle and interned literal while keeping capacity. Call this alongside <tt class="docutils literal"><span class="pre"><span class="Identifier">restart</span></span></tt> so each decision starts with an empty pool and stale handles from earlier decisions fail deterministically.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4212" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4212" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4352" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4352" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1490,8 +1690,8 @@
   <dd>
     
     Restores zeroed variables and the program's immutable DATA values.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3281" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3281" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3322" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3322" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1503,8 +1703,8 @@
   <dd>
     
     Restarts execution and reclaims strings, preserving globals and arrays. Host-held string Values must be fetched again after restarting.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3311" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3311" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3356" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3356" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1516,8 +1716,8 @@
   <dd>
     
     Returns the main routine plus the number of declared subs.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3377" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3377" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3422" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3422" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1530,8 +1730,8 @@
   <dd>
     
     Executes verified bytecode with bounded work, memory, calls, and output.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3784" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3784" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3911" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3911" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1544,8 +1744,8 @@
   <dd>
     
     Copies text into one string array element after validating its index.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3606" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3606" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3733" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3733" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1555,8 +1755,8 @@
   <dd>
     
     Writes one global array element with an explicit bounds check.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3498" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3498" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3545" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3545" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1569,8 +1769,8 @@
   <dd>
     
     Updates text copied into subsequently created runtimes.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L908" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L908" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L915" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L915" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1580,8 +1780,8 @@
   <dd>
     
     Updates a host data value used by subsequently created runtimes.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L891" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L891" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L898" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L898" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1591,8 +1791,8 @@
   <dd>
     
     Copies text into one bound string data slot.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3595" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3595" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3722" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3722" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1602,8 +1802,8 @@
   <dd>
     
     Updates one host data slot by its compile-time binding index.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3425" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3425" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3472" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3472" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1613,8 +1813,8 @@
   <dd>
     
     Copies text into one named string data binding.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3602" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3602" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3729" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3729" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1624,8 +1824,8 @@
   <dd>
     
     Updates one host data value without resetting other VM state.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3433" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3433" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3480" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3480" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1638,8 +1838,8 @@
   <dd>
     
     Copies text into a declared string global.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3589" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3589" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3716" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3716" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1649,8 +1849,8 @@
   <dd>
     
     Writes a scalar global after case-insensitive name resolution.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3453" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3453" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3500" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3500" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1662,8 +1862,8 @@
   <dd>
     
     Returns native string bytes occupied since the last reset.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3623" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3623" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3750" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3750" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1675,8 +1875,8 @@
   <dd>
     
     Returns the live handle count, including the shared empty string.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4239" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4239" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L4379" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L4379" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1685,8 +1885,8 @@
   <dd>
     
     Returns occupied native string slots, including the empty string.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3619" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3619" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3746" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3746" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1699,8 +1899,8 @@
   <dd>
     
     Returns work units charged since initialization or the last reset.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3357" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3357" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3402" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3402" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1718,8 +1918,8 @@
   <dd>
     
     Borrows string bytes for a block that must not modify or restart the VM.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3566" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3566" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy.nim#L3693" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy.nim#L3693" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -1731,7 +1931,7 @@
 <div class="section" id="19">
   <h1><a class="toc-backref" href="#19">Exports</a></h1>
   <dl class="item">
-    <a href="bassy/numbers.html#<,Value,Value"><span class="Identifier">&lt;</span></a>, <a href="bassy/numbers.html#asBool,Value"><span class="Identifier">asBool</span></a>, <a href="bassy/numbers.html#imp,Value,Value"><span class="Identifier">imp</span></a>, <a href="bassy/numbers.html#BasicError"><span class="Identifier">BasicError</span></a>, <a href="bassy/numbers.html#toValue.c,bool"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#stringHandle,Value"><span class="Identifier">stringHandle</span></a>, <a href="bassy/numbers.html#ValueKind"><span class="Identifier">ValueKind</span></a>, <a href="bassy/numbers.html#xor,Value,Value"><span class="Identifier">xor</span></a>, <a href="bassy/numbers.html#-,Value,Value"><span class="Identifier">-</span></a>, <a href="bassy/numbers.html#div,Value,Value"><span class="Identifier">div</span></a>, <a href="bassy/numbers.html#$,Value"><span class="Identifier">$</span></a>, <a href="bassy/numbers.html#asInt,Value"><span class="Identifier">asInt</span></a>, <a href="bassy/numbers.html#toValue.c,int32"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#stringOwner,Value"><span class="Identifier">stringOwner</span></a>, <a href="bassy/numbers.html#not,Value"><span class="Identifier">not</span></a>, <a href="bassy/numbers.html#<=,Value,Value"><span class="Identifier">&lt;=</span></a>, <a href="bassy/numbers.html#-,Value"><span class="Identifier">-</span></a>, <a href="bassy/numbers.html#kind,Value"><span class="Identifier">kind</span></a>, <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a>, <a href="bassy/numbers.html#==,Value,Value"><span class="Identifier">==</span></a>, <a href="bassy/numbers.html#/,Value,Value"><span class="Identifier">/</span></a>, <a href="bassy/numbers.html#toValue.c,Fixed"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#toValue.c,int"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#and,Value,Value"><span class="Identifier">and</span></a>, <a href="bassy/numbers.html#or,Value,Value"><span class="Identifier">or</span></a>, <a href="bassy/numbers.html#stringValue,uint32,int32"><span class="Identifier">stringValue</span></a>, <a href="bassy/numbers.html#eqv,Value,Value"><span class="Identifier">eqv</span></a>, <a href="bassy/numbers.html#mod,Value,Value"><span class="Identifier">mod</span></a>, <a href="bassy/numbers.html#+,Value,Value"><span class="Identifier">+</span></a>, <a href="bassy/numbers.html#asFixed,Value"><span class="Identifier">asFixed</span></a>, <a href="bassy/numbers.html#*,Value,Value"><span class="Identifier">*</span></a>
+    <a href="bassy/numbers.html#<,Value,Value"><span class="Identifier">&lt;</span></a>, <a href="bassy/numbers.html#asBool,Value"><span class="Identifier">asBool</span></a>, <a href="bassy/numbers.html#imp,Value,Value"><span class="Identifier">imp</span></a>, <a href="bassy/numbers.html#BasicError"><span class="Identifier">BasicError</span></a>, <a href="bassy/numbers.html#toValue.c,bool"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#stringHandle,Value"><span class="Identifier">stringHandle</span></a>, <a href="bassy/numbers.html#ValueKind"><span class="Identifier">ValueKind</span></a>, <a href="bassy/numbers.html#xor,Value,Value"><span class="Identifier">xor</span></a>, <a href="bassy/numbers.html#-,Value,Value"><span class="Identifier">-</span></a>, <a href="bassy/numbers.html#bufferValue,ValueKind,uint32,int32"><span class="Identifier">bufferValue</span></a>, <a href="bassy/numbers.html#div,Value,Value"><span class="Identifier">div</span></a>, <a href="bassy/numbers.html#$,Value"><span class="Identifier">$</span></a>, <a href="bassy/numbers.html#asInt,Value"><span class="Identifier">asInt</span></a>, <a href="bassy/numbers.html#toValue.c,int32"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#stringOwner,Value"><span class="Identifier">stringOwner</span></a>, <a href="bassy/numbers.html#not,Value"><span class="Identifier">not</span></a>, <a href="bassy/numbers.html#eqv,Value,Value"><span class="Identifier">eqv</span></a>, <a href="bassy/numbers.html#bufferSlot,Value"><span class="Identifier">bufferSlot</span></a>, <a href="bassy/numbers.html#<=,Value,Value"><span class="Identifier">&lt;=</span></a>, <a href="bassy/numbers.html#-,Value"><span class="Identifier">-</span></a>, <a href="bassy/numbers.html#kind,Value"><span class="Identifier">kind</span></a>, <a href="bassy/numbers.html#Value"><span class="Identifier">Value</span></a>, <a href="bassy/numbers.html#==,Value,Value"><span class="Identifier">==</span></a>, <a href="bassy/numbers.html#/,Value,Value"><span class="Identifier">/</span></a>, <a href="bassy/numbers.html#bufferOwner,Value"><span class="Identifier">bufferOwner</span></a>, <a href="bassy/numbers.html#toValue.c,Fixed"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#toValue.c,int"><span class="Identifier">toValue</span></a>, <a href="bassy/numbers.html#and,Value,Value"><span class="Identifier">and</span></a>, <a href="bassy/numbers.html#or,Value,Value"><span class="Identifier">or</span></a>, <a href="bassy/numbers.html#stringValue,uint32,int32"><span class="Identifier">stringValue</span></a>, <a href="bassy/numbers.html#mod,Value,Value"><span class="Identifier">mod</span></a>, <a href="bassy/numbers.html#+,Value,Value"><span class="Identifier">+</span></a>, <a href="bassy/numbers.html#asFixed,Value"><span class="Identifier">asFixed</span></a>, <a href="bassy/numbers.html#*,Value,Value"><span class="Identifier">*</span></a>
   </dl>
 </div>
 
@@ -1741,7 +1941,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:06:21 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:10:26 UTC</small>
       </div>
     </div>
   </div>

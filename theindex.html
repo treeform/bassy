@@ -28,7 +28,7 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">Index</h1>
-      Modules: <a href="bassy.html">bassy</a>, <a href="bassy/numbers.html">bassy/numbers</a>, <a href="bassy/texts.html">bassy/texts</a>.<br/><p /><h2>API symbols</h2>
+      Modules: <a href="bassy.html">bassy</a>, <a href="bassy/buffers.html">bassy/buffers</a>, <a href="bassy/numbers.html">bassy/numbers</a>, <a href="bassy/texts.html">bassy/texts</a>.<br/><p /><h2>API symbols</h2>
 <dl><dt><a name="%60%24%60" href="#%60%24%60"><span>`$`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `$`(value: Value): string" href="bassy/numbers.html#%24%2CValue">numbers: proc `$`(value: Value): string</a></li>
@@ -95,6 +95,10 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `xor`(left, right: Value): Value" href="bassy/numbers.html#xor%2CValue%2CValue">numbers: proc `xor`(left, right: Value): Value</a></li>
           </ul></dd>
+<dt><a name="addBufferFunctions" href="#addBufferFunctions"><span>addBufferFunctions:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc addBufferFunctions(host: var Host)" href="bassy.html#addBufferFunctions%2CHost">bassy: proc addBufferFunctions(host: var Host)</a></li>
+          </ul></dd>
 <dt><a name="addData" href="#addData"><span>addData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc addData(host: var Host; name: string; value = Value()): int32" href="bassy.html#addData%2CHost%2Cstring">bassy: proc addData(host: var Host; name: string; value = Value()): int32</a></li>
@@ -127,6 +131,10 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc arrays(program: Program): int" href="bassy.html#arrays%2CProgram">bassy: proc arrays(program: Program): int</a></li>
           </ul></dd>
+<dt><a name="ArrayValue" href="#ArrayValue"><span>ArrayValue:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="numbers: ValueKind.ArrayValue" href="bassy/numbers.html#ArrayValue">numbers: ValueKind.ArrayValue</a></li>
+          </ul></dd>
 <dt><a name="ArrayView" href="#ArrayView"><span>ArrayView:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: object ArrayView" href="bassy.html#ArrayView">bassy: object ArrayView</a></li>
@@ -151,9 +159,41 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: object BasicError" href="bassy/numbers.html#BasicError">numbers: object BasicError</a></li>
           </ul></dd>
+<dt><a name="binding" href="#binding"><span>binding:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc binding(storage: BufferStorage; value: Value): string" href="bassy/buffers.html#binding%2CBufferStorage%2CValue">buffers: proc binding(storage: BufferStorage; value: Value): string</a></li>
+          </ul></dd>
 <dt><a name="bindProgram" href="#bindProgram"><span>bindProgram:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc bindProgram(pool: StringPool; program: Program)" href="bassy.html#bindProgram%2CStringPool%2CProgram">bassy: proc bindProgram(pool: StringPool; program: Program)</a></li>
+          </ul></dd>
+<dt><a name="blob" href="#blob"><span>blob:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc blob(storage: BufferStorage; value: Value): string" href="bassy/buffers.html#blob%2CBufferStorage%2CValue">buffers: proc blob(storage: BufferStorage; value: Value): string</a></li>
+          </ul></dd>
+<dt><a name="blobBinding" href="#blobBinding"><span>blobBinding:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc blobBinding(runtime: Runtime; value: Value): string" href="bassy.html#blobBinding%2CRuntime%2CValue">bassy: proc blobBinding(runtime: Runtime; value: Value): string</a></li>
+          </ul></dd>
+<dt><a name="BlobValue" href="#BlobValue"><span>BlobValue:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="numbers: ValueKind.BlobValue" href="bassy/numbers.html#BlobValue">numbers: ValueKind.BlobValue</a></li>
+          </ul></dd>
+<dt><a name="bufferOwner" href="#bufferOwner"><span>bufferOwner:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="numbers: proc bufferOwner(value: Value): uint32" href="bassy/numbers.html#bufferOwner%2CValue">numbers: proc bufferOwner(value: Value): uint32</a></li>
+          </ul></dd>
+<dt><a name="bufferSlot" href="#bufferSlot"><span>bufferSlot:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="numbers: proc bufferSlot(value: Value): int32" href="bassy/numbers.html#bufferSlot%2CValue">numbers: proc bufferSlot(value: Value): int32</a></li>
+          </ul></dd>
+<dt><a name="BufferStorage" href="#BufferStorage"><span>BufferStorage:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: object BufferStorage" href="bassy/buffers.html#BufferStorage">buffers: object BufferStorage</a></li>
+          </ul></dd>
+<dt><a name="bufferValue" href="#bufferValue"><span>bufferValue:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="numbers: proc bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value" href="bassy/numbers.html#bufferValue%2CValueKind%2Cuint32%2Cint32">numbers: proc bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value</a></li>
           </ul></dd>
 <dt><a name="bytesUsed" href="#bytesUsed"><span>bytesUsed:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -177,9 +217,17 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc chargeWork(runtime: Runtime; cost: int64)" href="bassy.html#chargeWork%2CRuntime%2Cint64">bassy: proc chargeWork(runtime: Runtime; cost: int64)</a></li>
           </ul></dd>
+<dt><a name="checkNativeMemory" href="#checkNativeMemory"><span>checkNativeMemory:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc checkNativeMemory(runtime: Runtime; bytes: int64)" href="bassy.html#checkNativeMemory%2CRuntime%2Cint64">bassy: proc checkNativeMemory(runtime: Runtime; bytes: int64)</a></li>
+          </ul></dd>
 <dt><a name="CodeFunction" href="#CodeFunction"><span>CodeFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.CodeFunction" href="bassy/texts.html#CodeFunction">texts: TextFunction.CodeFunction</a></li>
+          </ul></dd>
+<dt><a name="collectBuffers" href="#collectBuffers"><span>collectBuffers:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc collectBuffers(runtime: Runtime)" href="bassy.html#collectBuffers%2CRuntime">bassy: proc collectBuffers(runtime: Runtime)</a></li>
           </ul></dd>
 <dt><a name="compare" href="#compare"><span>compare:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -202,6 +250,12 @@
 <dt><a name="count" href="#count"><span>count:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc count(storage: TextStorage): int" href="bassy/texts.html#count%2CTextStorage">texts: proc count(storage: TextStorage): int</a></li>
+          </ul></dd>
+<dt><a name="createBlob" href="#createBlob"><span>createBlob:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc createBlob(runtime: Runtime): Value" href="bassy.html#createBlob%2CRuntime">bassy: proc createBlob(runtime: Runtime): Value</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="buffers: proc createBlob(storage: var BufferStorage): Value" href="bassy/buffers.html#createBlob%2CBufferStorage">buffers: proc createBlob(storage: var BufferStorage): Value</a></li>
           </ul></dd>
 <dt><a name="defaultLimits" href="#defaultLimits"><span>defaultLimits:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -325,6 +379,8 @@
           </ul></dd>
 <dt><a name="get" href="#get"><span>get:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="buffers: proc get(storage: BufferStorage; value: Value; index: int): Value" href="bassy/buffers.html#get%2CBufferStorage%2CValue%2Cint">buffers: proc get(storage: BufferStorage; value: Value; index: int): Value</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="texts: proc get(storage: TextStorage; value: Value): string" href="bassy/texts.html#get%2CTextStorage%2CValue">texts: proc get(storage: TextStorage; value: Value): string</a></li>
           </ul></dd>
 <dt><a name="getArray" href="#getArray"><span>getArray:</span></a></dt><dd><ul class="simple">
@@ -334,6 +390,10 @@
 <dt><a name="getArrayValue" href="#getArrayValue"><span>getArrayValue:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc getArrayValue(runtime: Runtime; name: string; index: int32): Value" href="bassy.html#getArrayValue%2CRuntime%2Cstring%2Cint32">bassy: proc getArrayValue(runtime: Runtime; name: string; index: int32): Value</a></li>
+          </ul></dd>
+<dt><a name="getBlob" href="#getBlob"><span>getBlob:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc getBlob(runtime: Runtime; value: Value): string" href="bassy.html#getBlob%2CRuntime%2CValue">bassy: proc getBlob(runtime: Runtime; value: Value): string</a></li>
           </ul></dd>
 <dt><a name="getData" href="#getData"><span>getData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -395,6 +455,10 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc imp(left, right: Value): Value" href="bassy/numbers.html#imp%2CValue%2CValue">numbers: proc imp(left, right: Value): Value</a></li>
           </ul></dd>
+<dt><a name="index" href="#index"><span>index:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc index(storage: BufferStorage; value: Value): int" href="bassy/buffers.html#index%2CBufferStorage%2CValue">buffers: proc index(storage: BufferStorage; value: Value): int</a></li>
+          </ul></dd>
 <dt><a name="initHost" href="#initHost"><span>initHost:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc initHost(): Host" href="bassy.html#initHost">bassy: proc initHost(): Host</a></li>
@@ -443,6 +507,8 @@
           </ul></dd>
 <dt><a name="length" href="#length"><span>length:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="buffers: proc length(storage: BufferStorage; value: Value): int" href="bassy/buffers.html#length%2CBufferStorage%2CValue">buffers: proc length(storage: BufferStorage; value: Value): int</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="texts: proc length(storage: TextStorage; value: Value): int" href="bassy/texts.html#length%2CTextStorage%2CValue">texts: proc length(storage: TextStorage; value: Value): int</a></li>
           </ul></dd>
 <dt><a name="LengthFunction" href="#LengthFunction"><span>LengthFunction:</span></a></dt><dd><ul class="simple">
@@ -469,6 +535,10 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: proc mapped(storage: var TextStorage; value: Value; upper: bool): Value" href="bassy/texts.html#mapped%2CTextStorage%2CValue%2Cbool">texts: proc mapped(storage: var TextStorage; value: Value; upper: bool): Value</a></li>
           </ul></dd>
+<dt><a name="mark" href="#mark"><span>mark:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc mark(storage: var BufferStorage; values: openArray[Value])" href="bassy/buffers.html#mark%2CBufferStorage%2CopenArray%5BValue%5D">buffers: proc mark(storage: var BufferStorage; values: openArray[Value])</a></li>
+          </ul></dd>
 <dt><a name="MaximumFixedExponent" href="#MaximumFixedExponent"><span>MaximumFixedExponent:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: const MaximumFixedExponent" href="bassy.html#MaximumFixedExponent">bassy: const MaximumFixedExponent</a></li>
@@ -484,10 +554,16 @@
 <dt><a name="memoryBytes" href="#memoryBytes"><span>memoryBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc memoryBytes(runtime: Runtime): int64" href="bassy.html#memoryBytes%2CRuntime">bassy: proc memoryBytes(runtime: Runtime): int64</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="buffers: proc memoryBytes(storage: BufferStorage): int64" href="bassy/buffers.html#memoryBytes%2CBufferStorage">buffers: proc memoryBytes(storage: BufferStorage): int64</a></li>
           </ul></dd>
 <dt><a name="MidFunction" href="#MidFunction"><span>MidFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.MidFunction" href="bassy/texts.html#MidFunction">texts: TextFunction.MidFunction</a></li>
+          </ul></dd>
+<dt><a name="nativeMemoryBytes" href="#nativeMemoryBytes"><span>nativeMemoryBytes:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc nativeMemoryBytes(runtime: Runtime): int64" href="bassy.html#nativeMemoryBytes%2CRuntime">bassy: proc nativeMemoryBytes(runtime: Runtime): int64</a></li>
           </ul></dd>
 <dt><a name="NewlinePrint" href="#NewlinePrint"><span>NewlinePrint:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -523,13 +599,31 @@
           </ul></dd>
 <dt><a name="put" href="#put"><span>put:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="buffers: proc put(storage: var BufferStorage; value: Value; index: int; item: Value)" href="bassy/buffers.html#put%2CBufferStorage%2CValue%2Cint%2CValue">buffers: proc put(storage: var BufferStorage; value: Value; index: int; item: Value)</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="texts: proc put(storage: var TextStorage; text: string): Value" href="bassy/texts.html#put%2CTextStorage%2Cstring">texts: proc put(storage: var TextStorage; text: string): Value</a></li>
+          </ul></dd>
+<dt><a name="putArray" href="#putArray"><span>putArray:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc putArray(runtime: Runtime; values: openArray[Value]): Value" href="bassy.html#putArray%2CRuntime%2CopenArray%5BValue%5D">bassy: proc putArray(runtime: Runtime; values: openArray[Value]): Value</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="buffers: proc putArray(storage: var BufferStorage; values: openArray[Value]): Value" href="bassy/buffers.html#putArray%2CBufferStorage%2CopenArray%5BValue%5D">buffers: proc putArray(storage: var BufferStorage; values: openArray[Value]): Value</a></li>
+          </ul></dd>
+<dt><a name="putBlob" href="#putBlob"><span>putBlob:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc putBlob(runtime: Runtime; value: Value; bytes: string; binding = &quot;&quot;)" href="bassy.html#putBlob%2CRuntime%2CValue%2Cstring%2Cstring">bassy: proc putBlob(runtime: Runtime; value: Value; bytes: string; binding = &quot;&quot;)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="buffers: proc putBlob(storage: var BufferStorage; value: Value; bytes, binding: string)" href="bassy/buffers.html#putBlob%2CBufferStorage%2CValue%2Cstring%2Cstring">buffers: proc putBlob(storage: var BufferStorage; value: Value; bytes, binding: string)</a></li>
           </ul></dd>
 <dt><a name="putString" href="#putString"><span>putString:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc putString(runtime: var Runtime; value: string): Value" href="bassy.html#putString%2CRuntime%2Cstring">bassy: proc putString(runtime: var Runtime; value: string): Value</a></li>
           <li><a class="reference external"
           data-doc-search-tag="bassy: proc putString(pool: StringPool; text: openArray[char]): int32" href="bassy.html#putString%2CStringPool%2CopenArray%5Bchar%5D">bassy: proc putString(pool: StringPool; text: openArray[char]): int32</a></li>
+          </ul></dd>
+<dt><a name="releaseNativeMemory" href="#releaseNativeMemory"><span>releaseNativeMemory:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc releaseNativeMemory(runtime: Runtime; bytes: int64)" href="bassy.html#releaseNativeMemory%2CRuntime%2Cint64">bassy: proc releaseNativeMemory(runtime: Runtime; bytes: int64)</a></li>
           </ul></dd>
 <dt><a name="repeated" href="#repeated"><span>repeated:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -539,11 +633,21 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.RepeatFunction" href="bassy/texts.html#RepeatFunction">texts: TextFunction.RepeatFunction</a></li>
           </ul></dd>
+<dt><a name="reserve" href="#reserve"><span>reserve:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc reserve(storage: BufferStorage; bytes: int64)" href="bassy/buffers.html#reserve%2CBufferStorage%2Cint64">buffers: proc reserve(storage: BufferStorage; bytes: int64)</a></li>
+          </ul></dd>
+<dt><a name="reserveNativeMemory" href="#reserveNativeMemory"><span>reserveNativeMemory:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc reserveNativeMemory(runtime: Runtime; bytes: int64)" href="bassy.html#reserveNativeMemory%2CRuntime%2Cint64">bassy: proc reserveNativeMemory(runtime: Runtime; bytes: int64)</a></li>
+          </ul></dd>
 <dt><a name="reset" href="#reset"><span>reset:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc reset(runtime: var Runtime)" href="bassy.html#reset%2CRuntime">bassy: proc reset(runtime: var Runtime)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="bassy: proc reset(pool: StringPool)" href="bassy.html#reset%2CStringPool">bassy: proc reset(pool: StringPool)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="buffers: proc reset(storage: var BufferStorage)" href="bassy/buffers.html#reset%2CBufferStorage">buffers: proc reset(storage: var BufferStorage)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="texts: proc reset(storage: var TextStorage; roots: var seq[Value])" href="bassy/texts.html#reset%2CTextStorage%2Cseq%5BValue%5D">texts: proc reset(storage: var TextStorage; roots: var seq[Value])</a></li>
           </ul></dd>
@@ -647,6 +751,10 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc stringValue(owner: uint32; handle: int32): Value" href="bassy/numbers.html#stringValue%2Cuint32%2Cint32">numbers: proc stringValue(owner: uint32; handle: int32): Value</a></li>
           </ul></dd>
+<dt><a name="sweep" href="#sweep"><span>sweep:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc sweep(storage: var BufferStorage)" href="bassy/buffers.html#sweep%2CBufferStorage">buffers: proc sweep(storage: var BufferStorage)</a></li>
+          </ul></dd>
 <dt><a name="TextFunction" href="#TextFunction"><span>TextFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: enum TextFunction" href="bassy/texts.html#TextFunction">texts: enum TextFunction</a></li>
@@ -685,6 +793,10 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.UpperFunction" href="bassy/texts.html#UpperFunction">texts: TextFunction.UpperFunction</a></li>
           </ul></dd>
+<dt><a name="validate" href="#validate"><span>validate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="buffers: proc validate(storage: BufferStorage; value: Value)" href="bassy/buffers.html#validate%2CBufferStorage%2CValue">buffers: proc validate(storage: BufferStorage; value: Value)</a></li>
+          </ul></dd>
 <dt><a name="Value" href="#Value"><span>Value:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: object Value" href="bassy/numbers.html#Value">numbers: object Value</a></li>
@@ -713,7 +825,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:06:21 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:10:26 UTC</small>
       </div>
     </div>
   </div>
