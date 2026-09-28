@@ -23,15 +23,16 @@ nim	initTextStorage	bassy/texts.html#initTextStorage,int,int,int	proc initTextSt
 nim	empty	bassy/texts.html#empty,TextStorage	proc empty(storage: TextStorage): Value		95
 nim	length	bassy/texts.html#length,TextStorage,Value	proc length(storage: TextStorage; value: Value): int		107
 nim	get	bassy/texts.html#get,TextStorage,Value	proc get(storage: TextStorage; value: Value): string		111
-nim	count	bassy/texts.html#count,TextStorage	proc count(storage: TextStorage): int		117
-nim	bytesUsed	bassy/texts.html#bytesUsed,TextStorage	proc bytesUsed(storage: TextStorage): int		121
-nim	put	bassy/texts.html#put,TextStorage,string	proc put(storage: var TextStorage; text: string): Value		136
-nim	concat	bassy/texts.html#concat,TextStorage,Value,Value	proc concat(storage: var TextStorage; left, right: Value): Value		150
-nim	compare	bassy/texts.html#compare,TextStorage,Value,Value	proc compare(storage: TextStorage; left, right: Value): int		173
-nim	slice	bassy/texts.html#slice,TextStorage,Value,int,int	proc slice(storage: var TextStorage; value: Value; start, length: int): Value		187
-nim	repeated	bassy/texts.html#repeated,TextStorage,int,char	proc repeated(storage: var TextStorage; count: int; character: char): Value		204
-nim	character	bassy/texts.html#character,TextStorage,Value	proc character(storage: TextStorage; value: Value): char		219
-nim	mapped	bassy/texts.html#mapped,TextStorage,Value,bool	proc mapped(storage: var TextStorage; value: Value; upper: bool): Value		226
-nim	trimmed	bassy/texts.html#trimmed,TextStorage,Value,bool,bool	proc trimmed(storage: var TextStorage; value: Value; left, right: bool): Value		245
-nim	find	bassy/texts.html#find,TextStorage,Value,Value,int	proc find(storage: TextStorage; haystack, needle: Value; start: int): int		263
-nim	reset	bassy/texts.html#reset,TextStorage,seq[Value]	proc reset(storage: var TextStorage; roots: var seq[Value])		283
+nim	withText	bassy/texts.html#withText.t,TextStorage,Value,untyped,untyped	template withText(storage: var TextStorage; value: Value; text, body: untyped)		117
+nim	count	bassy/texts.html#count,TextStorage	proc count(storage: TextStorage): int		131
+nim	bytesUsed	bassy/texts.html#bytesUsed,TextStorage	proc bytesUsed(storage: TextStorage): int		135
+nim	put	bassy/texts.html#put,TextStorage,string	proc put(storage: var TextStorage; text: string): Value		150
+nim	concat	bassy/texts.html#concat,TextStorage,Value,Value	proc concat(storage: var TextStorage; left, right: Value): Value		164
+nim	compare	bassy/texts.html#compare,TextStorage,Value,Value	proc compare(storage: TextStorage; left, right: Value): int		187
+nim	slice	bassy/texts.html#slice,TextStorage,Value,int,int	proc slice(storage: var TextStorage; value: Value; start, length: int): Value		201
+nim	repeated	bassy/texts.html#repeated,TextStorage,int,char	proc repeated(storage: var TextStorage; count: int; character: char): Value		218
+nim	character	bassy/texts.html#character,TextStorage,Value	proc character(storage: TextStorage; value: Value): char		233
+nim	mapped	bassy/texts.html#mapped,TextStorage,Value,bool	proc mapped(storage: var TextStorage; value: Value; upper: bool): Value		240
+nim	trimmed	bassy/texts.html#trimmed,TextStorage,Value,bool,bool	proc trimmed(storage: var TextStorage; value: Value; left, right: bool): Value		259
+nim	find	bassy/texts.html#find,TextStorage,Value,Value,int	proc find(storage: TextStorage; haystack, needle: Value; start: int): int		277
+nim	reset	bassy/texts.html#reset,TextStorage,seq[Value]	proc reset(storage: var TextStorage; roots: var seq[Value])		297
