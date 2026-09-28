@@ -760,6 +760,10 @@ block:
   let program = compile("a = 1\nb = a + 1\n")
   for offset in [int32(program.instructions), int32(program.instructions + 7),
       -1'i32, high(int32)]:
+    if not jitSupported():
+      # With no compiled code there is nothing here to test, and the
+      # interpreter is not what this refusal is asked of.
+      break
     var runtime = initRuntime(program)
     discard runtime.compileNative()
     runtime.pc = offset
