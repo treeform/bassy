@@ -345,6 +345,8 @@ when NativeArm64:
       ## The assembler plus whether branches must reach anywhere at all.
       code: Assembler
       far: bool
+      limit: int
+      outside: Label
 
   proc label(e: var Emitter): Label {.inline, raises: [].} =
     ## Reserves a label.
@@ -390,6 +392,15 @@ when NativeArm64:
       e.code.place(skip)
     else:
       e.code.branchIfNotZero(Word32, register, target)
+
+  proc withinProgram(e: var Emitter, offset: Register)
+      {.raises: [BasicError].} =
+    ## Sends an offset that is not one of the program's own to the block
+    ## past the end, which refuses it, instead of reading a table entry
+    ## that is not there. One unsigned comparison covers both ends.
+    e.code.loadImmediate(Word32, Temps[6], int64(e.limit))
+    e.code.compareRegister(Word32, offset, Temps[6])
+    e.jumpWhen(CarrySetCondition, e.outside)
 
   proc reach(e: var Emitter, place: Place): (Register, int)
       {.raises: [BasicError].} =
@@ -860,6 +871,7 @@ when NativeArm64:
     e.code.loadWord(resume, frame, FrameReturn)
     e.code.storeWord(resume, Context, ContextOffset)
     e.frameOf(RegistersBase, base)
+    e.withinProgram(resume)
     e.code.addRegister(Word64, temp(4), TableBase, resume, 3)
     e.code.loadDouble(temp(4), temp(4), 0)
     e.code.jumpRegister(temp(4))
@@ -893,6 +905,7 @@ when NativeArm64:
   proc dispatch(e: var Emitter) {.raises: [BasicError].} =
     ## Jumps to the block for whatever offset the context names.
     e.code.loadWord(temp(0), Context, ContextOffset)
+    e.withinProgram(temp(0))
     e.code.addRegister(Word64, temp(1), TableBase, temp(0), 3)
     e.code.loadDouble(temp(1), temp(1), 0)
     e.code.jumpRegister(temp(1))
@@ -1360,6 +1373,8 @@ elif NativeAmd64:
       ## there is nothing to widen.
       code: Assembler
       far: bool
+      limit: int
+      outside: Label
 
   proc label(e: var Emitter): Label {.inline, raises: [].} =
     ## Reserves a label.
@@ -1377,6 +1392,13 @@ elif NativeAmd64:
       {.raises: [].} =
     ## Jumps when a condition holds.
     e.code.branchIf(condition, target)
+
+  proc withinProgram(e: var Emitter, offset: Register) {.raises: [].} =
+    ## Sends an offset that is not one of the program's own to the block
+    ## past the end, which refuses it, instead of reading a table entry
+    ## that is not there. One unsigned comparison covers both ends.
+    e.code.compareImmediate(Word32, offset, int32(e.limit))
+    e.jumpWhen(AboveEqualCondition, e.outside)
 
   proc contextField(e: var Emitter, destination: Register, offset: int)
       {.raises: [BasicError].} =
@@ -1867,6 +1889,7 @@ elif NativeAmd64:
     e.code.storeWord(Spare, Context, ContextOffset)
     e.code.moveRegister(Word32, r8, base)
     e.slotAddress(RegistersBase, r8)
+    e.withinProgram(Spare)
     e.contextField(rax, ContextTable)
     e.code.shiftLeftImmediate(Word64, Spare, 3)
     e.code.addRegister(Word64, rax, Spare)
@@ -1909,6 +1932,7 @@ elif NativeAmd64:
   proc dispatch(e: var Emitter) {.raises: [BasicError].} =
     ## Jumps to the block for whatever offset the context names.
     e.code.loadWord(rax, Context, ContextOffset)
+    e.withinProgram(rax)
     e.code.shiftLeftImmediate(Word64, rax, 3)
     e.contextField(rcx, ContextTable)
     e.code.addRegister(Word64, rcx, rax)
@@ -2475,6 +2499,8 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     for index in 0 .. code.len:
       blocks[index] = e.label()
       general[index] = blocks[index]
+    e.limit = code.len
+    e.outside = blocks[code.len]
     let dispatchLabel = e.label()
     let slowLabel = e.label()
     let hostLabel = e.label()
