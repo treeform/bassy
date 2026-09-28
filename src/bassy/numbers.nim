@@ -8,7 +8,9 @@ type
   ValueKind* = enum
     IntegerValue,
     FixedValue,
-    StringValue
+    StringValue,
+    ArrayValue,
+    BlobValue
 
   Value* = object
     ## A number or owned string reference, with an integer zero default.
@@ -17,7 +19,7 @@ type
       integer: int32
     of FixedValue:
       decimal: Fixed
-    of StringValue:
+    of StringValue, ArrayValue, BlobValue:
       reference: uint64
 
 proc kind*(value: Value): ValueKind {.inline, raises: [].} =
@@ -39,6 +41,31 @@ proc stringHandle*(value: Value): int32 {.raises: [BasicError].} =
   if value.kind != StringValue:
     raise newException(BasicError, "BASIC value must be a string")
   cast[int32](uint32(value.reference and 0xffffffff'u64))
+
+proc bufferValue*(kind: ValueKind, owner: uint32, slot: int32): Value =
+  ## Constructs a typed reference for a trusted native buffer store.
+  if kind notin {ArrayValue, BlobValue}:
+    raise newException(BasicError, "invalid BASIC buffer type")
+  let reference = (uint64(owner) shl 32) or uint32(slot)
+  case kind
+  of ArrayValue:
+    Value(kind: ArrayValue, reference: reference)
+  of BlobValue:
+    Value(kind: BlobValue, reference: reference)
+  else:
+    raise newException(BasicError, "invalid BASIC buffer type")
+
+proc bufferOwner*(value: Value): uint32 =
+  ## Reads the generation of an opaque array or blob reference.
+  if value.kind notin {ArrayValue, BlobValue}:
+    raise newException(BasicError, "BASIC value must be an array or blob")
+  uint32(value.reference shr 32)
+
+proc bufferSlot*(value: Value): int32 =
+  ## Reads the slot of an opaque array or blob reference.
+  if value.kind notin {ArrayValue, BlobValue}:
+    raise newException(BasicError, "BASIC value must be an array or blob")
+  cast[int32](uint32(value.reference))
 
 converter toValue*(value: int32): Value {.inline, raises: [].} =
   ## Wraps an integer without changing its representation.
@@ -70,7 +97,7 @@ proc asFixed*(value: Value): Fixed {.inline, raises: [BasicError].} =
     fixed(value.integer)
   of FixedValue:
     value.decimal
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 proc asBool*(value: Value): bool {.inline, raises: [BasicError].} =
@@ -80,7 +107,7 @@ proc asBool*(value: Value): bool {.inline, raises: [BasicError].} =
     value.integer != 0
   of FixedValue:
     value.decimal != FixedZero
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 proc asInt*(value: Value): int32 {.inline, raises: [BasicError].} =
@@ -92,7 +119,7 @@ proc asInt*(value: Value): int32 {.inline, raises: [BasicError].} =
     if value.decimal.fraction != 0:
       raise newException(BasicError, "BASIC value must be an exact int32")
     value.decimal.toInt
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 proc `$`*(value: Value): string {.raises: [BasicError].} =
@@ -102,7 +129,7 @@ proc `$`*(value: Value): string {.raises: [BasicError].} =
     $value.integer
   of FixedValue:
     $value.decimal
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 template fixedResult(expression: untyped): Value =
@@ -140,7 +167,7 @@ proc `-`*(value: Value): Value {.inline, raises: [BasicError].} =
     toValue(0'i32 -% value.integer)
   of FixedValue:
     toValue(-value.decimal)
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 proc `/`*(left, right: Value): Value {.inline, raises: [BasicError].} =
@@ -183,7 +210,7 @@ proc bitInteger(value: Value): int32 {.inline, raises: [BasicError].} =
     if fraction > 32768'u16 or
       (fraction == 32768'u16 and (result and 1) != 0):
         inc result
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 proc `not`*(value: Value): Value {.inline, raises: [BasicError].} =
@@ -217,7 +244,7 @@ proc scaled(value: Value): int64 {.inline, raises: [BasicError].} =
     int64(value.integer) * FixedScale
   of FixedValue:
     int64(int32(value.decimal))
-  of StringValue:
+  of StringValue, ArrayValue, BlobValue:
     raise newException(BasicError, "BASIC value must be numeric")
 
 proc `==`*(left, right: Value): bool {.inline, raises: [BasicError].} =
