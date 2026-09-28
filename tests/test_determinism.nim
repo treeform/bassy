@@ -42,6 +42,8 @@ proc number(value: Value): string =
     return "i:" & $value.asInt
   of FixedValue:
     return "f:" & $int32(value.asFixed)
+  of ArrayValue, BlobValue:
+    raise newException(BasicError, "numeric trace cannot contain buffers")
   of StringValue:
     raise newException(ValueError, "expected a numeric replay value")
 
