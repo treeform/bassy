@@ -771,6 +771,38 @@ block:
     report(&"compiled code refuses offset {offset}",
       (not jitSupported()) or "outside the program" in refused, refused)
 
+## Compiling from inside compiled code
+
+block:
+  # A host callback that compiles and runs another program while this one
+  # is running as machine code must not open code pages for writing
+  # beneath live frames. That compile is refused, the inner program runs
+  # on the interpreter, and compiling works again once the outer returns.
+  let inner = compile("x = 0\nwhile x < 50\n  x = x + 2\nwend\n")
+  var innerCompiled = -1
+  var innerResult = 0'i32
+  var host = initHost()
+  let nest: ContextHostProc = proc(runtime: Runtime,
+      arguments: openArray[Value]): Value =
+    var other = initRuntime(inner)
+    innerCompiled = other.compileNative()
+    discard other.run()
+    innerResult = other.getGlobal("x")
+    toValue(innerResult)
+  discard host.addFunction("nest", 0, nest)
+  let program = compile("a = nest()\nb = a + 1\n", host)
+  var runtime = initRuntime(program, host)
+  discard runtime.compileNative()
+  discard runtime.run()
+  report("compiling beneath compiled frames is refused",
+    (not jitSupported()) or innerCompiled == 0, $innerCompiled)
+  report("the refused program still runs, interpreted",
+    innerResult == 50 and runtime.getGlobal("b") == 51,
+    &"{innerResult} {runtime.getGlobal(\"b\")}")
+  var after = initRuntime(inner)
+  report("compiling works again once compiled code returns",
+    (not jitSupported()) or after.compileNative() == inner.instructions)
+
 if failures > 0:
   quit($failures & " safety checks failed")
 echo "native compilation is indistinguishable from interpretation"

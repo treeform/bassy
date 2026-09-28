@@ -20,7 +20,8 @@
 import
   bytecode, machine, numbers, texts
 
-export machine.jitSupported
+export machine.jitSupported, machine.enterCompiledCode,
+  machine.leaveCompiledCode, machine.runningCompiledCode
 
 const
   NativeArm64* = NativeCode and defined(arm64)
@@ -3701,6 +3702,11 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
     return nil
   else:
     if not layoutMatches() or code.len == 0 or routines.len == 0:
+      return nil
+    # Writing code pages from a thread that is running compiled code would
+    # open the write gate beneath live frames, so such a compile is
+    # refused and the program runs on the interpreter instead.
+    if runningCompiledCode():
       return nil
     if limits.frames <= 0 or limits.slots < 0:
       return nil

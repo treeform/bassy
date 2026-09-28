@@ -4416,7 +4416,12 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
   )
   runtime.publishStorage(context.addr)
   runtime.printer = print
-  let status = runtime.machine.invoke(context)
+  enterCompiledCode()
+  let status =
+    try:
+      runtime.machine.invoke(context)
+    finally:
+      leaveCompiledCode()
   runtime.printer = nil
   if status == NativeFailed:
     # The interpreter's code left the runtime exactly as it failed.

@@ -175,15 +175,41 @@ proc capacity*(buffer: CodeBuffer): int {.inline, raises: [].} =
   ## Returns the reserved byte count, rounded up to whole pages.
   buffer.capacity
 
+var
+  ## How deep this thread is in writes to code pages. On Apple Silicon the
+  ## gate is per thread and covers every such page at once, so only the
+  ## outermost write may open it and only the outermost may close it.
+  writeDepth {.threadvar.}: int
+  ## How deep this thread is in running compiled code. Pages must not be
+  ## opened for writing while compiled frames are live beneath.
+  runDepth {.threadvar.}: int
+
 proc beginWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Makes the pages writable on platforms that enforce write-xor-execute.
   when NativeCode and AppleSilicon:
-    jitWriteProtect(0)
+    if writeDepth == 0:
+      jitWriteProtect(0)
+  inc writeDepth
 
 proc endWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Restores execute permission after a batch of writes.
+  dec writeDepth
   when NativeCode and AppleSilicon:
-    jitWriteProtect(1)
+    if writeDepth == 0:
+      jitWriteProtect(1)
+
+proc enterCompiledCode*() {.raises: [].} =
+  ## Records that this thread is about to run compiled code.
+  inc runDepth
+
+proc leaveCompiledCode*() {.raises: [].} =
+  ## Records that this thread has come back out of compiled code.
+  dec runDepth
+
+proc runningCompiledCode*(): bool {.raises: [].} =
+  ## Reports whether compiled frames are live on this thread, in which case
+  ## no code page may be written from it.
+  runDepth > 0
 
 proc write*(buffer: var CodeBuffer, source: pointer, size: int)
     {.raises: [BasicError].} =
@@ -194,11 +220,15 @@ proc write*(buffer: var CodeBuffer, source: pointer, size: int)
     fail("code buffer capacity exceeded")
   if size == 0:
     return
+  if runDepth > 0:
+    fail("code pages cannot be written while compiled code runs")
   buffer.beginWrite()
-  copyMem(
-    cast[pointer](cast[int](buffer.memory) + buffer.length), source, size
-  )
-  buffer.endWrite()
+  try:
+    copyMem(
+      cast[pointer](cast[int](buffer.memory) + buffer.length), source, size
+    )
+  finally:
+    buffer.endWrite()
   buffer.length += size
 
 proc write*(buffer: var CodeBuffer, words: openArray[uint32])
