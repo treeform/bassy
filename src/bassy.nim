@@ -272,6 +272,7 @@ type
     program: Program
     strings: TextStorage
     stringLiterals: seq[int32]
+    stringRoots: seq[Value]
     limits: Limits
     globals: seq[Value]
     memory: seq[Value]
@@ -3188,7 +3189,9 @@ proc initRuntimeState(
     allocatedBytes += cells * LogicalValueBytes
   if program.usesStrings:
     allocatedBytes += storageBytes(limits.maxStrings, limits.maxStringBytes) +
-      int64(program.literals.len) * 4
+      int64(program.literals.len) * 4 +
+      (globalCells + arrayCells + hostDataCells +
+        int64(program.literals.len)) * LogicalValueBytes
   if allocatedBytes > limits.maxMemoryBytes:
     fail("BASIC runtime exceeds the configured memory limit")
   for cells in [
@@ -3233,6 +3236,11 @@ proc initRuntimeState(
     result.strings = initTextStorage(
       limits.maxStrings, limits.maxStringBytes, limits.maxStringLength
     )
+    result.stringRoots = newSeq[Value](portableCells(
+      globalCells + arrayCells + hostDataCells +
+        int64(program.literals.len),
+      "too many BASIC string roots for this target"
+    ))
     result.stringLiterals = newSeq[int32](program.literals.len)
     for handle in result.stringLiterals.mitems:
       handle = -1
@@ -3301,7 +3309,35 @@ proc reset*(runtime: var Runtime) =
   runtime.finished = false
 
 proc restart*(runtime: var Runtime) =
-  ## Restarts execution and budgets while preserving globals and arrays.
+  ## Restarts execution and reclaims strings, preserving globals and arrays.
+  ## Host-held string Values must be fetched again after restarting.
+  if runtime.program.usesStrings:
+    let
+      globals = runtime.globals.len
+      cells = runtime.memory.len
+      literals = globals + cells + runtime.hostData.len
+    for i, value in runtime.globals:
+      runtime.stringRoots[i] = value
+    for i, value in runtime.memory:
+      runtime.stringRoots[globals + i] = value
+    for i, value in runtime.hostData:
+      runtime.stringRoots[globals + cells + i] = value
+    for i, handle in runtime.stringLiterals:
+      runtime.stringRoots[literals + i] =
+        if handle >= 0:
+          stringValue(runtime.strings.empty.stringOwner, handle)
+        else:
+          Value()
+    runtime.strings.reset(runtime.stringRoots)
+    for i in 0 ..< globals:
+      runtime.globals[i] = runtime.stringRoots[i]
+    for i in 0 ..< cells:
+      runtime.memory[i] = runtime.stringRoots[globals + i]
+    for i in 0 ..< runtime.hostData.len:
+      runtime.hostData[i] = runtime.stringRoots[globals + cells + i]
+    for i, handle in runtime.stringLiterals.mpairs:
+      let value = runtime.stringRoots[literals + i]
+      handle = if value.kind == StringValue: value.stringHandle else: -1
   runtime.registers.clear
   runtime.arguments.clear
   runtime.pc = runtime.program.routines[0].entry
@@ -3526,6 +3562,13 @@ proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
 proc getString*(runtime: Runtime, value: Value): string =
   ## Reads owned text without exposing raw arena handles.
   runtime.strings.get(value)
+
+template withString*(runtime: Runtime, value: Value, text, body: untyped) =
+  ## Borrows string bytes for a block that must not modify or restart the VM.
+  block:
+    let source = runtime
+    source.strings.withText(value, text):
+      body
 
 proc putString*(runtime: var Runtime, value: string): Value =
   ## Copies host text into bounded storage for a string-valued callback.
