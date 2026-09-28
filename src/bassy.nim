@@ -4352,6 +4352,11 @@ template handOver(context: ptr NativeContext, pc: int32,
   runtime.remainingWork = context.remainingWork
   var status = 0'i32
   try:
+    # An offset that is not the program's own cannot be looked up. The
+    # compiler proves none is ever reached, and this makes a missed proof
+    # an ordinary refusal rather than a defect the host did not expect.
+    if pc < 0 or int(pc) >= runtime.program.code.len:
+      fail("BASIC compiled code reached an offset outside the program")
     body
   except Exception as error:
     runtime.nativeError = error

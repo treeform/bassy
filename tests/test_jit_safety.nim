@@ -10,7 +10,7 @@
 ## the difference could be written to exploit it.
 
 import
-  std/[importutils, random, strformat],
+  std/[importutils, random, strformat, strutils],
   bassy {.all.},
   bassy/jit
 
@@ -749,6 +749,27 @@ wend
   let fast = relocated(true)
   report("buffers replaced by host code are followed, not written through",
     plain == fast, &"{plain} then {fast}")
+
+## Offsets outside the program
+
+block:
+  # No legal program reaches an offset outside itself. Should one ever be
+  # handed to compiled code anyway, it must end in an ordinary refusal,
+  # not a jump through memory past the table or a defect.
+  privateAccess(Runtime)
+  let program = compile("a = 1\nb = a + 1\n")
+  for offset in [int32(program.instructions), int32(program.instructions + 7),
+      -1'i32, high(int32)]:
+    var runtime = initRuntime(program)
+    discard runtime.compileNative()
+    runtime.pc = offset
+    var refused = ""
+    try:
+      discard runtime.run()
+    except BasicError as error:
+      refused = error.msg
+    report(&"compiled code refuses offset {offset}",
+      (not jitSupported()) or "outside the program" in refused, refused)
 
 if failures > 0:
   quit($failures & " safety checks failed")
