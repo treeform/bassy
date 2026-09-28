@@ -36,7 +36,8 @@ type
   NativeStatus* = enum
     ## Why compiled code returned to its caller.
     NativeCompleted,
-    NativeFailed
+    NativeFailed,
+    NativeRetired
 
   NativeContext* = object
     ## The interpreter state compiled code reads and writes. The frame and
@@ -939,10 +940,8 @@ when NativeArm64:
     e.code.loadWord(temp(0), Context, ContextBase)
     e.frameOf(RegistersBase, temp(0))
 
-  proc epilogue(e: var Emitter, status: NativeStatus)
-      {.raises: [BasicError].} =
-    ## Restores what the platform says to keep and returns a status.
-    e.code.loadImmediate(Word32, x0, int64(ord(status)))
+  proc restoreAndReturn(e: var Emitter) {.raises: [BasicError].} =
+    ## Restores what the platform says to keep and returns x0 as it is.
     e.code.loadPair(x19, x20, stackPointer, 16)
     e.code.loadPair(x21, x22, stackPointer, 32)
     e.code.loadPair(x23, x24, stackPointer, 48)
@@ -951,6 +950,17 @@ when NativeArm64:
     e.code.loadPair(framePointer, linkRegister, stackPointer, FrameBytes,
       true)
     e.code.returnToCaller()
+
+  proc epilogue(e: var Emitter, status: NativeStatus)
+      {.raises: [BasicError].} =
+    ## Restores what the platform says to keep and returns a status.
+    e.code.loadImmediate(Word32, x0, int64(ord(status)))
+    e.restoreAndReturn()
+
+  proc leaveWithAnswer(e: var Emitter) {.raises: [BasicError].} =
+    ## Returns whatever status the interpreter's code answered with.
+    e.code.moveRegister(Word32, x0, temp(0))
+    e.restoreAndReturn()
 
   ## Globals held in registers
   ##
@@ -1962,14 +1972,23 @@ elif NativeAmd64:
     e.code.loadWord(rcx, Context, ContextBase)
     e.slotAddress(RegistersBase, rcx)
 
-  proc epilogue(e: var Emitter, status: NativeStatus)
-      {.raises: [].} =
-    ## Restores what the platform says to keep and returns a status.
-    e.code.loadImmediate(Word32, rax, int64(ord(status)))
+  proc restoreAndReturn(e: var Emitter) {.raises: [].} =
+    ## Restores what the platform says to keep and returns rax as it is.
     e.code.addImmediate(Word64, rsp, Padding)
     for index in countdown(Saved.len - 1, 0):
       e.code.pop(Saved[index])
     e.code.returnToCaller()
+
+  proc epilogue(e: var Emitter, status: NativeStatus)
+      {.raises: [].} =
+    ## Restores what the platform says to keep and returns a status.
+    e.code.loadImmediate(Word32, rax, int64(ord(status)))
+    e.restoreAndReturn()
+
+  proc leaveWithAnswer(e: var Emitter) {.raises: [].} =
+    ## Returns whatever status the interpreter's code answered with.
+    e.code.moveRegister(Word32, rax, r10)
+    e.restoreAndReturn()
 
   ## Globals held in registers
   ##
@@ -3681,8 +3700,10 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     e.slowRoutine(failedLabel, ContextStep)
     e.place(hostLabel)
     e.slowRoutine(failedLabel, ContextHostStep)
+    # The interpreter's code answers with the status to leave with: a
+    # failure it raised, or the compiled program retired part way.
     e.place(failedLabel)
-    e.epilogue(NativeFailed)
+    e.leaveWithAnswer()
 
     let bytes = e.finish()
     var starts = newSeq[int](code.len + 1)

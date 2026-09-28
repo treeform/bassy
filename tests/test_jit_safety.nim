@@ -750,6 +750,58 @@ wend
   report("buffers replaced by host code are followed, not written through",
     plain == fast, &"{plain} then {fast}")
 
+block:
+  # Host code that shrinks a store the compiled program indexes directly.
+  # The indexes were proved against the old lengths, so the compiled
+  # program is retired and the rest runs interpreted, where every access
+  # is checked. The answer must be the interpreter's own, failure and all.
+  # Without bounds checks the interpreter itself has no defined answer.
+  when compileOption("boundChecks"):
+    var source = "dim cells(7)\n"
+    for index in 0 ..< 90:
+      source.add(&"g{index} = {index}\n")
+    source.add("""
+sub bump(n)
+  cells(n mod 8) = cells(n mod 8) + n
+end sub
+i = 0
+while i < 20
+  g80 = g80 + shrink(i)
+  cells(3) = cells(3) + g80
+  bump(i)
+  i = i + 1
+wend
+""")
+    for mode in ["globals", "no globals", "no cells", "registers"]:
+      proc shrunk(native: bool): string =
+        var host = initHost()
+        var calls = 0
+        let shrink: ContextHostProc = proc(runtime: Runtime,
+            arguments: openArray[Value]): Value =
+          privateAccess(Runtime)
+          inc calls
+          if calls == 5:
+            case mode
+            of "globals": runtime.globals = newSeq[Value](1)
+            of "no globals": runtime.globals.setLen(0)
+            of "no cells": runtime.memory.setLen(0)
+            else: runtime.registers.setLen(1)
+          toValue(1'i32)
+        discard host.addFunction("shrink", 1, shrink)
+        let program = compile(source, host)
+        var runtime = initRuntime(program, host)
+        if native:
+          discard runtime.compileNative()
+        try:
+          discard runtime.run()
+          result = "finished"
+        except Exception as error:
+          result = $error.name & ": " & error.msg
+      let plain = shrunk(false)
+      let fast = shrunk(true)
+      report(&"host code shrinking {mode} ends as the interpreter does",
+        plain == fast, &"{plain} then {fast}")
+
 ## Offsets outside the program
 
 block:

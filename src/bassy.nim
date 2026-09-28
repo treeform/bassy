@@ -226,6 +226,7 @@ type
     allocatedBytes: int64
     finished: bool
     machine: Machine
+    machineShape: array[6, int]
     printer: PrintProc
     nativeError: ref Exception
     handedBack: int64
@@ -3400,6 +3401,12 @@ proc handedBack*(runtime: Runtime): int64 {.inline.} =
   ## host calls, or about to fail. Everything else ran as machine code.
   runtime.handedBack
 
+proc storageShape(runtime: Runtime): array[6, int] {.raises: [].} =
+  ## Returns how long each store compiled code indexes directly is. The
+  ## compiler proved every index it emits against exactly these.
+  [runtime.globals.len, runtime.memory.len, runtime.hostData.len,
+    runtime.frames.len, runtime.arguments.len, runtime.registers.len]
+
 proc compileNative*(runtime: var Runtime): int =
   ## Compiles this program to machine code and returns how many bytecode
   ## offsets now run natively: all of them, or none where the target has
@@ -3432,6 +3439,7 @@ proc compileNative*(runtime: var Runtime): int =
     textLayoutMatches()
   )
   if runtime.machine != nil:
+    runtime.machineShape = runtime.storageShape
     return runtime.program.code.len
 
 proc arrayExtent*(program: Program, id: int32): (int32, int32) {.inline.} =
@@ -4368,6 +4376,13 @@ template handOver(context: ptr NativeContext, pc: int32,
   except Exception as error:
     runtime.nativeError = error
     status = 1
+  if status == 0 and runtime.storageShape != runtime.machineShape:
+    # Host code resized storage the compiled program indexes by offsets
+    # proved at compile time. None of them can be trusted now, so the
+    # program is retired and the rest of the run is interpreted, where
+    # every access is checked.
+    runtime.machine = nil
+    status = int32(ord(NativeRetired))
   if status == 0:
     context.pc = runtime.pc
     runtime.publishStorage(context)
@@ -4399,6 +4414,14 @@ proc nativeHostCall(context: ptr NativeContext, pc: int32): int32
 proc runMachine(runtime: var Runtime, print: PrintProc) =
   ## Runs the compiled program from wherever the runtime stands until it
   ## halts, or raises whatever the interpreter's code raised on its way.
+  if runtime.storageShape != runtime.machineShape:
+    # Storage changed shape since compiling, so the program is retired
+    # before it runs rather than part way through.
+    runtime.machine = nil
+    return
+  # Held here as well, so retiring the program part way cannot free the
+  # code it is still returning through.
+  let machine = runtime.machine
   var context = NativeContext(
     table: runtime.machine.tableAddress,
     base: runtime.base,
@@ -4419,7 +4442,7 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
   enterCompiledCode()
   let status =
     try:
-      runtime.machine.invoke(context)
+      machine.invoke(context)
     finally:
       leaveCompiledCode()
   runtime.printer = nil
@@ -4428,6 +4451,10 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     let error = runtime.nativeError
     runtime.nativeError = nil
     raise error
+  if status == NativeRetired:
+    # The interpreter's code left the runtime where it stopped, and the
+    # run carries on interpreted from there.
+    return
   runtime.remainingInstructions = context.remainingInstructions
   runtime.remainingWork = context.remainingWork
   runtime.pc = context.pc
