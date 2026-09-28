@@ -845,7 +845,8 @@ when NativeArm64:
     ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
     ## frame first hands the shared parameters back to the caller. Leaving
     ## a sub outright only goes this way when its own frame is on top.
-    ## Nothing is written until both refusals have been passed.
+    ## Nothing is written until every refusal has been passed, the offset
+    ## it would carry on at included, so a refusal leaves the frame on.
     let depth = temp(0)
     let frame = temp(1)
     let base = temp(2)
@@ -857,23 +858,27 @@ when NativeArm64:
     if exitSub:
       e.code.loadByte(temp(4), frame, FrameTag)
       e.jumpIfNotZero(temp(4), slow)
+    e.code.loadWord(resume, frame, FrameReturn)
+    e.withinProgram(resume)
     e.code.storeWord(depth, Context, ContextDepth)
-    e.code.loadWord(base, frame, FrameBase)
     if parameters > 0:
       let plain = e.label()
       e.code.loadByte(temp(4), frame, FrameTag)
       e.code.compareImmediate(Word32, temp(4), 1)
       e.code.branchIf(NotEqualCondition, plain)
+      e.code.loadWord(base, frame, FrameBase)
       e.frameOf(Far, base)
       e.copyValues(Far, RegistersBase, int(parameters))
       e.place(plain)
+    # A long copy works through the same registers, so what it needs from
+    # the frame is read again after it rather than kept across it.
+    e.code.loadWord(base, frame, FrameBase)
+    e.code.loadWord(resume, frame, FrameReturn)
     e.code.storeWord(base, Context, ContextBase)
     e.code.loadWord(temp(4), frame, FrameRoutine)
     e.code.storeWord(temp(4), Context, ContextRoutine)
-    e.code.loadWord(resume, frame, FrameReturn)
     e.code.storeWord(resume, Context, ContextOffset)
     e.frameOf(RegistersBase, base)
-    e.withinProgram(resume)
     e.code.addRegister(Word64, temp(4), TableBase, resume, 3)
     e.code.loadDouble(temp(4), temp(4), 0)
     e.code.jumpRegister(temp(4))
@@ -1873,7 +1878,8 @@ elif NativeAmd64:
     ## Pops a frame and jumps to wherever it said to carry on. A GOSUB
     ## frame first hands the shared parameters back to the caller. Leaving
     ## a sub outright only goes this way when its own frame is on top.
-    ## Nothing is written until both refusals have been passed.
+    ## Nothing is written until every refusal has been passed, the offset
+    ## it would carry on at included, so a refusal leaves the frame on.
     let depth = rax
     let frame = rcx
     let base = rsi
@@ -1889,6 +1895,8 @@ elif NativeAmd64:
       e.code.loadByteZeroed(Spare, frame, FrameTag)
       e.code.testRegister(Word32, Spare, Spare)
       e.jumpWhen(NotEqualCondition, slow)
+    e.code.loadWord(Cell, frame, FrameReturn)
+    e.withinProgram(Cell)
     e.code.storeWord(depth, Context, ContextDepth)
     e.code.loadWord(base, frame, FrameBase)
     if parameters > 0:
@@ -1907,7 +1915,6 @@ elif NativeAmd64:
     e.code.storeWord(Spare, Context, ContextOffset)
     e.code.moveRegister(Word32, r8, base)
     e.slotAddress(RegistersBase, r8)
-    e.withinProgram(Spare)
     e.contextField(rax, ContextTable)
     e.code.shiftLeftImmediate(Word64, Spare, 3)
     e.code.addRegister(Word64, rax, Spare)

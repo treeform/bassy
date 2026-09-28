@@ -802,6 +802,35 @@ wend
       report(&"host code shrinking {mode} ends as the interpreter does",
         plain == fast, &"{plain} then {fast}")
 
+block:
+  # Host code that points a live frame's return at no offset at all. The
+  # return must refuse before it pops anything, so the frame is still on
+  # and a second run refuses the same way rather than carrying on a call
+  # further down.
+  privateAccess(Runtime)
+  privateAccess(Frame)
+  var host = initHost()
+  let corrupt: ContextHostProc = proc(runtime: Runtime,
+      arguments: openArray[Value]): Value =
+    runtime.frames[int(runtime.depth) - 1].returnPc = 9999
+    toValue(0'i32)
+  discard host.addFunction("corrupt", 0, corrupt)
+  let program = compile("sub inner()\n  a = corrupt()\nend sub\ninner()\nb = 1\n",
+    host)
+  var runtime = initRuntime(program, host)
+  if runtime.compileNative() > 0:
+    var messages: seq[string]
+    for attempt in 0 .. 1:
+      try:
+        discard runtime.run()
+        messages.add("finished")
+      except BasicError as error:
+        messages.add(error.msg)
+    report("a corrupted return offset is refused before the frame is popped",
+      messages.len == 2 and "outside the program" in messages[0] and
+        messages[1] == messages[0] and runtime.depth == 1,
+      &"{messages} depth {runtime.depth}")
+
 ## Offsets outside the program
 
 block:

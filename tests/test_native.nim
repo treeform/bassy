@@ -384,6 +384,23 @@ while 1
 wend
 """, limits)
 
+agree("GOSUB inside a sub with many parameters", Preamble & """
+sub many(p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
+  gosub more
+  gosub more
+  a = a + p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 + p10
+  exit sub
+more:
+  p0 = p0 + 1
+  p10 = p10 + 100
+  b = b + 1
+  return
+end sub
+many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+many(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110)
+c = a * 2 + b
+""")
+
 agree("select, for, do, and on-goto", Preamble & """
 for i = 1 to 10 step 3
   select case i
