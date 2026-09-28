@@ -20,6 +20,7 @@ proc describe(value: Value): string =
   of IntegerValue: $value.asInt
   of FixedValue: $value.asFixed
   of StringValue: "<string>"
+  of ArrayValue, BlobValue: "<buffer>"
 
 proc execute(source: string, native: bool): Outcome =
   ## Runs one script with or without native compilation.

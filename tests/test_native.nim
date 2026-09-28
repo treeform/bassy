@@ -37,6 +37,10 @@ proc render(runtime: Runtime, value: Value): string =
       "s" & runtime.getString(value).escape
     except CatchableError:
       "s<stale>"
+  of ArrayValue, BlobValue:
+    # Each runtime has its own buffer generation, so only the slot is
+    # something the two paths must agree on.
+    "b" & $value.kind & $value.bufferSlot
 
 proc makeHost(): Host =
   ## Builds host data and functions of every kind a script can call.

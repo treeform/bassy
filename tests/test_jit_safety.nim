@@ -217,6 +217,7 @@ proc execute(source: string, native: bool, maximum: int64): Outcome =
       of IntegerValue: int64(value.asInt)
       of FixedValue: int64(int32(value.asFixed))
       of StringValue: -1'i64
+      of ArrayValue, BlobValue: -2'i64
     )
   let (instructions, work) = runtime.remainingBudget
   result.instructions = instructions

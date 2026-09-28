@@ -2931,7 +2931,10 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
           e.writeWhole(slot(item.a), 0)
         else:
           runSlow()
-      of LoadStringOp, PrintTextOp, PrintValueOp, PrintNewlineOp:
+      of LoadStringOp, PrintTextOp, PrintValueOp, PrintNewlineOp,
+          BufferGetOp, BufferSetOp:
+        # Returned arrays live in host buffers, reached only through the
+        # checked views the interpreter's own code uses.
         runSlow()
 
       when not specialised:

@@ -51,6 +51,8 @@ type
     JumpUnlessGlobalModuloEqualZeroOp,
     ArrayGetOp,
     ArraySetOp,
+    BufferGetOp,
+    BufferSetOp,
     ArrayAddGlobalsOp,
     SetArgumentOp,
     SetArgumentImmediateOp,

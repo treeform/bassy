@@ -5,7 +5,7 @@
 
 import
   std/[strutils, tables],
-  bassy/[bytecode, jit, numbers, texts]
+  bassy/[buffers, bytecode, jit, numbers, texts]
 
 export bytecode, jit, numbers
 
@@ -57,6 +57,7 @@ type
     maxRegisters*: int
     maxSyntaxDepth*: int
     maxCallDepth*: int
+    maxNativeMemoryBytes*: int64
     maxMemoryBytes*: int64
     maxInstructions*: int64
     maxWorkUnits*: int64
@@ -202,7 +203,9 @@ type
   Runtime* = ref object
     program: Program
     strings: TextStorage
+    buffers: BufferStorage
     stringLiterals: seq[int32]
+    stringRoots: seq[Value]
     limits: Limits
     globals: seq[Value]
     memory: seq[Value]
@@ -232,6 +235,7 @@ type
     base: int32
     length: int32
     writable: bool
+    buffer: Value
 
   Expr = object
     text: bool
@@ -300,6 +304,7 @@ proc defaultLimits*(): Limits =
     maxRegisters: DefaultMaxRegisters,
     maxSyntaxDepth: DefaultMaxSyntaxDepth,
     maxCallDepth: DefaultMaxCallDepth,
+    maxNativeMemoryBytes: DefaultMaxMemoryBytes,
     maxMemoryBytes: DefaultMaxMemoryBytes,
     maxInstructions: DefaultMaxInstructions,
     maxWorkUnits: DefaultMaxWorkUnits,
@@ -339,6 +344,7 @@ proc validate(limits: Limits) =
       limits.maxRegisters <= 0 or
       limits.maxSyntaxDepth <= 0 or
       limits.maxCallDepth <= 0 or
+      limits.maxNativeMemoryBytes < 0 or
       limits.maxMemoryBytes < 0 or
       limits.maxInstructions < 0 or
       limits.maxWorkUnits < 0 or
@@ -627,7 +633,7 @@ proc isReserved(name: string, functions = true): bool =
   if functions and textFunction(name) != NoTextFunction:
     return true
   case name
-  of "and", "call", "case", "data", "dim", "do", "else", "elseif", "end", "eqv",
+  of "and", "call", "case", "dim", "do", "else", "elseif", "end", "eqv",
       "exit", "false", "for", "gosub", "goto", "if", "imp", "is", "let",
       "loop", "mod", "next", "not", "on", "or", "print", "rem",
       "return", "select", "step", "stop", "sub", "then", "to", "true",
@@ -1097,7 +1103,8 @@ proc collectDeclarations(compiler: var Compiler) =
         pos,
         nameToken
       )
-    elif compiler.tokens[pos].isKeyword("data"):
+    elif compiler.tokens[pos].isKeyword("data") and
+      compiler.tokens[pos + 1].kind == IdentifierToken:
       compiler.collectData(pos)
     elif compiler.tokens[pos].isKeyword("dim"):
       inc pos
@@ -1460,11 +1467,21 @@ proc parsePrimary(parser: var Parser): Expr =
         ) >= 0:
       fail(token, "subroutines do not return expression values")
     let parameter = parser.parameterIds.getOrDefault(token.text, -1'i32)
-    if parameter >= 0:
+    if parameter >= 0 and parser.current.kind != LeftParenToken:
       return Expr(reg: parameter, text: token.text.stringName)
-    let id = parser.compiler[].globalId(token.text, token)
     let destination = parser.allocateTemp
-    discard parser.emit(LoadGlobalOp, destination, id)
+    if parameter >= 0:
+      discard parser.emit(MoveOp, destination, parameter)
+    else:
+      let id = parser.compiler[].globalId(token.text, token)
+      discard parser.emit(LoadGlobalOp, destination, id)
+    if parser.current.kind == LeftParenToken:
+      discard parser.advance
+      var index = parser.parseExpression
+      discard parser.expectKind(RightParenToken, "expected ')' after index")
+      parser.materialize(index)
+      discard parser.emit(BufferGetOp, destination, destination, index.reg)
+      parser.release(index)
     result = Expr(
       reg: destination, temporary: true, text: token.text.stringName
     )
@@ -1824,9 +1841,8 @@ proc parseAssignment(parser: var Parser, name: Token) =
   let arrayId =
     parser.compiler[].program.arrayIds.getOrDefault(name.text, -1'i32)
   if parser.current.kind == LeftParenToken:
-    if arrayId < 0:
-      fail(name, "only arrays can be indexed")
-    if parser.compiler[].program.arrays[int(arrayId)].initial.len > 0:
+    if arrayId >= 0 and
+      parser.compiler[].program.arrays[int(arrayId)].initial.len > 0:
       fail(name, "DATA arrays are read-only")
     let assignmentStart = parser.code.len
     inc parser.pos
@@ -1838,7 +1854,17 @@ proc parseAssignment(parser: var Parser, name: Token) =
       fail(name, "BASIC assignment type mismatch")
     parser.materialize(index)
     parser.materialize(value)
-    if not parser.fuseArrayAssignment(
+    if arrayId < 0:
+      let handle = parser.allocateTemp
+      let parameter = parser.parameterIds.getOrDefault(name.text, -1'i32)
+      if parameter >= 0:
+        discard parser.emit(MoveOp, handle, parameter)
+      else:
+        let id = parser.compiler[].globalId(name.text, name)
+        discard parser.emit(LoadGlobalOp, handle, id)
+      discard parser.emit(BufferSetOp, handle, index.reg, value.reg)
+      parser.release(Expr(reg: handle, temporary: true))
+    elif not parser.fuseArrayAssignment(
       assignmentStart,
       arrayId,
       index,
@@ -2583,7 +2609,8 @@ proc parseStatement(parser: var Parser) =
       return
   if parser.atKeyword("dim"):
     parser.parseDim
-  elif parser.atKeyword("data"):
+  elif parser.atKeyword("data") and
+    parser.peek(1).kind == IdentifierToken:
     parser.parseData
   elif parser.atKeyword("if"):
     parser.parseIf
@@ -2647,7 +2674,11 @@ proc parseStatement(parser: var Parser) =
       parser.compiler[].program.arrayIds.getOrDefault(name.text, -1'i32) >= 0:
         parser.parseAssignment(name)
     elif parser.current.kind == LeftParenToken:
-      parser.parseCall(name)
+      if parser.compiler[].program.hostFunctionIds.hasKey(name.text) or
+        parser.compiler[].program.routineIds.hasKey(name.text):
+          parser.parseCall(name)
+      else:
+        parser.parseAssignment(name)
     else:
       fail(name, "expected an assignment or subroutine call")
   else:
@@ -2684,7 +2715,7 @@ proc workCost(item: Instruction): int32 {.inline.} =
     9
   of CallOp, GosubOp:
     8
-  of ArrayGetOp, ArraySetOp:
+  of ArrayGetOp, ArraySetOp, BufferGetOp, BufferSetOp:
     2
   else:
     1
@@ -2928,6 +2959,10 @@ proc verify(program: Program) =
           JumpUnlessGlobalModuloEqualZeroOp:
         requireGlobal(item.a)
         requireTarget(item.c)
+      of BufferGetOp, BufferSetOp:
+        requireRegister(item.a)
+        requireRegister(item.b)
+        requireRegister(item.c)
       of ArrayGetOp:
         requireRegister(item.a)
         requireArray(item.b)
@@ -3126,7 +3161,9 @@ proc initRuntimeState(
     allocatedBytes += cells * LogicalValueBytes
   if program.usesStrings:
     allocatedBytes += storageBytes(limits.maxStrings, limits.maxStringBytes) +
-      int64(program.literals.len) * 4
+      int64(program.literals.len) * 4 +
+      (globalCells + arrayCells + hostDataCells +
+        int64(program.literals.len)) * LogicalValueBytes
   if allocatedBytes > limits.maxMemoryBytes:
     fail("BASIC runtime exceeds the configured memory limit")
   for cells in [
@@ -3142,6 +3179,11 @@ proc initRuntimeState(
   result = Runtime(
     program: program,
     limits: limits,
+    buffers: BufferStorage(
+      maximum: limits.maxNativeMemoryBytes,
+      maxCount: limits.maxArrays,
+      maxElements: limits.maxArrayElements
+    ),
     globals: newSeq[Value](portableCells(
       globalCells,
       "too many BASIC globals for this target"
@@ -3171,6 +3213,11 @@ proc initRuntimeState(
     result.strings = initTextStorage(
       limits.maxStrings, limits.maxStringBytes, limits.maxStringLength
     )
+    result.stringRoots = newSeq[Value](portableCells(
+      globalCells + arrayCells + hostDataCells +
+        int64(program.literals.len),
+      "too many BASIC string roots for this target"
+    ))
     result.stringLiterals = newSeq[int32](program.literals.len)
     for handle in result.stringLiterals.mitems:
       handle = -1
@@ -3216,6 +3263,10 @@ proc initRuntime*(
 
 proc reset*(runtime: var Runtime) =
   ## Restores zeroed variables and the program's immutable DATA values.
+  runtime.buffers.reset
+  for value in runtime.hostData.mitems:
+    if value.kind in {ArrayValue, BlobValue}:
+      value = Value()
   runtime.globals.clear
   runtime.memory.clear
   for array in runtime.program.arrays:
@@ -3245,7 +3296,35 @@ proc reset*(runtime: var Runtime) =
   runtime.finished = false
 
 proc restart*(runtime: var Runtime) =
-  ## Restarts execution and budgets while preserving globals and arrays.
+  ## Restarts execution and reclaims strings, preserving globals and arrays.
+  ## Host-held string Values must be fetched again after restarting.
+  if runtime.program.usesStrings:
+    let
+      globals = runtime.globals.len
+      cells = runtime.memory.len
+      literals = globals + cells + runtime.hostData.len
+    for i, value in runtime.globals:
+      runtime.stringRoots[i] = value
+    for i, value in runtime.memory:
+      runtime.stringRoots[globals + i] = value
+    for i, value in runtime.hostData:
+      runtime.stringRoots[globals + cells + i] = value
+    for i, handle in runtime.stringLiterals:
+      runtime.stringRoots[literals + i] =
+        if handle >= 0:
+          stringValue(runtime.strings.empty.stringOwner, handle)
+        else:
+          Value()
+    runtime.strings.reset(runtime.stringRoots)
+    for i in 0 ..< globals:
+      runtime.globals[i] = runtime.stringRoots[i]
+    for i in 0 ..< cells:
+      runtime.memory[i] = runtime.stringRoots[globals + i]
+    for i in 0 ..< runtime.hostData.len:
+      runtime.hostData[i] = runtime.stringRoots[globals + cells + i]
+    for i, handle in runtime.stringLiterals.mpairs:
+      let value = runtime.stringRoots[literals + i]
+      handle = if value.kind == StringValue: value.stringHandle else: -1
   runtime.registers.clear
   runtime.arguments.clear
   runtime.pc = runtime.program.routines[0].entry
@@ -3429,6 +3508,8 @@ proc requireValue(runtime: Runtime, value: Value) =
   ## Enforces the compiled numeric policy at every host entry point.
   if value.kind == StringValue:
     discard runtime.strings.length(value)
+  if value.kind in {ArrayValue, BlobValue}:
+    runtime.buffers.validate(value)
   if runtime.program.disableFixed and value.kind == FixedValue:
     fail("BASIC fixed-point values are disabled")
 
@@ -3526,7 +3607,14 @@ proc arrayView*(
     handle: Value,
     writable = false
 ): ArrayView =
-  ## Resolves a program-local numeric array handle without allocating.
+  ## Resolves a program-local or returned numeric array without allocating.
+  if handle.kind == ArrayValue:
+    return ArrayView(
+      runtime: runtime,
+      buffer: handle,
+      length: int32(runtime.buffers.length(handle)),
+      writable: writable
+    )
   let id = handle.asInt
   if id < 0 or int(id) >= runtime.program.arrays.len:
     fail("invalid BASIC array handle")
@@ -3548,6 +3636,10 @@ proc len*(view: ArrayView): int {.inline.} =
 
 proc overlaps*(left, right: ArrayView): bool {.inline.} =
   ## Tests whether two views share any backing array storage.
+  if left.buffer.kind == ArrayValue or right.buffer.kind == ArrayValue:
+    return left.runtime == right.runtime and
+      left.buffer.kind == ArrayValue and right.buffer.kind == ArrayValue and
+      left.buffer.bufferOwner == right.buffer.bufferOwner
   left.runtime == right.runtime and
     left.base < right.base + right.length and
     right.base < left.base + left.length
@@ -3556,6 +3648,8 @@ proc `[]`*(view: ArrayView, index: int): Value {.inline.} =
   ## Reads one element with bounds checks even in release builds.
   if index < 0 or index >= view.len:
     fail("native array index is outside the array")
+  if view.buffer.kind == ArrayValue:
+    return view.runtime.buffers.get(view.buffer, index)
   view.runtime.memory[int(view.base) + index]
 
 proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
@@ -3564,14 +3658,88 @@ proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
     fail("native array view is read-only")
   if index < 0 or index >= view.len:
     fail("native array index is outside the array")
-  if value.kind == StringValue:
+  if value.kind notin {IntegerValue, FixedValue}:
     fail("native math requires numeric values")
   view.runtime.requireValue(value)
-  view.runtime.memory[int(view.base) + index] = value
+  if view.buffer.kind == ArrayValue:
+    view.runtime.buffers.put(view.buffer, index, value)
+  else:
+    view.runtime.memory[int(view.base) + index] = value
+
+proc collectBuffers*(runtime: Runtime) =
+  ## Reclaims buffers unreachable from VM values between native calls.
+  runtime.buffers.mark(runtime.globals)
+  runtime.buffers.mark(runtime.memory)
+  runtime.buffers.mark(runtime.registers)
+  runtime.buffers.mark(runtime.arguments)
+  runtime.buffers.mark(runtime.hostData)
+  runtime.buffers.sweep()
+
+proc nativeMemoryBytes*(runtime: Runtime): int64 =
+  ## Returns live buffer and externally reserved native storage bytes.
+  runtime.buffers.memoryBytes
+
+proc checkNativeMemory*(runtime: Runtime, bytes: int64) =
+  ## Checks temporary or retained native capacity without charging it.
+  runtime.buffers.reserve(bytes)
+
+proc reserveNativeMemory*(runtime: Runtime, bytes: int64) =
+  ## Charges host model or scratch storage before allocation.
+  runtime.buffers.reserve(bytes)
+  runtime.buffers.external += bytes
+
+proc releaseNativeMemory*(runtime: Runtime, bytes: int64) =
+  ## Releases a previous host reservation without accepting underflow.
+  if bytes < 0 or bytes > runtime.buffers.external:
+    fail("invalid BASIC native memory release")
+  runtime.buffers.external -= bytes
+
+proc putArray*(runtime: Runtime, values: openArray[Value]): Value =
+  ## Returns a fresh owned numeric array from a native callback.
+  for value in values:
+    runtime.requireValue(value)
+  runtime.buffers.putArray(values)
+
+proc createBlob*(runtime: Runtime): Value =
+  ## Creates an empty mutable binary state value.
+  runtime.buffers.createBlob()
+
+proc getBlob*(runtime: Runtime, value: Value): string =
+  ## Reads opaque bytes for a transactional host computation.
+  runtime.buffers.blob(value)
+
+proc blobBinding*(runtime: Runtime, value: Value): string =
+  ## Reads the host-defined model identity attached to state.
+  runtime.buffers.binding(value)
+
+proc putBlob*(runtime: Runtime, value: Value, bytes: string, binding = "") =
+  ## Commits validated state bytes and their host-defined binding together.
+  runtime.buffers.putBlob(value, bytes, binding)
+
+proc blobCreate(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Implements the BASIC empty-state constructor.
+  runtime.createBlob()
+
+proc blobClear(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Clears bytes and model binding while preserving the handle and aliases.
+  runtime.putBlob(arguments[0], "")
+  toValue(0)
+
+proc addBufferFunctions*(host: var Host) =
+  ## Enables explicit mutable state construction and reset in BASIC.
+  discard host.addFunction("blobCreate", 0, blobCreate, 1)
+  discard host.addFunction("blobClear", 1, blobClear, 1)
 
 proc getString*(runtime: Runtime, value: Value): string =
   ## Reads owned text without exposing raw arena handles.
   runtime.strings.get(value)
+
+template withString*(runtime: Runtime, value: Value, text, body: untyped) =
+  ## Borrows string bytes for a block that must not modify or restart the VM.
+  block:
+    let source = runtime
+    source.strings.withText(value, text):
+      body
 
 proc putString*(runtime: var Runtime, value: string): Value =
   ## Copies host text into bounded storage for a string-valued callback.
@@ -3812,6 +3980,7 @@ template callHost(runtime: Runtime, item: Instruction) =
   template callback(): untyped = runtime.hostCallbacks[functionId]
   var value: Value
   if callback.context != nil:
+    runtime.collectBuffers()
     if count == 0:
       value = callback.context(runtime, [])
     else:
@@ -4015,6 +4184,18 @@ template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
   of ArraySetOp:
     let index = runtime.checkedArrayIndex(item.a, register(item.b))
     runtime.memory[index] = register(item.c)
+    inc runtime.pc
+  of BufferGetOp:
+    if register(item.b).kind != ArrayValue:
+      fail("BASIC indexed value must be a returned array")
+    let view = runtime.arrayView(register(item.b))
+    register(item.a) = view[int(register(item.c).asInt)]
+    inc runtime.pc
+  of BufferSetOp:
+    if register(item.a).kind != ArrayValue:
+      fail("BASIC indexed value must be a returned array")
+    let view = runtime.arrayView(register(item.a), writable = true)
+    view[int(register(item.b).asInt)] = register(item.c)
     inc runtime.pc
   of ArrayAddGlobalsOp:
     let index = runtime.checkedArrayIndex(
