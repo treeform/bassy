@@ -183,6 +183,12 @@ var
   ## How deep this thread is in running compiled code. Pages must not be
   ## opened for writing while compiled frames are live beneath.
   runDepth {.threadvar.}: int
+  ##
+  ## Both are per thread, as the gate is. Another thread compiling opens
+  ## only its own gate, and may write any such page while it is open; the
+  ## thread running compiled code keeps its gate closed throughout, so a
+  ## script cannot reach that window. Compiling from several threads at
+  ## once is host code the host is trusted with.
 
 proc beginWrite(buffer: var CodeBuffer) {.raises: [].} =
   ## Makes the pages writable on platforms that enforce write-xor-execute.
