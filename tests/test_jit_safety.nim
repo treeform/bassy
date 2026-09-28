@@ -10,8 +10,8 @@
 ## the difference could be written to exploit it.
 
 import
-  std/[random, strformat],
-  bassy,
+  std/[importutils, random, strformat],
+  bassy {.all.},
   bassy/jit
 
 var failures = 0
@@ -703,6 +703,52 @@ report(
   generatedFailures == 0,
   &"{generatedFailures} disagreed"
 )
+
+## Host code that replaces the runtime's buffers
+
+block:
+  # A runtime-aware callback moves every buffer compiled code reaches
+  # into fresh memory, keeping the contents, then returns into compiled
+  # code. Everything after must land in the new buffers, not the freed.
+  proc relocated(native: bool): string =
+    var host = initHost()
+    let move: ContextHostProc = proc(runtime: Runtime,
+        arguments: openArray[Value]): Value =
+      privateAccess(Runtime)
+      runtime.globals = runtime.globals & @[]
+      runtime.memory = runtime.memory & @[]
+      runtime.registers = runtime.registers & @[]
+      runtime.frames = runtime.frames & @[]
+      runtime.arguments = runtime.arguments & @[]
+      runtime.hostData = runtime.hostData & @[]
+      arguments[0]
+    discard host.addFunction("move", 1, move)
+    let program = compile("""
+dim cells(7)
+sub stash(n)
+  cells(n mod 8) = cells(n mod 8) + n
+  total = total + move(n)
+end sub
+i = 0
+while i < 200
+  a = a + i
+  stash(i)
+  b = b + cells(i mod 8) * 2
+  i = i + 1
+wend
+""", host)
+    var runtime = initRuntime(program, host)
+    if native:
+      discard runtime.compileNative()
+    discard runtime.run()
+    result = $runtime.getGlobal("a") & " " & $runtime.getGlobal("b") &
+      " " & $runtime.getGlobal("total")
+    for index in 0 ..< 8:
+      result.add(" " & $runtime.getArray("cells", int32(index)))
+  let plain = relocated(false)
+  let fast = relocated(true)
+  report("buffers replaced by host code are followed, not written through",
+    plain == fast, &"{plain} then {fast}")
 
 if failures > 0:
   quit($failures & " safety checks failed")

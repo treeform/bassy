@@ -4320,6 +4320,20 @@ template performOp(runtime: Runtime, item: Instruction, print: PrintProc) =
       print(PrintEvent(kind: NewlinePrint))
     inc runtime.pc
 
+proc publishStorage(runtime: Runtime, context: ptr NativeContext)
+    {.raises: [].} =
+  ## Tells compiled code where the runtime's storage is now. Called before
+  ## compiled code starts and after every call out of it, since host code
+  ## is free to replace a buffer in between.
+  template first(values: untyped): pointer =
+    if values.len == 0: nil else: values[0].addr
+  context.globals = first(runtime.globals)
+  context.memory = first(runtime.memory)
+  context.hostData = first(runtime.hostData)
+  context.frames = first(runtime.frames)
+  context.arguments = first(runtime.arguments)
+  context.registerFile = first(runtime.registers)
+
 template handOver(context: ptr NativeContext, pc: int32,
     body: untyped): int32 =
   ## Runs interpreter code for compiled code. Compiled code keeps the frame
@@ -4344,6 +4358,7 @@ template handOver(context: ptr NativeContext, pc: int32,
     status = 1
   if status == 0:
     context.pc = runtime.pc
+    runtime.publishStorage(context)
     context.base = runtime.base
     context.depth = runtime.depth
     context.routine = runtime.routine
@@ -4373,24 +4388,6 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
   ## Runs the compiled program from wherever the runtime stands until it
   ## halts, or raises whatever the interpreter's code raised on its way.
   var context = NativeContext(
-    globals:
-      if runtime.globals.len == 0: nil
-      else: runtime.globals[0].addr,
-    memory:
-      if runtime.memory.len == 0: nil
-      else: runtime.memory[0].addr,
-    hostData:
-      if runtime.hostData.len == 0: nil
-      else: runtime.hostData[0].addr,
-    frames:
-      if runtime.frames.len == 0: nil
-      else: runtime.frames[0].addr,
-    arguments:
-      if runtime.arguments.len == 0: nil
-      else: runtime.arguments[0].addr,
-    registerFile:
-      if runtime.registers.len == 0: nil
-      else: runtime.registers[0].addr,
     table: runtime.machine.tableAddress,
     base: runtime.base,
     depth: runtime.depth,
@@ -4405,6 +4402,7 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     remainingWork: runtime.remainingWork,
     pc: runtime.pc
   )
+  runtime.publishStorage(context.addr)
   runtime.printer = print
   let status = runtime.machine.invoke(context)
   runtime.printer = nil

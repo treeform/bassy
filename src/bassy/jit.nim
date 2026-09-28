@@ -887,6 +887,8 @@ when NativeArm64:
     ## The one place compiled code calls out. The budgets go into the
     ## context for the interpreter's code to charge, and come back from it
     ## along with the frame, since a call or a return may have moved it.
+    ## Every storage base comes back too: host code may have replaced a
+    ## buffer, and nothing held from before the call may be trusted after.
     e.code.storePair(framePointer, linkRegister, stackPointer, -16, true)
     e.code.storeDouble(Instructions, Context, ContextInstructions)
     e.code.storeDouble(Work, Context, ContextWork)
@@ -896,6 +898,11 @@ when NativeArm64:
     e.code.moveRegister(Word32, temp(0), x0)
     e.code.loadDouble(Instructions, Context, ContextInstructions)
     e.code.loadDouble(Work, Context, ContextWork)
+    e.code.loadDouble(GlobalsBase, Context, 0)
+    e.code.loadDouble(MemoryBase, Context, ContextMemory)
+    e.code.loadDouble(ArgumentsBase, Context, ContextArguments)
+    e.code.loadDouble(FramesBase, Context, ContextFrames)
+    e.code.loadDouble(FileBase, Context, ContextRegisterFile)
     e.code.loadWord(temp(1), Context, ContextBase)
     e.frameOf(RegistersBase, temp(1))
     e.code.loadPair(framePointer, linkRegister, stackPointer, 16, true)
@@ -1907,6 +1914,8 @@ elif NativeAmd64:
     ## The one place compiled code calls out. The budgets go into the
     ## context for the interpreter's code to charge, and come back from it
     ## along with the frame, since a call or a return may have moved it.
+    ## The globals' base comes back too, host code having possibly replaced
+    ## that buffer; every other base is read from the context where used.
     ## A failure leaves through the shared exit, dropping the return
     ## address this routine was called with on the way.
     let refused = e.label()
@@ -1920,6 +1929,7 @@ elif NativeAmd64:
     e.code.moveRegister(Word32, r10, rax)
     e.code.loadDouble(Instructions, Context, ContextInstructions)
     e.code.loadDouble(Work, Context, ContextWork)
+    e.contextField(GlobalsBase, 0)
     e.code.loadWord(rcx, Context, ContextBase)
     e.slotAddress(RegistersBase, rcx)
     e.code.testRegister(Word32, r10, r10)
