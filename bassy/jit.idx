@@ -6,20 +6,20 @@ nim	NativeFailed	bassy/jit.html#NativeFailed	NativeStatus.NativeFailed		36
 nim	NativeRetired	bassy/jit.html#NativeRetired	NativeStatus.NativeRetired		36
 nim	NativeStatus	bassy/jit.html#NativeStatus	enum NativeStatus		36
 nim	NativeContext	bassy/jit.html#NativeContext	object NativeContext		42
-nim	NativeCall	bassy/jit.html#NativeCall	type NativeCall		66
-nim	RoutineExtent	bassy/jit.html#RoutineExtent	object RoutineExtent		69
-nim	CallLimits	bassy/jit.html#CallLimits	object CallLimits		77
-nim	ArrayExtent	bassy/jit.html#ArrayExtent	object ArrayExtent		82
-nim	FrameStride	bassy/jit.html#FrameStride	const FrameStride		113
-nim	FrameBase	bassy/jit.html#FrameBase	const FrameBase		114
-nim	FrameRoutine	bassy/jit.html#FrameRoutine	const FrameRoutine		115
-nim	FrameReturn	bassy/jit.html#FrameReturn	const FrameReturn		116
-nim	FrameTag	bassy/jit.html#FrameTag	const FrameTag		117
-nim	ModelsFixed	bassy/jit.html#ModelsFixed	const ModelsFixed		127
-nim	layoutMatches	bassy/jit.html#layoutMatches	proc layoutMatches(): bool		136
-nim	Machine	bassy/jit.html#Machine	type Machine		193
-nim	Hoisting	bassy/jit.html#Hoisting	const Hoisting		666
-nim	Pool	bassy/jit.html#Pool	const Pool		745
-nim	invoke	bassy/jit.html#invoke,Machine,NativeContext	proc invoke(machine: Machine; context: var NativeContext): NativeStatus		302
-nim	compileProgram	bassy/jit.html#compileProgram,seq[Instruction],seq[RoutineExtent],seq[ArrayExtent],seq[int32],int,int,int,CallLimits	proc compileProgram(code: seq[Instruction]; routines: seq[RoutineExtent];\n               extents: seq[ArrayExtent]; constants: seq[int32];\n               globals, hostData, arguments: int; limits: CallLimits;\n               strings = false): Machine		1667
-nim	tableAddress	bassy/jit.html#tableAddress,Machine	proc tableAddress(machine: Machine): pointer		1861
+nim	NativeCall	bassy/jit.html#NativeCall	type NativeCall		67
+nim	RoutineExtent	bassy/jit.html#RoutineExtent	object RoutineExtent		70
+nim	CallLimits	bassy/jit.html#CallLimits	object CallLimits		78
+nim	ArrayExtent	bassy/jit.html#ArrayExtent	object ArrayExtent		83
+nim	FrameStride	bassy/jit.html#FrameStride	const FrameStride		115
+nim	FrameBase	bassy/jit.html#FrameBase	const FrameBase		116
+nim	FrameRoutine	bassy/jit.html#FrameRoutine	const FrameRoutine		117
+nim	FrameReturn	bassy/jit.html#FrameReturn	const FrameReturn		118
+nim	FrameTag	bassy/jit.html#FrameTag	const FrameTag		119
+nim	ModelsFixed	bassy/jit.html#ModelsFixed	const ModelsFixed		129
+nim	layoutMatches	bassy/jit.html#layoutMatches	proc layoutMatches(): bool		138
+nim	Machine	bassy/jit.html#Machine	type Machine		196
+nim	Hoisting	bassy/jit.html#Hoisting	const Hoisting		671
+nim	Pool	bassy/jit.html#Pool	const Pool		758
+nim	invoke	bassy/jit.html#invoke,Machine,NativeContext	proc invoke(machine: Machine; context: var NativeContext): NativeStatus		305
+nim	compileProgram	bassy/jit.html#compileProgram,seq[Instruction],seq[RoutineExtent],seq[ArrayExtent],seq[int32],int,int,int,CallLimits,seq[bool]	proc compileProgram(code: seq[Instruction]; routines: seq[RoutineExtent];\n               extents: seq[ArrayExtent]; constants: seq[int32];\n               globals, hostData, arguments: int; limits: CallLimits;\n               strings = false; queries: seq[bool] = @[]): Machine		1720
+nim	tableAddress	bassy/jit.html#tableAddress,Machine	proc tableAddress(machine: Machine): pointer		1920

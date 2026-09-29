@@ -36,7 +36,7 @@ nim	mapped	bassy/texts.html#mapped,TextStorage,Value,bool	proc mapped(storage: v
 nim	trimmed	bassy/texts.html#trimmed,TextStorage,Value,bool,bool	proc trimmed(storage: var TextStorage; value: Value; left, right: bool): Value		259
 nim	find	bassy/texts.html#find,TextStorage,Value,Value,int	proc find(storage: TextStorage; haystack, needle: Value; start: int): int		277
 nim	reset	bassy/texts.html#reset,TextStorage,seq[Value]	proc reset(storage: var TextStorage; roots: var seq[Value])		297
-nim	ownerAddress	bassy/texts.html#ownerAddress,TextStorage	proc ownerAddress(storage: var TextStorage): pointer		339
-nim	spansAddress	bassy/texts.html#spansAddress,TextStorage	proc spansAddress(storage: var TextStorage): pointer		343
-nim	arenaAddress	bassy/texts.html#arenaAddress,TextStorage	proc arenaAddress(storage: var TextStorage): pointer		348
-nim	textLayoutMatches	bassy/texts.html#textLayoutMatches	proc textLayoutMatches(): bool		352
+nim	ownerAddress	bassy/texts.html#ownerAddress,TextStorage	proc ownerAddress(storage: var TextStorage): pointer		340
+nim	spansAddress	bassy/texts.html#spansAddress,TextStorage	proc spansAddress(storage: var TextStorage): pointer		344
+nim	arenaAddress	bassy/texts.html#arenaAddress,TextStorage	proc arenaAddress(storage: var TextStorage): pointer		349
+nim	textLayoutMatches	bassy/texts.html#textLayoutMatches	proc textLayoutMatches(): bool		353

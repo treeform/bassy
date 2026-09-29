@@ -39,45 +39,45 @@ nim	r13	bassy/amd64.html#r13	const r13		61
 nim	r14	bassy/amd64.html#r14	const r14		62
 nim	r15	bassy/amd64.html#r15	const r15		63
 nim	position	bassy/amd64.html#position,Assembler	proc position(assembler: Assembler): int		89
-nim	label	bassy/amd64.html#label,Assembler	proc label(assembler: var Assembler): Label		134
-nim	place	bassy/amd64.html#place,Assembler,Label	proc place(assembler: var Assembler; target: Label)		139
-nim	resolve	bassy/amd64.html#resolve,Assembler	proc resolve(assembler: var Assembler)		143
-nim	moveRegister	bassy/amd64.html#moveRegister,Assembler,Width,Register,Register	proc moveRegister(assembler: var Assembler; width: Width;\n             destination, source: Register)		160
-nim	loadImmediate	bassy/amd64.html#loadImmediate,Assembler,Width,Register,int64	proc loadImmediate(assembler: var Assembler; width: Width; destination: Register;\n              value: int64)		167
-nim	loadWord	bassy/amd64.html#loadWord,Assembler,Register,Register,int	proc loadWord(assembler: var Assembler; destination, base: Register; offset = 0)		182
-nim	storeWord	bassy/amd64.html#storeWord,Assembler,Register,Register,int	proc storeWord(assembler: var Assembler; source, base: Register; offset = 0)		189
-nim	loadDouble	bassy/amd64.html#loadDouble,Assembler,Register,Register,int	proc loadDouble(assembler: var Assembler; destination, base: Register; offset = 0)		196
-nim	storeDouble	bassy/amd64.html#storeDouble,Assembler,Register,Register,int	proc storeDouble(assembler: var Assembler; source, base: Register; offset = 0)		203
-nim	loadByteZeroed	bassy/amd64.html#loadByteZeroed,Assembler,Register,Register,int	proc loadByteZeroed(assembler: var Assembler; destination, base: Register; offset = 0)		210
-nim	storeByteImmediate	bassy/amd64.html#storeByteImmediate,Assembler,Register,int,byte	proc storeByteImmediate(assembler: var Assembler; base: Register; offset: int;\n                   value: byte)		218
-nim	addRegister	bassy/amd64.html#addRegister,Assembler,Width,Register,Register	proc addRegister(assembler: var Assembler; width: Width;\n            destination, source: Register)		228
-nim	subtractRegister	bassy/amd64.html#subtractRegister,Assembler,Width,Register,Register	proc subtractRegister(assembler: var Assembler; width: Width;\n                 destination, source: Register)		235
-nim	addImmediate	bassy/amd64.html#addImmediate,Assembler,Width,Register,int32	proc addImmediate(assembler: var Assembler; width: Width; target: Register;\n             value: int32)		250
-nim	subtractImmediate	bassy/amd64.html#subtractImmediate,Assembler,Width,Register,int32	proc subtractImmediate(assembler: var Assembler; width: Width; target: Register;\n                  value: int32)		255
-nim	compareImmediate	bassy/amd64.html#compareImmediate,Assembler,Width,Register,int32	proc compareImmediate(assembler: var Assembler; width: Width; target: Register;\n                 value: int32)		260
-nim	compareRegister	bassy/amd64.html#compareRegister,Assembler,Width,Register,Register	proc compareRegister(assembler: var Assembler; width: Width; left, right: Register)		265
-nim	testRegister	bassy/amd64.html#testRegister,Assembler,Width,Register,Register	proc testRegister(assembler: var Assembler; width: Width; left, right: Register)		272
-nim	multiplyRegister	bassy/amd64.html#multiplyRegister,Assembler,Width,Register,Register	proc multiplyRegister(assembler: var Assembler; width: Width;\n                 destination, source: Register)		279
-nim	signExtendToPair	bassy/amd64.html#signExtendToPair,Assembler,Width	proc signExtendToPair(assembler: var Assembler; width: Width)		287
-nim	signedDivide	bassy/amd64.html#signedDivide,Assembler,Width,Register	proc signedDivide(assembler: var Assembler; width: Width; divisor: Register)		294
-nim	push	bassy/amd64.html#push,Assembler,Register	proc push(assembler: var Assembler; source: Register)		303
-nim	pop	bassy/amd64.html#pop,Assembler,Register	proc pop(assembler: var Assembler; destination: Register)		309
-nim	branch	bassy/amd64.html#branch,Assembler,Label	proc branch(assembler: var Assembler; target: Label)		315
-nim	branchIf	bassy/amd64.html#branchIf,Assembler,Condition,Label	proc branchIf(assembler: var Assembler; condition: Condition; target: Label)		324
-nim	returnToCaller	bassy/amd64.html#returnToCaller,Assembler	proc returnToCaller(assembler: var Assembler)		335
-nim	storeWordImmediate	bassy/amd64.html#storeWordImmediate,Assembler,Register,int,int32	proc storeWordImmediate(assembler: var Assembler; base: Register; offset: int;\n                   value: int32)		339
-nim	negateRegister	bassy/amd64.html#negateRegister,Assembler,Width,Register	proc negateRegister(assembler: var Assembler; width: Width; target: Register)		347
-nim	setIfCondition	bassy/amd64.html#setIfCondition,Assembler,Register,Condition	proc setIfCondition(assembler: var Assembler; target: Register; condition: Condition)		354
-nim	shiftLeftImmediate	bassy/amd64.html#shiftLeftImmediate,Assembler,Width,Register,int	proc shiftLeftImmediate(assembler: var Assembler; width: Width; target: Register;\n                   count: int)		372
-nim	signExtendDouble	bassy/amd64.html#signExtendDouble,Assembler,Register,Register	proc signExtendDouble(assembler: var Assembler; destination, source: Register)		382
-nim	shiftRightImmediate	bassy/amd64.html#shiftRightImmediate,Assembler,Width,Register,int	proc shiftRightImmediate(assembler: var Assembler; width: Width; target: Register;\n                    count: int)		389
-nim	storeByteLow	bassy/amd64.html#storeByteLow,Assembler,Register,int,Register	proc storeByteLow(assembler: var Assembler; base: Register; offset: int;\n             source: Register)		399
-nim	offsetOf	bassy/amd64.html#offsetOf,Assembler,Label	proc offsetOf(assembler: Assembler; target: Label): int		408
-nim	andRegister	bassy/amd64.html#andRegister,Assembler,Width,Register,Register	proc andRegister(assembler: var Assembler; width: Width;\n            destination, source: Register)		421
-nim	orRegister	bassy/amd64.html#orRegister,Assembler,Width,Register,Register	proc orRegister(assembler: var Assembler; width: Width; destination, source: Register)		426
-nim	xorRegister	bassy/amd64.html#xorRegister,Assembler,Width,Register,Register	proc xorRegister(assembler: var Assembler; width: Width;\n            destination, source: Register)		431
-nim	notRegister	bassy/amd64.html#notRegister,Assembler,Width,Register	proc notRegister(assembler: var Assembler; width: Width; target: Register)		436
-nim	callLabel	bassy/amd64.html#callLabel,Assembler,Label	proc callLabel(assembler: var Assembler; target: Label)		443
-nim	callRegister	bassy/amd64.html#callRegister,Assembler,Register	proc callRegister(assembler: var Assembler; target: Register)		452
-nim	jumpRegister	bassy/amd64.html#jumpRegister,Assembler,Register	proc jumpRegister(assembler: var Assembler; target: Register)		459
-nim	testImmediate	bassy/amd64.html#testImmediate,Assembler,Width,Register,int32	proc testImmediate(assembler: var Assembler; width: Width; target: Register;\n              value: int32)		466
+nim	label	bassy/amd64.html#label,Assembler	proc label(assembler: var Assembler): Label		138
+nim	place	bassy/amd64.html#place,Assembler,Label	proc place(assembler: var Assembler; target: Label)		143
+nim	resolve	bassy/amd64.html#resolve,Assembler	proc resolve(assembler: var Assembler)		147
+nim	moveRegister	bassy/amd64.html#moveRegister,Assembler,Width,Register,Register	proc moveRegister(assembler: var Assembler; width: Width;\n             destination, source: Register)		164
+nim	loadImmediate	bassy/amd64.html#loadImmediate,Assembler,Width,Register,int64	proc loadImmediate(assembler: var Assembler; width: Width; destination: Register;\n              value: int64)		171
+nim	loadWord	bassy/amd64.html#loadWord,Assembler,Register,Register,int	proc loadWord(assembler: var Assembler; destination, base: Register; offset = 0)		186
+nim	storeWord	bassy/amd64.html#storeWord,Assembler,Register,Register,int	proc storeWord(assembler: var Assembler; source, base: Register; offset = 0)		193
+nim	loadDouble	bassy/amd64.html#loadDouble,Assembler,Register,Register,int	proc loadDouble(assembler: var Assembler; destination, base: Register; offset = 0)		200
+nim	storeDouble	bassy/amd64.html#storeDouble,Assembler,Register,Register,int	proc storeDouble(assembler: var Assembler; source, base: Register; offset = 0)		207
+nim	loadByteZeroed	bassy/amd64.html#loadByteZeroed,Assembler,Register,Register,int	proc loadByteZeroed(assembler: var Assembler; destination, base: Register; offset = 0)		214
+nim	storeByteImmediate	bassy/amd64.html#storeByteImmediate,Assembler,Register,int,byte	proc storeByteImmediate(assembler: var Assembler; base: Register; offset: int;\n                   value: byte)		222
+nim	addRegister	bassy/amd64.html#addRegister,Assembler,Width,Register,Register	proc addRegister(assembler: var Assembler; width: Width;\n            destination, source: Register)		232
+nim	subtractRegister	bassy/amd64.html#subtractRegister,Assembler,Width,Register,Register	proc subtractRegister(assembler: var Assembler; width: Width;\n                 destination, source: Register)		239
+nim	addImmediate	bassy/amd64.html#addImmediate,Assembler,Width,Register,int32	proc addImmediate(assembler: var Assembler; width: Width; target: Register;\n             value: int32)		254
+nim	subtractImmediate	bassy/amd64.html#subtractImmediate,Assembler,Width,Register,int32	proc subtractImmediate(assembler: var Assembler; width: Width; target: Register;\n                  value: int32)		259
+nim	compareImmediate	bassy/amd64.html#compareImmediate,Assembler,Width,Register,int32	proc compareImmediate(assembler: var Assembler; width: Width; target: Register;\n                 value: int32)		264
+nim	compareRegister	bassy/amd64.html#compareRegister,Assembler,Width,Register,Register	proc compareRegister(assembler: var Assembler; width: Width; left, right: Register)		269
+nim	testRegister	bassy/amd64.html#testRegister,Assembler,Width,Register,Register	proc testRegister(assembler: var Assembler; width: Width; left, right: Register)		276
+nim	multiplyRegister	bassy/amd64.html#multiplyRegister,Assembler,Width,Register,Register	proc multiplyRegister(assembler: var Assembler; width: Width;\n                 destination, source: Register)		283
+nim	signExtendToPair	bassy/amd64.html#signExtendToPair,Assembler,Width	proc signExtendToPair(assembler: var Assembler; width: Width)		291
+nim	signedDivide	bassy/amd64.html#signedDivide,Assembler,Width,Register	proc signedDivide(assembler: var Assembler; width: Width; divisor: Register)		298
+nim	push	bassy/amd64.html#push,Assembler,Register	proc push(assembler: var Assembler; source: Register)		307
+nim	pop	bassy/amd64.html#pop,Assembler,Register	proc pop(assembler: var Assembler; destination: Register)		313
+nim	branch	bassy/amd64.html#branch,Assembler,Label	proc branch(assembler: var Assembler; target: Label)		319
+nim	branchIf	bassy/amd64.html#branchIf,Assembler,Condition,Label	proc branchIf(assembler: var Assembler; condition: Condition; target: Label)		328
+nim	returnToCaller	bassy/amd64.html#returnToCaller,Assembler	proc returnToCaller(assembler: var Assembler)		339
+nim	storeWordImmediate	bassy/amd64.html#storeWordImmediate,Assembler,Register,int,int32	proc storeWordImmediate(assembler: var Assembler; base: Register; offset: int;\n                   value: int32)		343
+nim	negateRegister	bassy/amd64.html#negateRegister,Assembler,Width,Register	proc negateRegister(assembler: var Assembler; width: Width; target: Register)		351
+nim	setIfCondition	bassy/amd64.html#setIfCondition,Assembler,Register,Condition	proc setIfCondition(assembler: var Assembler; target: Register; condition: Condition)		358
+nim	shiftLeftImmediate	bassy/amd64.html#shiftLeftImmediate,Assembler,Width,Register,int	proc shiftLeftImmediate(assembler: var Assembler; width: Width; target: Register;\n                   count: int)		376
+nim	signExtendDouble	bassy/amd64.html#signExtendDouble,Assembler,Register,Register	proc signExtendDouble(assembler: var Assembler; destination, source: Register)		386
+nim	shiftRightImmediate	bassy/amd64.html#shiftRightImmediate,Assembler,Width,Register,int	proc shiftRightImmediate(assembler: var Assembler; width: Width; target: Register;\n                    count: int)		393
+nim	storeByteLow	bassy/amd64.html#storeByteLow,Assembler,Register,int,Register	proc storeByteLow(assembler: var Assembler; base: Register; offset: int;\n             source: Register)		403
+nim	offsetOf	bassy/amd64.html#offsetOf,Assembler,Label	proc offsetOf(assembler: Assembler; target: Label): int		412
+nim	andRegister	bassy/amd64.html#andRegister,Assembler,Width,Register,Register	proc andRegister(assembler: var Assembler; width: Width;\n            destination, source: Register)		425
+nim	orRegister	bassy/amd64.html#orRegister,Assembler,Width,Register,Register	proc orRegister(assembler: var Assembler; width: Width; destination, source: Register)		430
+nim	xorRegister	bassy/amd64.html#xorRegister,Assembler,Width,Register,Register	proc xorRegister(assembler: var Assembler; width: Width;\n            destination, source: Register)		435
+nim	notRegister	bassy/amd64.html#notRegister,Assembler,Width,Register	proc notRegister(assembler: var Assembler; width: Width; target: Register)		440
+nim	callLabel	bassy/amd64.html#callLabel,Assembler,Label	proc callLabel(assembler: var Assembler; target: Label)		447
+nim	callRegister	bassy/amd64.html#callRegister,Assembler,Register	proc callRegister(assembler: var Assembler; target: Register)		456
+nim	jumpRegister	bassy/amd64.html#jumpRegister,Assembler,Register	proc jumpRegister(assembler: var Assembler; target: Register)		463
+nim	testImmediate	bassy/amd64.html#testImmediate,Assembler,Width,Register,int32	proc testImmediate(assembler: var Assembler; width: Width; target: Register;\n              value: int32)		470
