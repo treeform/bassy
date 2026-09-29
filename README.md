@@ -145,6 +145,55 @@ Native callbacks are trusted Nim code and define the sandbox's capabilities. Val
 
 `run` executes until completion or an error. It does not yield after a budget is exhausted. On an error, state can contain partial changes. Use `restart` or `reset` before running again and choose how your application handles any host effects already performed.
 
+## Native compilation
+
+On arm64 and x86-64, under macOS, Linux, and Windows, Bassy can compile a whole program to machine code. Call `compileNative` once after creating a runtime. It returns how many bytecode instructions were compiled, which is either all of them or zero. After that, `run` executes the machine code instead of the interpreter.
+
+```nim
+import bassy
+
+let program = compile("""
+total = 0
+for i = 1 to 100000
+  total = total + i mod 7
+next
+""")
+var runtime = initRuntime(program)
+if runtime.compileNative() > 0:
+  echo "running as machine code"
+discard runtime.run
+```
+
+Compiling is optional and changes nothing a script can observe. Results, both budgets, print output, string storage, and errors are the same as the interpreter's, including the exact failure and where it happened. Strings, printing, host calls, and any instruction that is about to fail run the interpreter's own code for that one instruction. `runtime.handedBack` counts how many instructions went that way.
+
+The compiler is written in Nim and needs no external compiler or library. Loops keep their globals in machine registers, and ordinary code keeps the values it is working on in registers from one instruction to the next.
+
+Measured speedups over the interpreter:
+
+| Workload | arm64 (Apple M4) | x86-64 (Windows CI) |
+| --- | --- | --- |
+| Tight integer loops | 25 to 35 times | 100 to 150 times |
+| Raytracer, fixed point with subs and host calls | 6.5 times | 9.9 times |
+| Text processing, mostly string functions | 2.5 times | 2.1 times |
+
+The interpreter runs slower on the CI machines, so the ratios there come out higher.
+
+The interpreter runs instead when there is no backend for the target, such as WebAssembly, when the program is built with `-d:bassyNoJit`, or when a runtime is compiled from inside a host callback while machine code is running on the same thread.
+
+Scripts cannot leave the sandbox through compiled code. Every global, register, and branch target the code uses is proved in range before any machine code is written, and a program that fails a check is not compiled. Array indexes are still checked while running, and every computed jump is checked against the program's length. The compiler also checks that Nim's memory layout is the one it writes against, and refuses to compile if not.
+
+Host callbacks remain trusted code. If one resizes the runtime's own storage while compiled code is running, the compiled program is retired and the rest of the run is interpreted. On Apple Silicon the code pages stay executable, and writes to them are only ever enabled on the thread doing the compiling, never while machine code is running on it.
+
+Compiled code is not counted in `Limits`. A program's machine code is capped at 64 MiB and is usually under 200 bytes per bytecode instruction.
+
+Two build switches help when testing. `-d:bassyNative` compiles every runtime automatically. `-d:bassyNativeStrict` also fails loudly if any program is not compiled, so a test suite proves it really ran as machine code:
+
+```sh
+nim r -d:release -d:bassyNativeStrict tests/tests.nim
+nim r -d:release tests/test_native.nim
+nim r -d:release tests/test_jit_safety.nim
+```
+
 ## Strings
 
 Create a `StringPool`, call `host.addStringFunctions(pool)`, compile with that host, then call `pool.bindProgram(program)` before running. See [strings.nim](examples/strings.nim) for a complete example.
