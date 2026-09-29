@@ -17,6 +17,7 @@ jobs:
       matrix:
         os:
           - macos-latest       # arm64 macOS, native backend
+          - ubuntu-24.04-arm   # arm64 Linux, native backend
           - ubuntu-latest      # x86-64 Linux, native backend
           - windows-latest     # x86-64 Windows, native backend
     runs-on: ${{ matrix.os }}
