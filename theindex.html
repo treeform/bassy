@@ -28,7 +28,7 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">Index</h1>
-      Modules: <a href="bassy.html">bassy</a>, <a href="bassy/buffers.html">bassy/buffers</a>, <a href="bassy/numbers.html">bassy/numbers</a>, <a href="bassy/texts.html">bassy/texts</a>.<br/><p /><h2>API symbols</h2>
+      Modules: <a href="bassy.html">bassy</a>, <a href="bassy/amd64.html">bassy/amd64</a>, <a href="bassy/buffers.html">bassy/buffers</a>, <a href="bassy/bytecode.html">bassy/bytecode</a>, <a href="bassy/jit.html">bassy/jit</a>, <a href="bassy/machine.html">bassy/machine</a>, <a href="bassy/numbers.html">bassy/numbers</a>, <a href="bassy/texts.html">bassy/texts</a>.<br/><p /><h2>API symbols</h2>
 <dl><dt><a name="%60%24%60" href="#%60%24%60"><span>`$`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `$`(value: Value): string" href="bassy/numbers.html#%24%2CValue">numbers: proc `$`(value: Value): string</a></li>
@@ -63,6 +63,14 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `==`(left, right: Value): bool" href="bassy/numbers.html#%3D%3D%2CValue%2CValue">numbers: proc `==`(left, right: Value): bool</a></li>
           </ul></dd>
+<dt><a name="%60%3Dcopy%60" href="#%60%3Dcopy%60"><span>`=copy`:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc `=copy`(destination: var CodeBuffer; source: CodeBuffer)" href="bassy/machine.html#%3Dcopy%2CCodeBuffer%2CCodeBuffer">machine: proc `=copy`(destination: var CodeBuffer; source: CodeBuffer)</a></li>
+          </ul></dd>
+<dt><a name="%60%3Ddestroy%60" href="#%60%3Ddestroy%60"><span>`=destroy`:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc `=destroy`(buffer: CodeBuffer)" href="bassy/machine.html#%3Ddestroy%2CCodeBuffer">machine: proc `=destroy`(buffer: CodeBuffer)</a></li>
+          </ul></dd>
 <dt><a name="%60%5B%5D%3D%60" href="#%60%5B%5D%3D%60"><span>`[]=`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc `[]=`(view: ArrayView; index: int; value: Value)" href="bassy.html#%5B%5D%3D%2CArrayView%2Cint%2CValue">bassy: proc `[]=`(view: ArrayView; index: int; value: Value)</a></li>
@@ -95,6 +103,14 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc `xor`(left, right: Value): Value" href="bassy/numbers.html#xor%2CValue%2CValue">numbers: proc `xor`(left, right: Value): Value</a></li>
           </ul></dd>
+<dt><a name="AboveCondition" href="#AboveCondition"><span>AboveCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.AboveCondition" href="bassy/amd64.html#AboveCondition">amd64: Condition.AboveCondition</a></li>
+          </ul></dd>
+<dt><a name="AboveEqualCondition" href="#AboveEqualCondition"><span>AboveEqualCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.AboveEqualCondition" href="bassy/amd64.html#AboveEqualCondition">amd64: Condition.AboveEqualCondition</a></li>
+          </ul></dd>
 <dt><a name="addBufferFunctions" href="#addBufferFunctions"><span>addBufferFunctions:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc addBufferFunctions(host: var Host)" href="bassy.html#addBufferFunctions%2CHost">bassy: proc addBufferFunctions(host: var Host)</a></li>
@@ -119,9 +135,79 @@
             callback: NumericHostProc; workUnits = 16): int32" href="bassy.html#addFunction%2CHost%2Cstring%2Cint%2CNumericHostProc%2Cint">bassy: proc addFunction(host: var Host; name: string; parameters: int;
             callback: NumericHostProc; workUnits = 16): int32</a></li>
           </ul></dd>
+<dt><a name="AddGlobalArrayGlobalIndexOp" href="#AddGlobalArrayGlobalIndexOp"><span>AddGlobalArrayGlobalIndexOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AddGlobalArrayGlobalIndexOp" href="bassy/bytecode.html#AddGlobalArrayGlobalIndexOp">bytecode: Op.AddGlobalArrayGlobalIndexOp</a></li>
+          </ul></dd>
+<dt><a name="AddGlobalHostDataOp" href="#AddGlobalHostDataOp"><span>AddGlobalHostDataOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AddGlobalHostDataOp" href="bassy/bytecode.html#AddGlobalHostDataOp">bytecode: Op.AddGlobalHostDataOp</a></li>
+          </ul></dd>
+<dt><a name="AddGlobalImmediateOp" href="#AddGlobalImmediateOp"><span>AddGlobalImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AddGlobalImmediateOp" href="bassy/bytecode.html#AddGlobalImmediateOp">bytecode: Op.AddGlobalImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="AddGlobalOp" href="#AddGlobalOp"><span>AddGlobalOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AddGlobalOp" href="bassy/bytecode.html#AddGlobalOp">bytecode: Op.AddGlobalOp</a></li>
+          </ul></dd>
+<dt><a name="AddGlobalRegisterOp" href="#AddGlobalRegisterOp"><span>AddGlobalRegisterOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AddGlobalRegisterOp" href="bassy/bytecode.html#AddGlobalRegisterOp">bytecode: Op.AddGlobalRegisterOp</a></li>
+          </ul></dd>
+<dt><a name="addImmediate" href="#addImmediate"><span>addImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc addImmediate(assembler: var Assembler; width: Width; target: Register;
+             value: int32)" href="bassy/amd64.html#addImmediate%2CAssembler%2CWidth%2CRegister%2Cint32">amd64: proc addImmediate(assembler: var Assembler; width: Width; target: Register;
+             value: int32)</a></li>
+          </ul></dd>
+<dt><a name="AddOp" href="#AddOp"><span>AddOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AddOp" href="bassy/bytecode.html#AddOp">bytecode: Op.AddOp</a></li>
+          </ul></dd>
+<dt><a name="addRegister" href="#addRegister"><span>addRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc addRegister(assembler: var Assembler; width: Width;
+            destination, source: Register)" href="bassy/amd64.html#addRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc addRegister(assembler: var Assembler; width: Width;
+            destination, source: Register)</a></li>
+          </ul></dd>
 <dt><a name="addStringFunctions" href="#addStringFunctions"><span>addStringFunctions:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc addStringFunctions(host: var Host; pool: StringPool)" href="bassy.html#addStringFunctions%2CHost%2CStringPool">bassy: proc addStringFunctions(host: var Host; pool: StringPool)</a></li>
+          </ul></dd>
+<dt><a name="AndOp" href="#AndOp"><span>AndOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.AndOp" href="bassy/bytecode.html#AndOp">bytecode: Op.AndOp</a></li>
+          </ul></dd>
+<dt><a name="andRegister" href="#andRegister"><span>andRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc andRegister(assembler: var Assembler; width: Width;
+            destination, source: Register)" href="bassy/amd64.html#andRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc andRegister(assembler: var Assembler; width: Width;
+            destination, source: Register)</a></li>
+          </ul></dd>
+<dt><a name="AppleSilicon" href="#AppleSilicon"><span>AppleSilicon:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: const AppleSilicon" href="bassy/machine.html#AppleSilicon">machine: const AppleSilicon</a></li>
+          </ul></dd>
+<dt><a name="arenaAddress" href="#arenaAddress"><span>arenaAddress:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="texts: proc arenaAddress(storage: var TextStorage): pointer" href="bassy/texts.html#arenaAddress%2CTextStorage">texts: proc arenaAddress(storage: var TextStorage): pointer</a></li>
+          </ul></dd>
+<dt><a name="ArrayAddGlobalsOp" href="#ArrayAddGlobalsOp"><span>ArrayAddGlobalsOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ArrayAddGlobalsOp" href="bassy/bytecode.html#ArrayAddGlobalsOp">bytecode: Op.ArrayAddGlobalsOp</a></li>
+          </ul></dd>
+<dt><a name="arrayExtent" href="#arrayExtent"><span>arrayExtent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc arrayExtent(program: Program; id: int32): (int32, int32)" href="bassy.html#arrayExtent%2CProgram%2Cint32">bassy: proc arrayExtent(program: Program; id: int32): (int32, int32)</a></li>
+          </ul></dd>
+<dt><a name="ArrayExtent" href="#ArrayExtent"><span>ArrayExtent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: object ArrayExtent" href="bassy/jit.html#ArrayExtent">jit: object ArrayExtent</a></li>
+          </ul></dd>
+<dt><a name="ArrayGetOp" href="#ArrayGetOp"><span>ArrayGetOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ArrayGetOp" href="bassy/bytecode.html#ArrayGetOp">bytecode: Op.ArrayGetOp</a></li>
           </ul></dd>
 <dt><a name="arrayLength" href="#arrayLength"><span>arrayLength:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -130,6 +216,10 @@
 <dt><a name="arrays" href="#arrays"><span>arrays:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc arrays(program: Program): int" href="bassy.html#arrays%2CProgram">bassy: proc arrays(program: Program): int</a></li>
+          </ul></dd>
+<dt><a name="ArraySetOp" href="#ArraySetOp"><span>ArraySetOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ArraySetOp" href="bassy/bytecode.html#ArraySetOp">bytecode: Op.ArraySetOp</a></li>
           </ul></dd>
 <dt><a name="ArrayValue" href="#ArrayValue"><span>ArrayValue:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -155,9 +245,21 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc asInt(value: Value): int32" href="bassy/numbers.html#asInt%2CValue">numbers: proc asInt(value: Value): int32</a></li>
           </ul></dd>
+<dt><a name="Assembler" href="#Assembler"><span>Assembler:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: object Assembler" href="bassy/amd64.html#Assembler">amd64: object Assembler</a></li>
+          </ul></dd>
 <dt><a name="BasicError" href="#BasicError"><span>BasicError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: object BasicError" href="bassy/numbers.html#BasicError">numbers: object BasicError</a></li>
+          </ul></dd>
+<dt><a name="BelowCondition" href="#BelowCondition"><span>BelowCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.BelowCondition" href="bassy/amd64.html#BelowCondition">amd64: Condition.BelowCondition</a></li>
+          </ul></dd>
+<dt><a name="BelowEqualCondition" href="#BelowEqualCondition"><span>BelowEqualCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.BelowEqualCondition" href="bassy/amd64.html#BelowEqualCondition">amd64: Condition.BelowEqualCondition</a></li>
           </ul></dd>
 <dt><a name="binding" href="#binding"><span>binding:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -179,9 +281,25 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: ValueKind.BlobValue" href="bassy/numbers.html#BlobValue">numbers: ValueKind.BlobValue</a></li>
           </ul></dd>
+<dt><a name="branch" href="#branch"><span>branch:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc branch(assembler: var Assembler; target: Label)" href="bassy/amd64.html#branch%2CAssembler%2CLabel">amd64: proc branch(assembler: var Assembler; target: Label)</a></li>
+          </ul></dd>
+<dt><a name="branchIf" href="#branchIf"><span>branchIf:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc branchIf(assembler: var Assembler; condition: Condition; target: Label)" href="bassy/amd64.html#branchIf%2CAssembler%2CCondition%2CLabel">amd64: proc branchIf(assembler: var Assembler; condition: Condition; target: Label)</a></li>
+          </ul></dd>
+<dt><a name="BufferGetOp" href="#BufferGetOp"><span>BufferGetOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.BufferGetOp" href="bassy/bytecode.html#BufferGetOp">bytecode: Op.BufferGetOp</a></li>
+          </ul></dd>
 <dt><a name="bufferOwner" href="#bufferOwner"><span>bufferOwner:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc bufferOwner(value: Value): uint32" href="bassy/numbers.html#bufferOwner%2CValue">numbers: proc bufferOwner(value: Value): uint32</a></li>
+          </ul></dd>
+<dt><a name="BufferSetOp" href="#BufferSetOp"><span>BufferSetOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.BufferSetOp" href="bassy/bytecode.html#BufferSetOp">bytecode: Op.BufferSetOp</a></li>
           </ul></dd>
 <dt><a name="bufferSlot" href="#bufferSlot"><span>bufferSlot:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -195,11 +313,35 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value" href="bassy/numbers.html#bufferValue%2CValueKind%2Cuint32%2Cint32">numbers: proc bufferValue(kind: ValueKind; owner: uint32; slot: int32): Value</a></li>
           </ul></dd>
+<dt><a name="bytecode" href="#bytecode"><span>bytecode:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc bytecode(program: Program): lent seq[Instruction]" href="bassy.html#bytecode%2CProgram">bassy: proc bytecode(program: Program): lent seq[Instruction]</a></li>
+          </ul></dd>
 <dt><a name="bytesUsed" href="#bytesUsed"><span>bytesUsed:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc bytesUsed(pool: StringPool): int" href="bassy.html#bytesUsed%2CStringPool">bassy: proc bytesUsed(pool: StringPool): int</a></li>
           <li><a class="reference external"
           data-doc-search-tag="texts: proc bytesUsed(storage: TextStorage): int" href="bassy/texts.html#bytesUsed%2CTextStorage">texts: proc bytesUsed(storage: TextStorage): int</a></li>
+          </ul></dd>
+<dt><a name="callLabel" href="#callLabel"><span>callLabel:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc callLabel(assembler: var Assembler; target: Label)" href="bassy/amd64.html#callLabel%2CAssembler%2CLabel">amd64: proc callLabel(assembler: var Assembler; target: Label)</a></li>
+          </ul></dd>
+<dt><a name="CallLimits" href="#CallLimits"><span>CallLimits:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: object CallLimits" href="bassy/jit.html#CallLimits">jit: object CallLimits</a></li>
+          </ul></dd>
+<dt><a name="CallOp" href="#CallOp"><span>CallOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.CallOp" href="bassy/bytecode.html#CallOp">bytecode: Op.CallOp</a></li>
+          </ul></dd>
+<dt><a name="callRegister" href="#callRegister"><span>callRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc callRegister(assembler: var Assembler; target: Register)" href="bassy/amd64.html#callRegister%2CAssembler%2CRegister">amd64: proc callRegister(assembler: var Assembler; target: Register)</a></li>
+          </ul></dd>
+<dt><a name="capacity" href="#capacity"><span>capacity:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc capacity(buffer: CodeBuffer): int" href="bassy/machine.html#capacity%2CCodeBuffer">machine: proc capacity(buffer: CodeBuffer): int</a></li>
           </ul></dd>
 <dt><a name="character" href="#character"><span>character:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -221,6 +363,10 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc checkNativeMemory(runtime: Runtime; bytes: int64)" href="bassy.html#checkNativeMemory%2CRuntime%2Cint64">bassy: proc checkNativeMemory(runtime: Runtime; bytes: int64)</a></li>
           </ul></dd>
+<dt><a name="CodeBuffer" href="#CodeBuffer"><span>CodeBuffer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: object CodeBuffer" href="bassy/machine.html#CodeBuffer">machine: object CodeBuffer</a></li>
+          </ul></dd>
 <dt><a name="CodeFunction" href="#CodeFunction"><span>CodeFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.CodeFunction" href="bassy/texts.html#CodeFunction">texts: TextFunction.CodeFunction</a></li>
@@ -233,15 +379,43 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: proc compare(storage: TextStorage; left, right: Value): int" href="bassy/texts.html#compare%2CTextStorage%2CValue%2CValue">texts: proc compare(storage: TextStorage; left, right: Value): int</a></li>
           </ul></dd>
+<dt><a name="compareImmediate" href="#compareImmediate"><span>compareImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc compareImmediate(assembler: var Assembler; width: Width; target: Register;
+                 value: int32)" href="bassy/amd64.html#compareImmediate%2CAssembler%2CWidth%2CRegister%2Cint32">amd64: proc compareImmediate(assembler: var Assembler; width: Width; target: Register;
+                 value: int32)</a></li>
+          </ul></dd>
+<dt><a name="compareRegister" href="#compareRegister"><span>compareRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc compareRegister(assembler: var Assembler; width: Width; left, right: Register)" href="bassy/amd64.html#compareRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc compareRegister(assembler: var Assembler; width: Width; left, right: Register)</a></li>
+          </ul></dd>
 <dt><a name="compile" href="#compile"><span>compile:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc compile(source: string; limits = defaultLimits()): Program" href="bassy.html#compile%2Cstring">bassy: proc compile(source: string; limits = defaultLimits()): Program</a></li>
           <li><a class="reference external"
           data-doc-search-tag="bassy: proc compile(source: string; host: Host; limits = defaultLimits()): Program" href="bassy.html#compile%2Cstring%2CHost">bassy: proc compile(source: string; host: Host; limits = defaultLimits()): Program</a></li>
           </ul></dd>
+<dt><a name="compileNative" href="#compileNative"><span>compileNative:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc compileNative(runtime: var Runtime): int" href="bassy.html#compileNative%2CRuntime">bassy: proc compileNative(runtime: var Runtime): int</a></li>
+          </ul></dd>
+<dt><a name="compileProgram" href="#compileProgram"><span>compileProgram:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: proc compileProgram(code: seq[Instruction]; routines: seq[RoutineExtent];
+               extents: seq[ArrayExtent]; constants: seq[int32];
+               globals, hostData, arguments: int; limits: CallLimits;
+               strings = false): Machine" href="bassy/jit.html#compileProgram%2Cseq%5BInstruction%5D%2Cseq%5BRoutineExtent%5D%2Cseq%5BArrayExtent%5D%2Cseq%5Bint32%5D%2Cint%2Cint%2Cint%2CCallLimits">jit: proc compileProgram(code: seq[Instruction]; routines: seq[RoutineExtent];
+               extents: seq[ArrayExtent]; constants: seq[int32];
+               globals, hostData, arguments: int; limits: CallLimits;
+               strings = false): Machine</a></li>
+          </ul></dd>
 <dt><a name="concat" href="#concat"><span>concat:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc concat(storage: var TextStorage; left, right: Value): Value" href="bassy/texts.html#concat%2CTextStorage%2CValue%2CValue">texts: proc concat(storage: var TextStorage; left, right: Value): Value</a></li>
+          </ul></dd>
+<dt><a name="Condition" href="#Condition"><span>Condition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: enum Condition" href="bassy/amd64.html#Condition">amd64: enum Condition</a></li>
           </ul></dd>
 <dt><a name="ContextHostProc" href="#ContextHostProc"><span>ContextHostProc:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -345,6 +519,10 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc defaultStringLimits(): StringLimits" href="bassy.html#defaultStringLimits">bassy: proc defaultStringLimits(): StringLimits</a></li>
           </ul></dd>
+<dt><a name="DivideOp" href="#DivideOp"><span>DivideOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.DivideOp" href="bassy/bytecode.html#DivideOp">bytecode: Op.DivideOp</a></li>
+          </ul></dd>
 <dt><a name="empty" href="#empty"><span>empty:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc empty(storage: TextStorage): Value" href="bassy/texts.html#empty%2CTextStorage">texts: proc empty(storage: TextStorage): Value</a></li>
@@ -353,9 +531,33 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: const EmptyHandle" href="bassy.html#EmptyHandle">bassy: const EmptyHandle</a></li>
           </ul></dd>
+<dt><a name="enterCompiledCode" href="#enterCompiledCode"><span>enterCompiledCode:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc enterCompiledCode()" href="bassy/machine.html#enterCompiledCode">machine: proc enterCompiledCode()</a></li>
+          </ul></dd>
+<dt><a name="entry" href="#entry"><span>entry:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc entry(buffer: CodeBuffer): pointer" href="bassy/machine.html#entry%2CCodeBuffer">machine: proc entry(buffer: CodeBuffer): pointer</a></li>
+          </ul></dd>
+<dt><a name="EqualCondition" href="#EqualCondition"><span>EqualCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.EqualCondition" href="bassy/amd64.html#EqualCondition">amd64: Condition.EqualCondition</a></li>
+          </ul></dd>
+<dt><a name="EqualOp" href="#EqualOp"><span>EqualOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.EqualOp" href="bassy/bytecode.html#EqualOp">bytecode: Op.EqualOp</a></li>
+          </ul></dd>
 <dt><a name="eqv" href="#eqv"><span>eqv:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc eqv(left, right: Value): Value" href="bassy/numbers.html#eqv%2CValue%2CValue">numbers: proc eqv(left, right: Value): Value</a></li>
+          </ul></dd>
+<dt><a name="EqvOp" href="#EqvOp"><span>EqvOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.EqvOp" href="bassy/bytecode.html#EqvOp">bytecode: Op.EqvOp</a></li>
+          </ul></dd>
+<dt><a name="ExitSubOp" href="#ExitSubOp"><span>ExitSubOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ExitSubOp" href="bassy/bytecode.html#ExitSubOp">bytecode: Op.ExitSubOp</a></li>
           </ul></dd>
 <dt><a name="find" href="#find"><span>find:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -364,6 +566,10 @@
 <dt><a name="FindFunction" href="#FindFunction"><span>FindFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.FindFunction" href="bassy/texts.html#FindFunction">texts: TextFunction.FindFunction</a></li>
+          </ul></dd>
+<dt><a name="fixedConstants" href="#fixedConstants"><span>fixedConstants:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc fixedConstants(program: Program): seq[int32]" href="bassy.html#fixedConstants%2CProgram">bassy: proc fixedConstants(program: Program): seq[int32]</a></li>
           </ul></dd>
 <dt><a name="FixedPrint" href="#FixedPrint"><span>FixedPrint:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -376,6 +582,30 @@
 <dt><a name="FormatFunction" href="#FormatFunction"><span>FormatFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.FormatFunction" href="bassy/texts.html#FormatFunction">texts: TextFunction.FormatFunction</a></li>
+          </ul></dd>
+<dt><a name="FrameBase" href="#FrameBase"><span>FrameBase:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const FrameBase" href="bassy/jit.html#FrameBase">jit: const FrameBase</a></li>
+          </ul></dd>
+<dt><a name="frameLayoutMatches" href="#frameLayoutMatches"><span>frameLayoutMatches:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc frameLayoutMatches(): bool" href="bassy.html#frameLayoutMatches">bassy: proc frameLayoutMatches(): bool</a></li>
+          </ul></dd>
+<dt><a name="FrameReturn" href="#FrameReturn"><span>FrameReturn:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const FrameReturn" href="bassy/jit.html#FrameReturn">jit: const FrameReturn</a></li>
+          </ul></dd>
+<dt><a name="FrameRoutine" href="#FrameRoutine"><span>FrameRoutine:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const FrameRoutine" href="bassy/jit.html#FrameRoutine">jit: const FrameRoutine</a></li>
+          </ul></dd>
+<dt><a name="FrameStride" href="#FrameStride"><span>FrameStride:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const FrameStride" href="bassy/jit.html#FrameStride">jit: const FrameStride</a></li>
+          </ul></dd>
+<dt><a name="FrameTag" href="#FrameTag"><span>FrameTag:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const FrameTag" href="bassy/jit.html#FrameTag">jit: const FrameTag</a></li>
           </ul></dd>
 <dt><a name="get" href="#get"><span>get:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -439,9 +669,53 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc globals(program: Program): int" href="bassy.html#globals%2CProgram">bassy: proc globals(program: Program): int</a></li>
           </ul></dd>
+<dt><a name="globalsAddress" href="#globalsAddress"><span>globalsAddress:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc globalsAddress(runtime: var Runtime): pointer" href="bassy.html#globalsAddress%2CRuntime">bassy: proc globalsAddress(runtime: var Runtime): pointer</a></li>
+          </ul></dd>
+<dt><a name="globalValue" href="#globalValue"><span>globalValue:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc globalValue(runtime: Runtime; index: int32): Value" href="bassy.html#globalValue%2CRuntime%2Cint32">bassy: proc globalValue(runtime: Runtime; index: int32): Value</a></li>
+          </ul></dd>
+<dt><a name="GosubOp" href="#GosubOp"><span>GosubOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.GosubOp" href="bassy/bytecode.html#GosubOp">bytecode: Op.GosubOp</a></li>
+          </ul></dd>
+<dt><a name="GreaterCondition" href="#GreaterCondition"><span>GreaterCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.GreaterCondition" href="bassy/amd64.html#GreaterCondition">amd64: Condition.GreaterCondition</a></li>
+          </ul></dd>
+<dt><a name="GreaterEqualCondition" href="#GreaterEqualCondition"><span>GreaterEqualCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.GreaterEqualCondition" href="bassy/amd64.html#GreaterEqualCondition">amd64: Condition.GreaterEqualCondition</a></li>
+          </ul></dd>
+<dt><a name="GreaterEqualOp" href="#GreaterEqualOp"><span>GreaterEqualOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.GreaterEqualOp" href="bassy/bytecode.html#GreaterEqualOp">bytecode: Op.GreaterEqualOp</a></li>
+          </ul></dd>
+<dt><a name="GreaterOp" href="#GreaterOp"><span>GreaterOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.GreaterOp" href="bassy/bytecode.html#GreaterOp">bytecode: Op.GreaterOp</a></li>
+          </ul></dd>
+<dt><a name="HaltOp" href="#HaltOp"><span>HaltOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.HaltOp" href="bassy/bytecode.html#HaltOp">bytecode: Op.HaltOp</a></li>
+          </ul></dd>
+<dt><a name="handedBack" href="#handedBack"><span>handedBack:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc handedBack(runtime: Runtime): int64" href="bassy.html#handedBack%2CRuntime">bassy: proc handedBack(runtime: Runtime): int64</a></li>
+          </ul></dd>
+<dt><a name="Hoisting" href="#Hoisting"><span>Hoisting:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const Hoisting" href="bassy/jit.html#Hoisting">jit: const Hoisting</a></li>
+          </ul></dd>
 <dt><a name="Host" href="#Host"><span>Host:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: object Host" href="bassy.html#Host">bassy: object Host</a></li>
+          </ul></dd>
+<dt><a name="HostCallOp" href="#HostCallOp"><span>HostCallOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.HostCallOp" href="bassy/bytecode.html#HostCallOp">bytecode: Op.HostCallOp</a></li>
           </ul></dd>
 <dt><a name="hostDataIndex" href="#hostDataIndex"><span>hostDataIndex:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -455,9 +729,17 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc imp(left, right: Value): Value" href="bassy/numbers.html#imp%2CValue%2CValue">numbers: proc imp(left, right: Value): Value</a></li>
           </ul></dd>
+<dt><a name="ImpOp" href="#ImpOp"><span>ImpOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ImpOp" href="bassy/bytecode.html#ImpOp">bytecode: Op.ImpOp</a></li>
+          </ul></dd>
 <dt><a name="index" href="#index"><span>index:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="buffers: proc index(storage: BufferStorage; value: Value): int" href="bassy/buffers.html#index%2CBufferStorage%2CValue">buffers: proc index(storage: BufferStorage; value: Value): int</a></li>
+          </ul></dd>
+<dt><a name="initCodeBuffer" href="#initCodeBuffer"><span>initCodeBuffer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc initCodeBuffer(capacity: int): CodeBuffer" href="bassy/machine.html#initCodeBuffer%2Cint">machine: proc initCodeBuffer(capacity: int): CodeBuffer</a></li>
           </ul></dd>
 <dt><a name="initHost" href="#initHost"><span>initHost:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -477,6 +759,10 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: proc initTextStorage(count, bytes, length: int): TextStorage" href="bassy/texts.html#initTextStorage%2Cint%2Cint%2Cint">texts: proc initTextStorage(count, bytes, length: int): TextStorage</a></li>
           </ul></dd>
+<dt><a name="Instruction" href="#Instruction"><span>Instruction:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: object Instruction" href="bassy/bytecode.html#Instruction">bytecode: object Instruction</a></li>
+          </ul></dd>
 <dt><a name="instructions" href="#instructions"><span>instructions:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc instructions(program: Program): int" href="bassy.html#instructions%2CProgram">bassy: proc instructions(program: Program): int</a></li>
@@ -485,13 +771,81 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc instructionsUsed(runtime: Runtime): int64" href="bassy.html#instructionsUsed%2CRuntime">bassy: proc instructionsUsed(runtime: Runtime): int64</a></li>
           </ul></dd>
+<dt><a name="IntegerDivideOp" href="#IntegerDivideOp"><span>IntegerDivideOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.IntegerDivideOp" href="bassy/bytecode.html#IntegerDivideOp">bytecode: Op.IntegerDivideOp</a></li>
+          </ul></dd>
 <dt><a name="IntegerValue" href="#IntegerValue"><span>IntegerValue:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: ValueKind.IntegerValue" href="bassy/numbers.html#IntegerValue">numbers: ValueKind.IntegerValue</a></li>
           </ul></dd>
+<dt><a name="invoke" href="#invoke"><span>invoke:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: proc invoke(machine: Machine; context: var NativeContext): NativeStatus" href="bassy/jit.html#invoke%2CMachine%2CNativeContext">jit: proc invoke(machine: Machine; context: var NativeContext): NativeStatus</a></li>
+          </ul></dd>
+<dt><a name="jitSupported" href="#jitSupported"><span>jitSupported:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc jitSupported(): bool" href="bassy/machine.html#jitSupported">machine: proc jitSupported(): bool</a></li>
+          </ul></dd>
+<dt><a name="JumpIfZeroOp" href="#JumpIfZeroOp"><span>JumpIfZeroOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpIfZeroOp" href="bassy/bytecode.html#JumpIfZeroOp">bytecode: Op.JumpIfZeroOp</a></li>
+          </ul></dd>
+<dt><a name="JumpOp" href="#JumpOp"><span>JumpOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpOp" href="bassy/bytecode.html#JumpOp">bytecode: Op.JumpOp</a></li>
+          </ul></dd>
+<dt><a name="jumpRegister" href="#jumpRegister"><span>jumpRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc jumpRegister(assembler: var Assembler; target: Register)" href="bassy/amd64.html#jumpRegister%2CAssembler%2CRegister">amd64: proc jumpRegister(assembler: var Assembler; target: Register)</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalEqualImmediateOp" href="#JumpUnlessGlobalEqualImmediateOp"><span>JumpUnlessGlobalEqualImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalEqualImmediateOp" href="bassy/bytecode.html#JumpUnlessGlobalEqualImmediateOp">bytecode: Op.JumpUnlessGlobalEqualImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalGreaterEqualImmediateOp" href="#JumpUnlessGlobalGreaterEqualImmediateOp"><span>JumpUnlessGlobalGreaterEqualImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalGreaterEqualImmediateOp" href="bassy/bytecode.html#JumpUnlessGlobalGreaterEqualImmediateOp">bytecode: Op.JumpUnlessGlobalGreaterEqualImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalGreaterImmediateOp" href="#JumpUnlessGlobalGreaterImmediateOp"><span>JumpUnlessGlobalGreaterImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalGreaterImmediateOp" href="bassy/bytecode.html#JumpUnlessGlobalGreaterImmediateOp">bytecode: Op.JumpUnlessGlobalGreaterImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalLessEqualImmediateOp" href="#JumpUnlessGlobalLessEqualImmediateOp"><span>JumpUnlessGlobalLessEqualImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalLessEqualImmediateOp" href="bassy/bytecode.html#JumpUnlessGlobalLessEqualImmediateOp">bytecode: Op.JumpUnlessGlobalLessEqualImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalLessImmediateOp" href="#JumpUnlessGlobalLessImmediateOp"><span>JumpUnlessGlobalLessImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalLessImmediateOp" href="bassy/bytecode.html#JumpUnlessGlobalLessImmediateOp">bytecode: Op.JumpUnlessGlobalLessImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalModuloEqualZeroOp" href="#JumpUnlessGlobalModuloEqualZeroOp"><span>JumpUnlessGlobalModuloEqualZeroOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalModuloEqualZeroOp" href="bassy/bytecode.html#JumpUnlessGlobalModuloEqualZeroOp">bytecode: Op.JumpUnlessGlobalModuloEqualZeroOp</a></li>
+          </ul></dd>
+<dt><a name="JumpUnlessGlobalNotEqualImmediateOp" href="#JumpUnlessGlobalNotEqualImmediateOp"><span>JumpUnlessGlobalNotEqualImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.JumpUnlessGlobalNotEqualImmediateOp" href="bassy/bytecode.html#JumpUnlessGlobalNotEqualImmediateOp">bytecode: Op.JumpUnlessGlobalNotEqualImmediateOp</a></li>
+          </ul></dd>
 <dt><a name="kind" href="#kind"><span>kind:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc kind(value: Value): ValueKind" href="bassy/numbers.html#kind%2CValue">numbers: proc kind(value: Value): ValueKind</a></li>
+          </ul></dd>
+<dt><a name="Label" href="#Label"><span>Label:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: type Label" href="bassy/amd64.html#Label">amd64: type Label</a></li>
+          </ul></dd>
+<dt><a name="label" href="#label"><span>label:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc label(assembler: var Assembler): Label" href="bassy/amd64.html#label%2CAssembler">amd64: proc label(assembler: var Assembler): Label</a></li>
+          </ul></dd>
+<dt><a name="layoutMatches" href="#layoutMatches"><span>layoutMatches:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: proc layoutMatches(): bool" href="bassy/jit.html#layoutMatches">jit: proc layoutMatches(): bool</a></li>
+          </ul></dd>
+<dt><a name="leaveCompiledCode" href="#leaveCompiledCode"><span>leaveCompiledCode:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc leaveCompiledCode()" href="bassy/machine.html#leaveCompiledCode">machine: proc leaveCompiledCode()</a></li>
           </ul></dd>
 <dt><a name="LeftFunction" href="#LeftFunction"><span>LeftFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -504,6 +858,8 @@
 <dt><a name="len" href="#len"><span>len:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc len(view: ArrayView): int" href="bassy.html#len%2CArrayView">bassy: proc len(view: ArrayView): int</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="machine: proc len(buffer: CodeBuffer): int" href="bassy/machine.html#len%2CCodeBuffer">machine: proc len(buffer: CodeBuffer): int</a></li>
           </ul></dd>
 <dt><a name="length" href="#length"><span>length:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -514,6 +870,22 @@
 <dt><a name="LengthFunction" href="#LengthFunction"><span>LengthFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.LengthFunction" href="bassy/texts.html#LengthFunction">texts: TextFunction.LengthFunction</a></li>
+          </ul></dd>
+<dt><a name="LessCondition" href="#LessCondition"><span>LessCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.LessCondition" href="bassy/amd64.html#LessCondition">amd64: Condition.LessCondition</a></li>
+          </ul></dd>
+<dt><a name="LessEqualCondition" href="#LessEqualCondition"><span>LessEqualCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.LessEqualCondition" href="bassy/amd64.html#LessEqualCondition">amd64: Condition.LessEqualCondition</a></li>
+          </ul></dd>
+<dt><a name="LessEqualOp" href="#LessEqualOp"><span>LessEqualOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LessEqualOp" href="bassy/bytecode.html#LessEqualOp">bytecode: Op.LessEqualOp</a></li>
+          </ul></dd>
+<dt><a name="LessOp" href="#LessOp"><span>LessOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LessOp" href="bassy/bytecode.html#LessOp">bytecode: Op.LessOp</a></li>
           </ul></dd>
 <dt><a name="Limits" href="#Limits"><span>Limits:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -527,9 +899,51 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc literalCount(program: Program): int" href="bassy.html#literalCount%2CProgram">bassy: proc literalCount(program: Program): int</a></li>
           </ul></dd>
+<dt><a name="loadByteZeroed" href="#loadByteZeroed"><span>loadByteZeroed:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc loadByteZeroed(assembler: var Assembler; destination, base: Register; offset = 0)" href="bassy/amd64.html#loadByteZeroed%2CAssembler%2CRegister%2CRegister%2Cint">amd64: proc loadByteZeroed(assembler: var Assembler; destination, base: Register; offset = 0)</a></li>
+          </ul></dd>
+<dt><a name="loadDouble" href="#loadDouble"><span>loadDouble:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc loadDouble(assembler: var Assembler; destination, base: Register; offset = 0)" href="bassy/amd64.html#loadDouble%2CAssembler%2CRegister%2CRegister%2Cint">amd64: proc loadDouble(assembler: var Assembler; destination, base: Register; offset = 0)</a></li>
+          </ul></dd>
+<dt><a name="LoadFixedOp" href="#LoadFixedOp"><span>LoadFixedOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LoadFixedOp" href="bassy/bytecode.html#LoadFixedOp">bytecode: Op.LoadFixedOp</a></li>
+          </ul></dd>
+<dt><a name="LoadGlobalOp" href="#LoadGlobalOp"><span>LoadGlobalOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LoadGlobalOp" href="bassy/bytecode.html#LoadGlobalOp">bytecode: Op.LoadGlobalOp</a></li>
+          </ul></dd>
+<dt><a name="LoadHostDataOp" href="#LoadHostDataOp"><span>LoadHostDataOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LoadHostDataOp" href="bassy/bytecode.html#LoadHostDataOp">bytecode: Op.LoadHostDataOp</a></li>
+          </ul></dd>
+<dt><a name="loadImmediate" href="#loadImmediate"><span>loadImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc loadImmediate(assembler: var Assembler; width: Width; destination: Register;
+              value: int64)" href="bassy/amd64.html#loadImmediate%2CAssembler%2CWidth%2CRegister%2Cint64">amd64: proc loadImmediate(assembler: var Assembler; width: Width; destination: Register;
+              value: int64)</a></li>
+          </ul></dd>
+<dt><a name="LoadImmediateOp" href="#LoadImmediateOp"><span>LoadImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LoadImmediateOp" href="bassy/bytecode.html#LoadImmediateOp">bytecode: Op.LoadImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="LoadStringOp" href="#LoadStringOp"><span>LoadStringOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.LoadStringOp" href="bassy/bytecode.html#LoadStringOp">bytecode: Op.LoadStringOp</a></li>
+          </ul></dd>
+<dt><a name="loadWord" href="#loadWord"><span>loadWord:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc loadWord(assembler: var Assembler; destination, base: Register; offset = 0)" href="bassy/amd64.html#loadWord%2CAssembler%2CRegister%2CRegister%2Cint">amd64: proc loadWord(assembler: var Assembler; destination, base: Register; offset = 0)</a></li>
+          </ul></dd>
 <dt><a name="LowerFunction" href="#LowerFunction"><span>LowerFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.LowerFunction" href="bassy/texts.html#LowerFunction">texts: TextFunction.LowerFunction</a></li>
+          </ul></dd>
+<dt><a name="Machine" href="#Machine"><span>Machine:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: type Machine" href="bassy/jit.html#Machine">jit: type Machine</a></li>
           </ul></dd>
 <dt><a name="mapped" href="#mapped"><span>mapped:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -551,35 +965,203 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: const MaximumSyntaxDepth" href="bassy.html#MaximumSyntaxDepth">bassy: const MaximumSyntaxDepth</a></li>
           </ul></dd>
+<dt><a name="maxRegisterCount" href="#maxRegisterCount"><span>maxRegisterCount:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc maxRegisterCount(program: Program): int32" href="bassy.html#maxRegisterCount%2CProgram">bassy: proc maxRegisterCount(program: Program): int32</a></li>
+          </ul></dd>
 <dt><a name="memoryBytes" href="#memoryBytes"><span>memoryBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc memoryBytes(runtime: Runtime): int64" href="bassy.html#memoryBytes%2CRuntime">bassy: proc memoryBytes(runtime: Runtime): int64</a></li>
           <li><a class="reference external"
           data-doc-search-tag="buffers: proc memoryBytes(storage: BufferStorage): int64" href="bassy/buffers.html#memoryBytes%2CBufferStorage">buffers: proc memoryBytes(storage: BufferStorage): int64</a></li>
           </ul></dd>
+<dt><a name="MeterOp" href="#MeterOp"><span>MeterOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.MeterOp" href="bassy/bytecode.html#MeterOp">bytecode: Op.MeterOp</a></li>
+          </ul></dd>
 <dt><a name="MidFunction" href="#MidFunction"><span>MidFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.MidFunction" href="bassy/texts.html#MidFunction">texts: TextFunction.MidFunction</a></li>
+          </ul></dd>
+<dt><a name="ModelsFixed" href="#ModelsFixed"><span>ModelsFixed:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const ModelsFixed" href="bassy/jit.html#ModelsFixed">jit: const ModelsFixed</a></li>
+          </ul></dd>
+<dt><a name="ModuloGlobalImmediateOp" href="#ModuloGlobalImmediateOp"><span>ModuloGlobalImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ModuloGlobalImmediateOp" href="bassy/bytecode.html#ModuloGlobalImmediateOp">bytecode: Op.ModuloGlobalImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="ModuloOp" href="#ModuloOp"><span>ModuloOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ModuloOp" href="bassy/bytecode.html#ModuloOp">bytecode: Op.ModuloOp</a></li>
+          </ul></dd>
+<dt><a name="MoveGlobalOp" href="#MoveGlobalOp"><span>MoveGlobalOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.MoveGlobalOp" href="bassy/bytecode.html#MoveGlobalOp">bytecode: Op.MoveGlobalOp</a></li>
+          </ul></dd>
+<dt><a name="MoveOp" href="#MoveOp"><span>MoveOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.MoveOp" href="bassy/bytecode.html#MoveOp">bytecode: Op.MoveOp</a></li>
+          </ul></dd>
+<dt><a name="moveRegister" href="#moveRegister"><span>moveRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc moveRegister(assembler: var Assembler; width: Width;
+             destination, source: Register)" href="bassy/amd64.html#moveRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc moveRegister(assembler: var Assembler; width: Width;
+             destination, source: Register)</a></li>
+          </ul></dd>
+<dt><a name="MultiplyOp" href="#MultiplyOp"><span>MultiplyOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.MultiplyOp" href="bassy/bytecode.html#MultiplyOp">bytecode: Op.MultiplyOp</a></li>
+          </ul></dd>
+<dt><a name="multiplyRegister" href="#multiplyRegister"><span>multiplyRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc multiplyRegister(assembler: var Assembler; width: Width;
+                 destination, source: Register)" href="bassy/amd64.html#multiplyRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc multiplyRegister(assembler: var Assembler; width: Width;
+                 destination, source: Register)</a></li>
+          </ul></dd>
+<dt><a name="NativeAmd64" href="#NativeAmd64"><span>NativeAmd64:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const NativeAmd64" href="bassy/jit.html#NativeAmd64">jit: const NativeAmd64</a></li>
+          </ul></dd>
+<dt><a name="NativeArm64" href="#NativeArm64"><span>NativeArm64:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const NativeArm64" href="bassy/jit.html#NativeArm64">jit: const NativeArm64</a></li>
+          </ul></dd>
+<dt><a name="NativeCall" href="#NativeCall"><span>NativeCall:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: type NativeCall" href="bassy/jit.html#NativeCall">jit: type NativeCall</a></li>
+          </ul></dd>
+<dt><a name="NativeCode" href="#NativeCode"><span>NativeCode:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: const NativeCode" href="bassy/machine.html#NativeCode">machine: const NativeCode</a></li>
+          </ul></dd>
+<dt><a name="NativeCompleted" href="#NativeCompleted"><span>NativeCompleted:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: NativeStatus.NativeCompleted" href="bassy/jit.html#NativeCompleted">jit: NativeStatus.NativeCompleted</a></li>
+          </ul></dd>
+<dt><a name="NativeContext" href="#NativeContext"><span>NativeContext:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: object NativeContext" href="bassy/jit.html#NativeContext">jit: object NativeContext</a></li>
+          </ul></dd>
+<dt><a name="NativeFailed" href="#NativeFailed"><span>NativeFailed:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: NativeStatus.NativeFailed" href="bassy/jit.html#NativeFailed">jit: NativeStatus.NativeFailed</a></li>
           </ul></dd>
 <dt><a name="nativeMemoryBytes" href="#nativeMemoryBytes"><span>nativeMemoryBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc nativeMemoryBytes(runtime: Runtime): int64" href="bassy.html#nativeMemoryBytes%2CRuntime">bassy: proc nativeMemoryBytes(runtime: Runtime): int64</a></li>
           </ul></dd>
+<dt><a name="NativeRetired" href="#NativeRetired"><span>NativeRetired:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: NativeStatus.NativeRetired" href="bassy/jit.html#NativeRetired">jit: NativeStatus.NativeRetired</a></li>
+          </ul></dd>
+<dt><a name="NativeStatus" href="#NativeStatus"><span>NativeStatus:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: enum NativeStatus" href="bassy/jit.html#NativeStatus">jit: enum NativeStatus</a></li>
+          </ul></dd>
+<dt><a name="NegateOp" href="#NegateOp"><span>NegateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.NegateOp" href="bassy/bytecode.html#NegateOp">bytecode: Op.NegateOp</a></li>
+          </ul></dd>
+<dt><a name="negateRegister" href="#negateRegister"><span>negateRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc negateRegister(assembler: var Assembler; width: Width; target: Register)" href="bassy/amd64.html#negateRegister%2CAssembler%2CWidth%2CRegister">amd64: proc negateRegister(assembler: var Assembler; width: Width; target: Register)</a></li>
+          </ul></dd>
 <dt><a name="NewlinePrint" href="#NewlinePrint"><span>NewlinePrint:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: PrintKind.NewlinePrint" href="bassy.html#NewlinePrint">bassy: PrintKind.NewlinePrint</a></li>
+          </ul></dd>
+<dt><a name="NoOverflowCondition" href="#NoOverflowCondition"><span>NoOverflowCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.NoOverflowCondition" href="bassy/amd64.html#NoOverflowCondition">amd64: Condition.NoOverflowCondition</a></li>
+          </ul></dd>
+<dt><a name="NoParityCondition" href="#NoParityCondition"><span>NoParityCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.NoParityCondition" href="bassy/amd64.html#NoParityCondition">amd64: Condition.NoParityCondition</a></li>
+          </ul></dd>
+<dt><a name="NoSignCondition" href="#NoSignCondition"><span>NoSignCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.NoSignCondition" href="bassy/amd64.html#NoSignCondition">amd64: Condition.NoSignCondition</a></li>
+          </ul></dd>
+<dt><a name="NotEqualCondition" href="#NotEqualCondition"><span>NotEqualCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.NotEqualCondition" href="bassy/amd64.html#NotEqualCondition">amd64: Condition.NotEqualCondition</a></li>
+          </ul></dd>
+<dt><a name="NotEqualOp" href="#NotEqualOp"><span>NotEqualOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.NotEqualOp" href="bassy/bytecode.html#NotEqualOp">bytecode: Op.NotEqualOp</a></li>
           </ul></dd>
 <dt><a name="NoTextFunction" href="#NoTextFunction"><span>NoTextFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.NoTextFunction" href="bassy/texts.html#NoTextFunction">texts: TextFunction.NoTextFunction</a></li>
           </ul></dd>
+<dt><a name="NotOp" href="#NotOp"><span>NotOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.NotOp" href="bassy/bytecode.html#NotOp">bytecode: Op.NotOp</a></li>
+          </ul></dd>
+<dt><a name="notRegister" href="#notRegister"><span>notRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc notRegister(assembler: var Assembler; width: Width; target: Register)" href="bassy/amd64.html#notRegister%2CAssembler%2CWidth%2CRegister">amd64: proc notRegister(assembler: var Assembler; width: Width; target: Register)</a></li>
+          </ul></dd>
 <dt><a name="NumericHostProc" href="#NumericHostProc"><span>NumericHostProc:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: type NumericHostProc" href="bassy.html#NumericHostProc">bassy: type NumericHostProc</a></li>
           </ul></dd>
+<dt><a name="offset" href="#offset"><span>offset:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc offset(runtime: Runtime): int32" href="bassy.html#offset%2CRuntime">bassy: proc offset(runtime: Runtime): int32</a></li>
+          </ul></dd>
+<dt><a name="offsetOf" href="#offsetOf"><span>offsetOf:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc offsetOf(assembler: Assembler; target: Label): int" href="bassy/amd64.html#offsetOf%2CAssembler%2CLabel">amd64: proc offsetOf(assembler: Assembler; target: Label): int</a></li>
+          </ul></dd>
+<dt><a name="Op" href="#Op"><span>Op:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: enum Op" href="bassy/bytecode.html#Op">bytecode: enum Op</a></li>
+          </ul></dd>
+<dt><a name="OrOp" href="#OrOp"><span>OrOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.OrOp" href="bassy/bytecode.html#OrOp">bytecode: Op.OrOp</a></li>
+          </ul></dd>
+<dt><a name="orRegister" href="#orRegister"><span>orRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc orRegister(assembler: var Assembler; width: Width; destination, source: Register)" href="bassy/amd64.html#orRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc orRegister(assembler: var Assembler; width: Width; destination, source: Register)</a></li>
+          </ul></dd>
+<dt><a name="OverflowCondition" href="#OverflowCondition"><span>OverflowCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.OverflowCondition" href="bassy/amd64.html#OverflowCondition">amd64: Condition.OverflowCondition</a></li>
+          </ul></dd>
 <dt><a name="overlaps" href="#overlaps"><span>overlaps:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc overlaps(left, right: ArrayView): bool" href="bassy.html#overlaps%2CArrayView%2CArrayView">bassy: proc overlaps(left, right: ArrayView): bool</a></li>
+          </ul></dd>
+<dt><a name="ownerAddress" href="#ownerAddress"><span>ownerAddress:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="texts: proc ownerAddress(storage: var TextStorage): pointer" href="bassy/texts.html#ownerAddress%2CTextStorage">texts: proc ownerAddress(storage: var TextStorage): pointer</a></li>
+          </ul></dd>
+<dt><a name="PageBytes" href="#PageBytes"><span>PageBytes:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: const PageBytes" href="bassy/machine.html#PageBytes">machine: const PageBytes</a></li>
+          </ul></dd>
+<dt><a name="ParityCondition" href="#ParityCondition"><span>ParityCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.ParityCondition" href="bassy/amd64.html#ParityCondition">amd64: Condition.ParityCondition</a></li>
+          </ul></dd>
+<dt><a name="place" href="#place"><span>place:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc place(assembler: var Assembler; target: Label)" href="bassy/amd64.html#place%2CAssembler%2CLabel">amd64: proc place(assembler: var Assembler; target: Label)</a></li>
+          </ul></dd>
+<dt><a name="Pool" href="#Pool"><span>Pool:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: const Pool" href="bassy/jit.html#Pool">jit: const Pool</a></li>
+          </ul></dd>
+<dt><a name="pop" href="#pop"><span>pop:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc pop(assembler: var Assembler; destination: Register)" href="bassy/amd64.html#pop%2CAssembler%2CRegister">amd64: proc pop(assembler: var Assembler; destination: Register)</a></li>
+          </ul></dd>
+<dt><a name="position" href="#position"><span>position:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc position(assembler: Assembler): int" href="bassy/amd64.html#position%2CAssembler">amd64: proc position(assembler: Assembler): int</a></li>
           </ul></dd>
 <dt><a name="PrintEvent" href="#PrintEvent"><span>PrintEvent:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -589,13 +1171,29 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: enum PrintKind" href="bassy.html#PrintKind">bassy: enum PrintKind</a></li>
           </ul></dd>
+<dt><a name="PrintNewlineOp" href="#PrintNewlineOp"><span>PrintNewlineOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.PrintNewlineOp" href="bassy/bytecode.html#PrintNewlineOp">bytecode: Op.PrintNewlineOp</a></li>
+          </ul></dd>
 <dt><a name="PrintProc" href="#PrintProc"><span>PrintProc:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: type PrintProc" href="bassy.html#PrintProc">bassy: type PrintProc</a></li>
           </ul></dd>
+<dt><a name="PrintTextOp" href="#PrintTextOp"><span>PrintTextOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.PrintTextOp" href="bassy/bytecode.html#PrintTextOp">bytecode: Op.PrintTextOp</a></li>
+          </ul></dd>
+<dt><a name="PrintValueOp" href="#PrintValueOp"><span>PrintValueOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.PrintValueOp" href="bassy/bytecode.html#PrintValueOp">bytecode: Op.PrintValueOp</a></li>
+          </ul></dd>
 <dt><a name="Program" href="#Program"><span>Program:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: type Program" href="bassy.html#Program">bassy: type Program</a></li>
+          </ul></dd>
+<dt><a name="push" href="#push"><span>push:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc push(assembler: var Assembler; source: Register)" href="bassy/amd64.html#push%2CAssembler%2CRegister">amd64: proc push(assembler: var Assembler; source: Register)</a></li>
           </ul></dd>
 <dt><a name="put" href="#put"><span>put:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -621,9 +1219,77 @@
           <li><a class="reference external"
           data-doc-search-tag="bassy: proc putString(pool: StringPool; text: openArray[char]): int32" href="bassy.html#putString%2CStringPool%2CopenArray%5Bchar%5D">bassy: proc putString(pool: StringPool; text: openArray[char]): int32</a></li>
           </ul></dd>
+<dt><a name="r10" href="#r10"><span>r10:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r10" href="bassy/amd64.html#r10">amd64: const r10</a></li>
+          </ul></dd>
+<dt><a name="r11" href="#r11"><span>r11:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r11" href="bassy/amd64.html#r11">amd64: const r11</a></li>
+          </ul></dd>
+<dt><a name="r12" href="#r12"><span>r12:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r12" href="bassy/amd64.html#r12">amd64: const r12</a></li>
+          </ul></dd>
+<dt><a name="r13" href="#r13"><span>r13:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r13" href="bassy/amd64.html#r13">amd64: const r13</a></li>
+          </ul></dd>
+<dt><a name="r14" href="#r14"><span>r14:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r14" href="bassy/amd64.html#r14">amd64: const r14</a></li>
+          </ul></dd>
+<dt><a name="r15" href="#r15"><span>r15:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r15" href="bassy/amd64.html#r15">amd64: const r15</a></li>
+          </ul></dd>
+<dt><a name="r8" href="#r8"><span>r8:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r8" href="bassy/amd64.html#r8">amd64: const r8</a></li>
+          </ul></dd>
+<dt><a name="r9" href="#r9"><span>r9:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const r9" href="bassy/amd64.html#r9">amd64: const r9</a></li>
+          </ul></dd>
+<dt><a name="rax" href="#rax"><span>rax:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rax" href="bassy/amd64.html#rax">amd64: const rax</a></li>
+          </ul></dd>
+<dt><a name="rbp" href="#rbp"><span>rbp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rbp" href="bassy/amd64.html#rbp">amd64: const rbp</a></li>
+          </ul></dd>
+<dt><a name="rbx" href="#rbx"><span>rbx:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rbx" href="bassy/amd64.html#rbx">amd64: const rbx</a></li>
+          </ul></dd>
+<dt><a name="rcx" href="#rcx"><span>rcx:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rcx" href="bassy/amd64.html#rcx">amd64: const rcx</a></li>
+          </ul></dd>
+<dt><a name="rdi" href="#rdi"><span>rdi:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rdi" href="bassy/amd64.html#rdi">amd64: const rdi</a></li>
+          </ul></dd>
+<dt><a name="rdx" href="#rdx"><span>rdx:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rdx" href="bassy/amd64.html#rdx">amd64: const rdx</a></li>
+          </ul></dd>
+<dt><a name="Register" href="#Register"><span>Register:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: type Register" href="bassy/amd64.html#Register">amd64: type Register</a></li>
+          </ul></dd>
+<dt><a name="release" href="#release"><span>release:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc release(buffer: var CodeBuffer)" href="bassy/machine.html#release%2CCodeBuffer">machine: proc release(buffer: var CodeBuffer)</a></li>
+          </ul></dd>
 <dt><a name="releaseNativeMemory" href="#releaseNativeMemory"><span>releaseNativeMemory:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc releaseNativeMemory(runtime: Runtime; bytes: int64)" href="bassy.html#releaseNativeMemory%2CRuntime%2Cint64">bassy: proc releaseNativeMemory(runtime: Runtime; bytes: int64)</a></li>
+          </ul></dd>
+<dt><a name="remainingBudget" href="#remainingBudget"><span>remainingBudget:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc remainingBudget(runtime: Runtime): (int64, int64)" href="bassy.html#remainingBudget%2CRuntime">bassy: proc remainingBudget(runtime: Runtime): (int64, int64)</a></li>
           </ul></dd>
 <dt><a name="repeated" href="#repeated"><span>repeated:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -651,9 +1317,25 @@
           <li><a class="reference external"
           data-doc-search-tag="texts: proc reset(storage: var TextStorage; roots: var seq[Value])" href="bassy/texts.html#reset%2CTextStorage%2Cseq%5BValue%5D">texts: proc reset(storage: var TextStorage; roots: var seq[Value])</a></li>
           </ul></dd>
+<dt><a name="resolve" href="#resolve"><span>resolve:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc resolve(assembler: var Assembler)" href="bassy/amd64.html#resolve%2CAssembler">amd64: proc resolve(assembler: var Assembler)</a></li>
+          </ul></dd>
 <dt><a name="restart" href="#restart"><span>restart:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc restart(runtime: var Runtime)" href="bassy.html#restart%2CRuntime">bassy: proc restart(runtime: var Runtime)</a></li>
+          </ul></dd>
+<dt><a name="ReturnLabelOp" href="#ReturnLabelOp"><span>ReturnLabelOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ReturnLabelOp" href="bassy/bytecode.html#ReturnLabelOp">bytecode: Op.ReturnLabelOp</a></li>
+          </ul></dd>
+<dt><a name="ReturnOp" href="#ReturnOp"><span>ReturnOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.ReturnOp" href="bassy/bytecode.html#ReturnOp">bytecode: Op.ReturnOp</a></li>
+          </ul></dd>
+<dt><a name="returnToCaller" href="#returnToCaller"><span>returnToCaller:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc returnToCaller(assembler: var Assembler)" href="bassy/amd64.html#returnToCaller%2CAssembler">amd64: proc returnToCaller(assembler: var Assembler)</a></li>
           </ul></dd>
 <dt><a name="RightFunction" href="#RightFunction"><span>RightFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -663,13 +1345,33 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.RightTrimFunction" href="bassy/texts.html#RightTrimFunction">texts: TextFunction.RightTrimFunction</a></li>
           </ul></dd>
+<dt><a name="RoutineExtent" href="#RoutineExtent"><span>RoutineExtent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: object RoutineExtent" href="bassy/jit.html#RoutineExtent">jit: object RoutineExtent</a></li>
+          </ul></dd>
+<dt><a name="routineExtents" href="#routineExtents"><span>routineExtents:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc routineExtents(program: Program): seq[RoutineExtent]" href="bassy.html#routineExtents%2CProgram">bassy: proc routineExtents(program: Program): seq[RoutineExtent]</a></li>
+          </ul></dd>
 <dt><a name="routines" href="#routines"><span>routines:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc routines(program: Program): int" href="bassy.html#routines%2CProgram">bassy: proc routines(program: Program): int</a></li>
           </ul></dd>
+<dt><a name="rsi" href="#rsi"><span>rsi:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rsi" href="bassy/amd64.html#rsi">amd64: const rsi</a></li>
+          </ul></dd>
+<dt><a name="rsp" href="#rsp"><span>rsp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: const rsp" href="bassy/amd64.html#rsp">amd64: const rsp</a></li>
+          </ul></dd>
 <dt><a name="run" href="#run"><span>run:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc run(runtime: var Runtime; print: PrintProc = nil): RunStats" href="bassy.html#run%2CRuntime%2CPrintProc">bassy: proc run(runtime: var Runtime; print: PrintProc = nil): RunStats</a></li>
+          </ul></dd>
+<dt><a name="runningCompiledCode" href="#runningCompiledCode"><span>runningCompiledCode:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc runningCompiledCode(): bool" href="bassy/machine.html#runningCompiledCode">machine: proc runningCompiledCode(): bool</a></li>
           </ul></dd>
 <dt><a name="RunStats" href="#RunStats"><span>RunStats:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -678,6 +1380,22 @@
 <dt><a name="Runtime" href="#Runtime"><span>Runtime:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: type Runtime" href="bassy.html#Runtime">bassy: type Runtime</a></li>
+          </ul></dd>
+<dt><a name="seal" href="#seal"><span>seal:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc seal(buffer: var CodeBuffer)" href="bassy/machine.html#seal%2CCodeBuffer">machine: proc seal(buffer: var CodeBuffer)</a></li>
+          </ul></dd>
+<dt><a name="SetArgumentGlobalOp" href="#SetArgumentGlobalOp"><span>SetArgumentGlobalOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.SetArgumentGlobalOp" href="bassy/bytecode.html#SetArgumentGlobalOp">bytecode: Op.SetArgumentGlobalOp</a></li>
+          </ul></dd>
+<dt><a name="SetArgumentImmediateOp" href="#SetArgumentImmediateOp"><span>SetArgumentImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.SetArgumentImmediateOp" href="bassy/bytecode.html#SetArgumentImmediateOp">bytecode: Op.SetArgumentImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="SetArgumentOp" href="#SetArgumentOp"><span>SetArgumentOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.SetArgumentOp" href="bassy/bytecode.html#SetArgumentOp">bytecode: Op.SetArgumentOp</a></li>
           </ul></dd>
 <dt><a name="setArray" href="#setArray"><span>setArray:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -705,6 +1423,38 @@
           <li><a class="reference external"
           data-doc-search-tag="bassy: proc setGlobal(runtime: var Runtime; name: string; value: Value)" href="bassy.html#setGlobal%2CRuntime%2Cstring%2CValue">bassy: proc setGlobal(runtime: var Runtime; name: string; value: Value)</a></li>
           </ul></dd>
+<dt><a name="setIfCondition" href="#setIfCondition"><span>setIfCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc setIfCondition(assembler: var Assembler; target: Register; condition: Condition)" href="bassy/amd64.html#setIfCondition%2CAssembler%2CRegister%2CCondition">amd64: proc setIfCondition(assembler: var Assembler; target: Register; condition: Condition)</a></li>
+          </ul></dd>
+<dt><a name="shiftLeftImmediate" href="#shiftLeftImmediate"><span>shiftLeftImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc shiftLeftImmediate(assembler: var Assembler; width: Width; target: Register;
+                   count: int)" href="bassy/amd64.html#shiftLeftImmediate%2CAssembler%2CWidth%2CRegister%2Cint">amd64: proc shiftLeftImmediate(assembler: var Assembler; width: Width; target: Register;
+                   count: int)</a></li>
+          </ul></dd>
+<dt><a name="shiftRightImmediate" href="#shiftRightImmediate"><span>shiftRightImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc shiftRightImmediate(assembler: var Assembler; width: Width; target: Register;
+                    count: int)" href="bassy/amd64.html#shiftRightImmediate%2CAssembler%2CWidth%2CRegister%2Cint">amd64: proc shiftRightImmediate(assembler: var Assembler; width: Width; target: Register;
+                    count: int)</a></li>
+          </ul></dd>
+<dt><a name="SignCondition" href="#SignCondition"><span>SignCondition:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Condition.SignCondition" href="bassy/amd64.html#SignCondition">amd64: Condition.SignCondition</a></li>
+          </ul></dd>
+<dt><a name="signedDivide" href="#signedDivide"><span>signedDivide:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc signedDivide(assembler: var Assembler; width: Width; divisor: Register)" href="bassy/amd64.html#signedDivide%2CAssembler%2CWidth%2CRegister">amd64: proc signedDivide(assembler: var Assembler; width: Width; divisor: Register)</a></li>
+          </ul></dd>
+<dt><a name="signExtendDouble" href="#signExtendDouble"><span>signExtendDouble:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc signExtendDouble(assembler: var Assembler; destination, source: Register)" href="bassy/amd64.html#signExtendDouble%2CAssembler%2CRegister%2CRegister">amd64: proc signExtendDouble(assembler: var Assembler; destination, source: Register)</a></li>
+          </ul></dd>
+<dt><a name="signExtendToPair" href="#signExtendToPair"><span>signExtendToPair:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc signExtendToPair(assembler: var Assembler; width: Width)" href="bassy/amd64.html#signExtendToPair%2CAssembler%2CWidth">amd64: proc signExtendToPair(assembler: var Assembler; width: Width)</a></li>
+          </ul></dd>
 <dt><a name="slice" href="#slice"><span>slice:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc slice(storage: var TextStorage; value: Value; start, length: int): Value" href="bassy/texts.html#slice%2CTextStorage%2CValue%2Cint%2Cint">texts: proc slice(storage: var TextStorage; value: Value; start, length: int): Value</a></li>
@@ -713,9 +1463,47 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: TextFunction.SpaceFunction" href="bassy/texts.html#SpaceFunction">texts: TextFunction.SpaceFunction</a></li>
           </ul></dd>
+<dt><a name="spansAddress" href="#spansAddress"><span>spansAddress:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="texts: proc spansAddress(storage: var TextStorage): pointer" href="bassy/texts.html#spansAddress%2CTextStorage">texts: proc spansAddress(storage: var TextStorage): pointer</a></li>
+          </ul></dd>
 <dt><a name="storageBytes" href="#storageBytes"><span>storageBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc storageBytes(count, bytes: int): int64" href="bassy/texts.html#storageBytes%2Cint%2Cint">texts: proc storageBytes(count, bytes: int): int64</a></li>
+          </ul></dd>
+<dt><a name="storeByteImmediate" href="#storeByteImmediate"><span>storeByteImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc storeByteImmediate(assembler: var Assembler; base: Register; offset: int;
+                   value: byte)" href="bassy/amd64.html#storeByteImmediate%2CAssembler%2CRegister%2Cint%2Cbyte">amd64: proc storeByteImmediate(assembler: var Assembler; base: Register; offset: int;
+                   value: byte)</a></li>
+          </ul></dd>
+<dt><a name="storeByteLow" href="#storeByteLow"><span>storeByteLow:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc storeByteLow(assembler: var Assembler; base: Register; offset: int;
+             source: Register)" href="bassy/amd64.html#storeByteLow%2CAssembler%2CRegister%2Cint%2CRegister">amd64: proc storeByteLow(assembler: var Assembler; base: Register; offset: int;
+             source: Register)</a></li>
+          </ul></dd>
+<dt><a name="storeDouble" href="#storeDouble"><span>storeDouble:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc storeDouble(assembler: var Assembler; source, base: Register; offset = 0)" href="bassy/amd64.html#storeDouble%2CAssembler%2CRegister%2CRegister%2Cint">amd64: proc storeDouble(assembler: var Assembler; source, base: Register; offset = 0)</a></li>
+          </ul></dd>
+<dt><a name="StoreGlobalImmediateOp" href="#StoreGlobalImmediateOp"><span>StoreGlobalImmediateOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.StoreGlobalImmediateOp" href="bassy/bytecode.html#StoreGlobalImmediateOp">bytecode: Op.StoreGlobalImmediateOp</a></li>
+          </ul></dd>
+<dt><a name="StoreGlobalOp" href="#StoreGlobalOp"><span>StoreGlobalOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.StoreGlobalOp" href="bassy/bytecode.html#StoreGlobalOp">bytecode: Op.StoreGlobalOp</a></li>
+          </ul></dd>
+<dt><a name="storeWord" href="#storeWord"><span>storeWord:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc storeWord(assembler: var Assembler; source, base: Register; offset = 0)" href="bassy/amd64.html#storeWord%2CAssembler%2CRegister%2CRegister%2Cint">amd64: proc storeWord(assembler: var Assembler; source, base: Register; offset = 0)</a></li>
+          </ul></dd>
+<dt><a name="storeWordImmediate" href="#storeWordImmediate"><span>storeWordImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc storeWordImmediate(assembler: var Assembler; base: Register; offset: int;
+                   value: int32)" href="bassy/amd64.html#storeWordImmediate%2CAssembler%2CRegister%2Cint%2Cint32">amd64: proc storeWordImmediate(assembler: var Assembler; base: Register; offset: int;
+                   value: int32)</a></li>
           </ul></dd>
 <dt><a name="stringBytes" href="#stringBytes"><span>stringBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -751,9 +1539,43 @@
 <li><a class="reference external"
           data-doc-search-tag="numbers: proc stringValue(owner: uint32; handle: int32): Value" href="bassy/numbers.html#stringValue%2Cuint32%2Cint32">numbers: proc stringValue(owner: uint32; handle: int32): Value</a></li>
           </ul></dd>
+<dt><a name="subtractImmediate" href="#subtractImmediate"><span>subtractImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc subtractImmediate(assembler: var Assembler; width: Width; target: Register;
+                  value: int32)" href="bassy/amd64.html#subtractImmediate%2CAssembler%2CWidth%2CRegister%2Cint32">amd64: proc subtractImmediate(assembler: var Assembler; width: Width; target: Register;
+                  value: int32)</a></li>
+          </ul></dd>
+<dt><a name="SubtractOp" href="#SubtractOp"><span>SubtractOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.SubtractOp" href="bassy/bytecode.html#SubtractOp">bytecode: Op.SubtractOp</a></li>
+          </ul></dd>
+<dt><a name="subtractRegister" href="#subtractRegister"><span>subtractRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc subtractRegister(assembler: var Assembler; width: Width;
+                 destination, source: Register)" href="bassy/amd64.html#subtractRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc subtractRegister(assembler: var Assembler; width: Width;
+                 destination, source: Register)</a></li>
+          </ul></dd>
 <dt><a name="sweep" href="#sweep"><span>sweep:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="buffers: proc sweep(storage: var BufferStorage)" href="bassy/buffers.html#sweep%2CBufferStorage">buffers: proc sweep(storage: var BufferStorage)</a></li>
+          </ul></dd>
+<dt><a name="tableAddress" href="#tableAddress"><span>tableAddress:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="jit: proc tableAddress(machine: Machine): pointer" href="bassy/jit.html#tableAddress%2CMachine">jit: proc tableAddress(machine: Machine): pointer</a></li>
+          </ul></dd>
+<dt><a name="testImmediate" href="#testImmediate"><span>testImmediate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc testImmediate(assembler: var Assembler; width: Width; target: Register;
+              value: int32)" href="bassy/amd64.html#testImmediate%2CAssembler%2CWidth%2CRegister%2Cint32">amd64: proc testImmediate(assembler: var Assembler; width: Width; target: Register;
+              value: int32)</a></li>
+          </ul></dd>
+<dt><a name="testRegister" href="#testRegister"><span>testRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc testRegister(assembler: var Assembler; width: Width; left, right: Register)" href="bassy/amd64.html#testRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc testRegister(assembler: var Assembler; width: Width; left, right: Register)</a></li>
+          </ul></dd>
+<dt><a name="TextCallOp" href="#TextCallOp"><span>TextCallOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.TextCallOp" href="bassy/bytecode.html#TextCallOp">bytecode: Op.TextCallOp</a></li>
           </ul></dd>
 <dt><a name="TextFunction" href="#TextFunction"><span>TextFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -762,6 +1584,10 @@
 <dt><a name="textFunction" href="#textFunction"><span>textFunction:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="texts: proc textFunction(name: string): TextFunction" href="bassy/texts.html#textFunction%2Cstring">texts: proc textFunction(name: string): TextFunction</a></li>
+          </ul></dd>
+<dt><a name="textLayoutMatches" href="#textLayoutMatches"><span>textLayoutMatches:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="texts: proc textLayoutMatches(): bool" href="bassy/texts.html#textLayoutMatches">texts: proc textLayoutMatches(): bool</a></li>
           </ul></dd>
 <dt><a name="TextPrint" href="#TextPrint"><span>TextPrint:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -809,6 +1635,10 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: PrintKind.ValuePrint" href="bassy.html#ValuePrint">bassy: PrintKind.ValuePrint</a></li>
           </ul></dd>
+<dt><a name="Width" href="#Width"><span>Width:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: enum Width" href="bassy/amd64.html#Width">amd64: enum Width</a></li>
+          </ul></dd>
 <dt><a name="withString" href="#withString"><span>withString:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: template withString(runtime: Runtime; value: Value; text, body: untyped)" href="bassy.html#withString.t%2CRuntime%2CValue%2Cuntyped%2Cuntyped">bassy: template withString(runtime: Runtime; value: Value; text, body: untyped)</a></li>
@@ -817,15 +1647,41 @@
 <li><a class="reference external"
           data-doc-search-tag="texts: template withText(storage: var TextStorage; value: Value; text, body: untyped)" href="bassy/texts.html#withText.t%2CTextStorage%2CValue%2Cuntyped%2Cuntyped">texts: template withText(storage: var TextStorage; value: Value; text, body: untyped)</a></li>
           </ul></dd>
+<dt><a name="Word32" href="#Word32"><span>Word32:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Width.Word32" href="bassy/amd64.html#Word32">amd64: Width.Word32</a></li>
+          </ul></dd>
+<dt><a name="Word64" href="#Word64"><span>Word64:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: Width.Word64" href="bassy/amd64.html#Word64">amd64: Width.Word64</a></li>
+          </ul></dd>
 <dt><a name="workUsed" href="#workUsed"><span>workUsed:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc workUsed(runtime: Runtime): int64" href="bassy.html#workUsed%2CRuntime">bassy: proc workUsed(runtime: Runtime): int64</a></li>
+          </ul></dd>
+<dt><a name="write" href="#write"><span>write:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="machine: proc write(buffer: var CodeBuffer; bytes: openArray[byte])" href="bassy/machine.html#write%2CCodeBuffer%2CopenArray%5Bbyte%5D">machine: proc write(buffer: var CodeBuffer; bytes: openArray[byte])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="machine: proc write(buffer: var CodeBuffer; words: openArray[uint32])" href="bassy/machine.html#write%2CCodeBuffer%2CopenArray%5Buint32%5D">machine: proc write(buffer: var CodeBuffer; words: openArray[uint32])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="machine: proc write(buffer: var CodeBuffer; source: pointer; size: int)" href="bassy/machine.html#write%2CCodeBuffer%2Cpointer%2Cint">machine: proc write(buffer: var CodeBuffer; source: pointer; size: int)</a></li>
+          </ul></dd>
+<dt><a name="XorOp" href="#XorOp"><span>XorOp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bytecode: Op.XorOp" href="bassy/bytecode.html#XorOp">bytecode: Op.XorOp</a></li>
+          </ul></dd>
+<dt><a name="xorRegister" href="#xorRegister"><span>xorRegister:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="amd64: proc xorRegister(assembler: var Assembler; width: Width;
+            destination, source: Register)" href="bassy/amd64.html#xorRegister%2CAssembler%2CWidth%2CRegister%2CRegister">amd64: proc xorRegister(assembler: var Assembler; width: Width;
+            destination, source: Register)</a></li>
           </ul></dd>
 </dl>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:10:26 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-29 19:52:51 UTC</small>
       </div>
     </div>
   </div>

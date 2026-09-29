@@ -1,0 +1,21 @@
+nimTitle	machine	bassy/machine.html	module bassy/machine		0
+nim	CodeBuffer	bassy/machine.html#CodeBuffer	object CodeBuffer		8
+nim	PageBytes	bassy/machine.html#PageBytes	const PageBytes		16
+nim	AppleSilicon	bassy/machine.html#AppleSilicon	const AppleSilicon		20
+nim	NativeCode	bassy/machine.html#NativeCode	const NativeCode		26
+nim	`=copy`	bassy/machine.html#=copy,CodeBuffer,CodeBuffer	proc `=copy`(destination: var CodeBuffer; source: CodeBuffer)		110
+nim	`=destroy`	bassy/machine.html#=destroy,CodeBuffer	proc `=destroy`(buffer: CodeBuffer)		113
+nim	jitSupported	bassy/machine.html#jitSupported	proc jitSupported(): bool		128
+nim	initCodeBuffer	bassy/machine.html#initCodeBuffer,int	proc initCodeBuffer(capacity: int): CodeBuffer		136
+nim	len	bassy/machine.html#len,CodeBuffer	proc len(buffer: CodeBuffer): int		170
+nim	capacity	bassy/machine.html#capacity,CodeBuffer	proc capacity(buffer: CodeBuffer): int		174
+nim	enterCompiledCode	bassy/machine.html#enterCompiledCode	proc enterCompiledCode()		207
+nim	leaveCompiledCode	bassy/machine.html#leaveCompiledCode	proc leaveCompiledCode()		211
+nim	runningCompiledCode	bassy/machine.html#runningCompiledCode	proc runningCompiledCode(): bool		215
+nim	write	bassy/machine.html#write,CodeBuffer,pointer,int	proc write(buffer: var CodeBuffer; source: pointer; size: int)		220
+nim	write	bassy/machine.html#write,CodeBuffer,openArray[uint32]	proc write(buffer: var CodeBuffer; words: openArray[uint32])		240
+nim	write	bassy/machine.html#write,CodeBuffer,openArray[byte]	proc write(buffer: var CodeBuffer; bytes: openArray[byte])		247
+nim	seal	bassy/machine.html#seal,CodeBuffer	proc seal(buffer: var CodeBuffer)		254
+nim	entry	bassy/machine.html#entry,CodeBuffer	proc entry(buffer: CodeBuffer): pointer		291
+nim	release	bassy/machine.html#release,CodeBuffer	proc release(buffer: var CodeBuffer)		297
+nimgrp	write	bassy/machine.html#write-procs-all	proc		220

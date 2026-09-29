@@ -75,7 +75,11 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
-      <ul class="simple nested-toc-section">bytesUsed
+      <ul class="simple nested-toc-section">arenaAddress
+  <li><a class="reference" href="#arenaAddress%2CTextStorage" title="arenaAddress(storage: var TextStorage): pointer">arenaAddress(storage: var TextStorage): pointer</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">bytesUsed
   <li><a class="reference" href="#bytesUsed%2CTextStorage" title="bytesUsed(storage: TextStorage): int">bytesUsed(storage: TextStorage): int</a></li>
 
 </ul>
@@ -119,6 +123,10 @@
   <li><a class="reference" href="#mapped%2CTextStorage%2CValue%2Cbool" title="mapped(storage: var TextStorage; value: Value; upper: bool): Value">mapped(storage: var TextStorage; value: Value; upper: bool): Value</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">ownerAddress
+  <li><a class="reference" href="#ownerAddress%2CTextStorage" title="ownerAddress(storage: var TextStorage): pointer">ownerAddress(storage: var TextStorage): pointer</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">put
   <li><a class="reference" href="#put%2CTextStorage%2Cstring" title="put(storage: var TextStorage; text: string): Value">put(storage: var TextStorage; text: string): Value</a></li>
 
@@ -135,12 +143,20 @@
   <li><a class="reference" href="#slice%2CTextStorage%2CValue%2Cint%2Cint" title="slice(storage: var TextStorage; value: Value; start, length: int): Value">slice(storage: var TextStorage; value: Value; start, length: int): Value</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">spansAddress
+  <li><a class="reference" href="#spansAddress%2CTextStorage" title="spansAddress(storage: var TextStorage): pointer">spansAddress(storage: var TextStorage): pointer</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">storageBytes
   <li><a class="reference" href="#storageBytes%2Cint%2Cint" title="storageBytes(count, bytes: int): int64">storageBytes(count, bytes: int): int64</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">textFunction
   <li><a class="reference" href="#textFunction%2Cstring" title="textFunction(name: string): TextFunction">textFunction(name: string): TextFunction</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">textLayoutMatches
+  <li><a class="reference" href="#textLayoutMatches" title="textLayoutMatches(): bool">textLayoutMatches(): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">trimmed
@@ -173,7 +189,7 @@
 
     <div id="tocRoot"></div>
     
-    <p class="module-desc"></p>
+    <p class="module-desc">Direct access for compiled code</p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
   <dl class="item">
@@ -213,7 +229,21 @@
 <div class="section" id="12">
   <h1><a class="toc-backref" href="#12">Procs</a></h1>
   <dl class="item">
-    <div id="bytesUsed-procs-all">
+    <div id="arenaAddress-procs-all">
+  <div id="arenaAddress,TextStorage">
+  <dt><pre><span class="Keyword">proc</span> <a href="#arenaAddress%2CTextStorage"><span class="Identifier">arenaAddress</span></a><span class="Other">(</span><span class="Identifier">storage</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#TextStorage"><span class="Identifier">TextStorage</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">pointer</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/texts.nim#L348" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/texts.nim#L348" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="bytesUsed-procs-all">
   <div id="bytesUsed,TextStorage">
   <dt><pre><span class="Keyword">proc</span> <a href="#bytesUsed%2CTextStorage"><span class="Identifier">bytesUsed</span></a><span class="Other">(</span><span class="Identifier">storage</span><span class="Other">:</span> <a href="#TextStorage"><span class="Identifier">TextStorage</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -364,6 +394,20 @@
 </div>
 
 </div>
+<div id="ownerAddress-procs-all">
+  <div id="ownerAddress,TextStorage">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ownerAddress%2CTextStorage"><span class="Identifier">ownerAddress</span></a><span class="Other">(</span><span class="Identifier">storage</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#TextStorage"><span class="Identifier">TextStorage</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">pointer</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/texts.nim#L339" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/texts.nim#L339" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
 <div id="put-procs-all">
   <div id="put,TextStorage,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#put%2CTextStorage%2Cstring"><span class="Identifier">put</span></a><span class="Other">(</span><span class="Identifier">storage</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#TextStorage"><span class="Identifier">TextStorage</span></a><span class="Other">;</span> <span class="Identifier">text</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="numbers.html#Value"><span class="Identifier">Value</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span>
@@ -420,6 +464,20 @@
 </div>
 
 </div>
+<div id="spansAddress-procs-all">
+  <div id="spansAddress,TextStorage">
+  <dt><pre><span class="Keyword">proc</span> <a href="#spansAddress%2CTextStorage"><span class="Identifier">spansAddress</span></a><span class="Other">(</span><span class="Identifier">storage</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#TextStorage"><span class="Identifier">TextStorage</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">pointer</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/texts.nim#L343" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/texts.nim#L343" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
 <div id="storageBytes-procs-all">
   <div id="storageBytes,int,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#storageBytes%2Cint%2Cint"><span class="Identifier">storageBytes</span></a><span class="Other">(</span><span class="Identifier">count</span><span class="Other">,</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int64</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -442,6 +500,19 @@
     Resolves one built-in string function by its normalized name.
     <a href="https://github.com/treeform/bassy/tree/master/src/bassy/texts.nim#L55" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
 <a href="https://github.com/treeform/bassy/edit/devel/src/bassy/texts.nim#L55" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="textLayoutMatches-procs-all">
+  <div id="textLayoutMatches">
+  <dt><pre><span class="Keyword">proc</span> <a href="#textLayoutMatches"><span class="Identifier">textLayoutMatches</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Confirms the layout compiled code reads strings through: a span is a start then a length, both thirty-two bits, and a sequence or string is a length then a pointer to a capacity followed by the items.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/texts.nim#L352" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/texts.nim#L352" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -490,7 +561,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 21:10:26 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-29 19:52:51 UTC</small>
       </div>
     </div>
   </div>
