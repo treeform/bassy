@@ -206,6 +206,9 @@ type
     buffers: BufferStorage
     stringLiterals: seq[int32]
     stringRoots: seq[Value]
+    stringGlobals: seq[int32]
+    stringCells: seq[int32]
+    stringHostData: seq[int32]
     limits: Limits
     globals: seq[Value]
     memory: seq[Value]
@@ -3214,11 +3217,22 @@ proc initRuntimeState(
     result.strings = initTextStorage(
       limits.maxStrings, limits.maxStringBytes, limits.maxStringLength
     )
-    result.stringRoots = newSeq[Value](portableCells(
-      globalCells + arrayCells + hostDataCells +
-        int64(program.literals.len),
-      "too many BASIC string roots for this target"
-    ))
+    # Only homes typed for strings by their names can hold one, so these
+    # are all a restart has to look through to keep strings alive.
+    for i, name in program.globalNames:
+      if name.stringName:
+        result.stringGlobals.add(int32(i))
+    for array in program.arrays:
+      if array.name.stringName:
+        for i in int(array.base) ..< int(array.base + array.length):
+          result.stringCells.add(int32(i))
+    for i, name in program.hostDataNames:
+      if name.stringName:
+        result.stringHostData.add(int32(i))
+    result.stringRoots = newSeq[Value](
+      result.stringGlobals.len + result.stringCells.len +
+        result.stringHostData.len + program.literals.len
+    )
     result.stringLiterals = newSeq[int32](program.literals.len)
     for handle in result.stringLiterals.mitems:
       handle = -1
@@ -3309,31 +3323,39 @@ proc restart*(runtime: var Runtime) =
   ## Restarts execution and reclaims strings, preserving globals and arrays.
   ## Host-held string Values must be fetched again after restarting.
   if runtime.program.usesStrings:
-    let
-      globals = runtime.globals.len
-      cells = runtime.memory.len
-      literals = globals + cells + runtime.hostData.len
-    for i, value in runtime.globals:
-      runtime.stringRoots[i] = value
-    for i, value in runtime.memory:
-      runtime.stringRoots[globals + i] = value
-    for i, value in runtime.hostData:
-      runtime.stringRoots[globals + cells + i] = value
-    for i, handle in runtime.stringLiterals:
-      runtime.stringRoots[literals + i] =
+    # Only the homes typed for strings are gathered, compacted, and put
+    # back; numeric globals and arrays cannot hold one.
+    var root = 0
+    template gather(value: Value) =
+      runtime.stringRoots[root] = value
+      inc root
+    for index in runtime.stringGlobals:
+      gather(runtime.globals[index])
+    for index in runtime.stringCells:
+      gather(runtime.memory[index])
+    for index in runtime.stringHostData:
+      gather(runtime.hostData[index])
+    for handle in runtime.stringLiterals:
+      gather(
         if handle >= 0:
           stringValue(runtime.strings.empty.stringOwner, handle)
         else:
           Value()
+      )
     runtime.strings.reset(runtime.stringRoots)
-    for i in 0 ..< globals:
-      runtime.globals[i] = runtime.stringRoots[i]
-    for i in 0 ..< cells:
-      runtime.memory[i] = runtime.stringRoots[globals + i]
-    for i in 0 ..< runtime.hostData.len:
-      runtime.hostData[i] = runtime.stringRoots[globals + cells + i]
-    for i, handle in runtime.stringLiterals.mpairs:
-      let value = runtime.stringRoots[literals + i]
+    root = 0
+    for index in runtime.stringGlobals:
+      runtime.globals[index] = runtime.stringRoots[root]
+      inc root
+    for index in runtime.stringCells:
+      runtime.memory[index] = runtime.stringRoots[root]
+      inc root
+    for index in runtime.stringHostData:
+      runtime.hostData[index] = runtime.stringRoots[root]
+      inc root
+    for handle in runtime.stringLiterals.mitems:
+      let value = runtime.stringRoots[root]
+      inc root
       handle = if value.kind == StringValue: value.stringHandle else: -1
   runtime.registers.clear
   runtime.arguments.clear

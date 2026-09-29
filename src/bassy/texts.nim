@@ -302,8 +302,9 @@ proc reset*(storage: var TextStorage, roots: var seq[Value]) =
   storage.scratch.setLen(0)
   storage.scratchSpans.setLen(0)
   storage.scratchSpans.add TextSpan()
-  for entry in storage.remap.mitems:
-    entry = -1
+  # Only handles below the span count can be looked up in the remap.
+  for i in 0 ..< storage.spans.len:
+    storage.remap[i] = -1
   storage.remap[0] = 0
   for i in 0 ..< storage.arena.len:
     storage.positions[i] = -1
