@@ -26,14 +26,19 @@ when defined(windows):
     FirstArgument = rcx
     SecondArgument = rdx
     Saved = [rbx, rbp, r12, r13, r14, r15, rsi, rdi]
-    ## Four shadow slots for the callee, plus eight to realign.
-    Padding = 40
+    ## Four shadow slots for the callee, room to keep seven registers
+    ## across a direct call to a query, and eight to realign.
+    Padding = 104
+    SpillOffset = 32
 else:
   const
     FirstArgument = rdi
     SecondArgument = rsi
     Saved = [rbx, rbp, r12, r13, r14, r15]
-    Padding = 8
+    ## Room to keep seven registers across a direct call to a query, and
+    ## eight to realign.
+    Padding = 72
+    SpillOffset = 0
 
 proc temp(index: int): Register {.inline, raises: [].} =
   ## Returns one working register.
@@ -729,6 +734,14 @@ proc addTempToHoisted(e: var Emitter, slot, value: int) {.raises: [].} =
   ## Adds a working register into a hoisted global, wrapping.
   e.code.addRegister(Word32, hoisted(slot), temp(value))
 
+proc writeFromHoisted(e: var Emitter, place: Place, slot: int)
+    {.raises: [BasicError].} =
+  ## Writes a hoisted global, always a whole number, somewhere in memory.
+  ## The place is reached through Cell, which holds no hoisted value.
+  let (base, offset) = e.reach(place)
+  e.code.storeByteImmediate(base, offset, 0)
+  e.code.storeWord(hoisted(slot), base, offset + ValuePayload)
+
 proc compareHoisted(e: var Emitter, slot: int, bits: int32)
     {.raises: [].} =
   ## Sets flags from a hoisted global against a constant.
@@ -884,6 +897,22 @@ proc fastCellAddress(e: var Emitter, index: int, extent: ArrayExtent,
   e.code.shiftLeftImmediate(Word64, FastScratch, 4)
   e.contextField(Cell, ContextMemory)
   e.code.addRegister(Word64, Cell, FastScratch)
+
+proc callQuery(e: var Emitter, offset: int32, keep: seq[Register],
+    refused: Label) {.raises: [BasicError].} =
+  ## Asks a query directly, keeping the registers that hold live values on
+  ## the stack across it, since a callee is free to clobber them. Leaves
+  ## for the refused path when the query answers that it did not answer.
+  for index, register in keep:
+    e.code.storeDouble(register, rsp, SpillOffset + index * 8)
+  e.code.moveRegister(Word64, FirstArgument, Context)
+  e.code.loadImmediate(Word32, SecondArgument, int64(offset))
+  e.contextField(rax, ContextQueryStep)
+  e.code.callRegister(rax)
+  for index, register in keep:
+    e.code.loadDouble(register, rsp, SpillOffset + index * 8)
+  e.code.testRegister(Word32, rax, rax)
+  e.jumpWhen(NotEqualCondition, refused)
 
 ## Strings read in place
 ##

@@ -168,6 +168,13 @@ Compiling is optional and changes nothing a script can observe. Results, both bu
 
 The compiler is written in Nim and needs no external compiler or library. Loops keep their globals in machine registers, and ordinary code keeps the values it is working on in registers from one instruction to the next.
 
+Game scripts spend much of their time asking the host small questions, such as one field of one object. Register those with `addQuery` instead of `addFunction` when the answer depends only on the arguments and the game's own state, and the callback never reads or changes the VM. Compiled code then calls a query directly, without saving or restoring VM state, and keeps its registers across it, even inside loops. The interpreter treats a query like any other integer function. A query must be safe to ask twice, because compiled code asks again the ordinary way whenever the first answer cannot be used.
+
+```nim
+discard host.addQuery("objectHp", 1, proc(arguments: openArray[int32]): int32 =
+  world.hp(arguments[0]))
+```
+
 Measured speedups over the interpreter:
 
 | Workload | arm64 (Apple M4) | x86-64 (Windows CI) |

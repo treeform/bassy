@@ -114,19 +114,23 @@ proc directOperand(assembler: var Assembler, reg, rm: Register)
 
 proc memoryOperand(assembler: var Assembler, reg, base: Register,
     displacement: int) {.raises: [BasicError].} =
-  ## Encodes a register plus a base register with a displacement.
-  if base.number == 4 or base.number == 12:
-    fail("assembler cannot address through this base register")
+  ## Encodes a register plus a base register with a displacement. An rsp
+  ## or r12 base can only be named through a SIB byte, which says base and
+  ## no index.
   let low = (reg.number and 7'u32) shl 3
   let rm = base.number and 7'u32
-  # An r13 base always needs an explicit displacement byte.
+  let sib = rm == 4
+  # An rbp or r13 base always needs an explicit displacement byte.
   if displacement == 0 and rm != 5:
     assembler.emit(byte(0x00'u32 or low or rm))
+    if sib: assembler.emit(0x24)
   elif displacement >= -128 and displacement <= 127:
     assembler.emit(byte(0x40'u32 or low or rm))
+    if sib: assembler.emit(0x24)
     assembler.emit(byte(cast[uint8](int8(displacement))))
   else:
     assembler.emit(byte(0x80'u32 or low or rm))
+    if sib: assembler.emit(0x24)
     assembler.emitDouble(int32(displacement))
 
 ## Labels

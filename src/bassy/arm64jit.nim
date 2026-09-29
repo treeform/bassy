@@ -25,7 +25,10 @@ const
   Temps = [x9, x10, x11, x12, x13, x14, x15]
   Far = x16
   Cell = x17
-  FrameBytes = 96
+  ## The saved registers, then room to keep up to fourteen registers
+  ## across a direct call to a query.
+  FrameBytes = 208
+  SpillOffset = 96
   NearBytes = 4095 - ValuePayload
 
 proc temp(index: int): Register {.inline, raises: [].} =
@@ -755,6 +758,13 @@ proc addTempToHoisted(e: var Emitter, slot, value: int) {.raises: [].} =
   ## Adds a working register into a hoisted global, wrapping.
   e.code.addRegister(Word32, hoisted(slot), hoisted(slot), temp(value))
 
+proc writeFromHoisted(e: var Emitter, place: Place, slot: int)
+    {.raises: [BasicError].} =
+  ## Writes a hoisted global, always a whole number, somewhere in memory.
+  let (base, offset) = e.reach(place)
+  e.code.storeByte(zeroRegister, base, offset)
+  e.code.storeWord(hoisted(slot), base, offset + ValuePayload)
+
 proc compareHoisted(e: var Emitter, slot: int, bits: int32)
     {.raises: [BasicError].} =
   ## Sets flags from a hoisted global against a constant.
@@ -920,6 +930,22 @@ proc fastCellAddress(e: var Emitter, index: int, extent: ArrayExtent,
   e.code.loadImmediate(Word32, FastScratch, int64(extent.base))
   e.code.addRegister(Word32, FastScratch, FastScratch, position)
   e.code.addRegister(Word64, Cell, MemoryBase, FastScratch, 4)
+
+proc callQuery(e: var Emitter, offset: int32, keep: seq[Register],
+    refused: Label) {.raises: [BasicError].} =
+  ## Asks a query directly, keeping the registers that hold live values on
+  ## the stack across it, since a callee is free to clobber them. Leaves
+  ## for the refused path when the query answers that it did not answer.
+  for index, register in keep:
+    e.code.storeDouble(register, stackPointer, SpillOffset + index * 8)
+  e.code.moveRegister(Word64, x0, Context)
+  e.code.loadImmediate(Word32, x1, int64(offset))
+  e.code.loadDouble(FastScratch, Context, ContextQueryStep)
+  e.code.callRegister(FastScratch)
+  e.code.moveRegister(Word32, FastScratch, x0)
+  for index, register in keep:
+    e.code.loadDouble(register, stackPointer, SpillOffset + index * 8)
+  e.jumpIfNotZero(FastScratch, refused)
 
 ## Strings read in place
 ##

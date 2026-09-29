@@ -192,6 +192,16 @@ encodes "test eax, 7":
   assembler.testImmediate(Word32, rax, 7)
 encodes "test r14d, 1023":
   assembler.testImmediate(Word32, r14, 1023)
+encodes "mov qword ptr [rsp], rcx":
+  assembler.storeDouble(rcx, rsp, 0)
+encodes "mov qword ptr [rsp + 40], r14":
+  assembler.storeDouble(r14, rsp, 40)
+encodes "mov rdi, qword ptr [rsp + 200]":
+  assembler.loadDouble(rdi, rsp, 200)
+encodes "mov rax, qword ptr [r12 + 8]":
+  assembler.loadDouble(rax, r12, 8)
+encodes "mov dword ptr [r12], esi":
+  assembler.storeWord(rsi, r12, 0)
 encodes "ret":
   assembler.returnToCaller()
 

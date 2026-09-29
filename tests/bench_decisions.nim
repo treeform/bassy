@@ -57,15 +57,15 @@ template query(field: untyped): HostProc =
 proc buildHost(): Host =
   ## Binds the queries a bot script observes the world through.
   result = initHost()
-  discard result.addFunction("objectCount", 0,
+  discard result.addQuery("objectCount", 0,
     proc(arguments: openArray[int32]): int32 = Objects, 2)
-  discard result.addFunction("objectId", 1, query(ids), 4)
-  discard result.addFunction("objectKind", 1, query(kinds), 4)
-  discard result.addFunction("objectTeam", 1, query(teams), 4)
-  discard result.addFunction("objectHp", 1, query(hps), 4)
-  discard result.addFunction("objectX", 1, query(xs), 4)
-  discard result.addFunction("objectY", 1, query(ys), 4)
-  discard result.addFunction("selfInfo", 1,
+  discard result.addQuery("objectId", 1, query(ids), 4)
+  discard result.addQuery("objectKind", 1, query(kinds), 4)
+  discard result.addQuery("objectTeam", 1, query(teams), 4)
+  discard result.addQuery("objectHp", 1, query(hps), 4)
+  discard result.addQuery("objectX", 1, query(xs), 4)
+  discard result.addQuery("objectY", 1, query(ys), 4)
+  discard result.addQuery("selfInfo", 1,
     proc(arguments: openArray[int32]): int32 =
       case arguments[0]
       of 0: arena.xs[0]

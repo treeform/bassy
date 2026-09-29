@@ -62,6 +62,7 @@ type
     stringOwner*: pointer
     stringSpans*: pointer
     stringArena*: pointer
+    queryStep*: pointer
 
   NativeCall* = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -105,6 +106,7 @@ const
   ContextStringOwner = 120
   ContextStringSpans = 128
   ContextStringArena = 136
+  ContextQueryStep = 144
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -187,7 +189,8 @@ proc layoutMatches*(): bool {.raises: [].} =
     at(hostStep) == ContextHostStep and
     at(stringOwner) == ContextStringOwner and
     at(stringSpans) == ContextStringSpans and
-    at(stringArena) == ContextStringArena
+    at(stringArena) == ContextStringArena and
+    at(queryStep) == ContextQueryStep
 
 type
   Machine* = ref object
@@ -356,6 +359,8 @@ proc loopGlobals(item: Instruction, globals: var seq[int32])
       JumpUnlessGlobalModuloEqualZeroOp,
       AddGlobalHostDataOp, AddGlobalRegisterOp, StoreGlobalOp:
     note(item.a)
+  of SetArgumentGlobalOp:
+    note(item.b)
   of MoveGlobalOp, AddGlobalOp, ModuloGlobalImmediateOp:
     note(item.a)
     note(item.b)
@@ -370,7 +375,7 @@ proc loopGlobals(item: Instruction, globals: var seq[int32])
   else:
     discard
 
-proc fitsLoop(item: Instruction): bool {.raises: [].} =
+proc fitsLoop(item: Instruction, queries: seq[bool]): bool {.raises: [].} =
   ## Reports whether an operation can run with its globals in registers.
   ## Nothing that calls out may, since the interpreter's code would find
   ## the globals' memory stale, and nothing that leaves the loop's code by
@@ -393,6 +398,12 @@ proc fitsLoop(item: Instruction): bool {.raises: [].} =
     true
   of DivideOp:
     ModelsFixed
+  of SetArgumentOp, SetArgumentImmediateOp, SetArgumentGlobalOp:
+    true
+  of HostCallOp:
+    # A query neither reads nor changes the VM, so a loop's registers can
+    # stay as they are across one. Any other host call may look at them.
+    item.b >= 0 and int(item.b) < queries.len and queries[int(item.b)]
   of ModuloGlobalImmediateOp:
     item.c != 0
   of JumpUnlessGlobalModuloEqualZeroOp:
@@ -400,7 +411,8 @@ proc fitsLoop(item: Instruction): bool {.raises: [].} =
   else:
     false
 
-proc findLoops(code: seq[Instruction], capacity: int): seq[Loop]
+proc findLoops(code: seq[Instruction], capacity: int, queries: seq[bool]):
+    seq[Loop]
     {.raises: [].} =
   ## Picks the loops worth specialising: each closed by a jump back to its
   ## head, made only of operations that fit, and touching no more globals
@@ -422,7 +434,7 @@ proc findLoops(code: seq[Instruction], capacity: int): seq[Loop]
     var fits = true
     var globals: seq[int32]
     for index in start ..< stop:
-      if covered[index] or not code[index].fitsLoop:
+      if covered[index] or not code[index].fitsLoop(queries):
         fits = false
         break
       code[index].loopGlobals(globals)
@@ -461,7 +473,8 @@ proc findLoops(code: seq[Instruction], capacity: int): seq[Loop]
 
 proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     ownerOf: seq[int32], extents: seq[ArrayExtent], constants: seq[int32],
-    limits: CallLimits, far, strings: bool): (seq[byte], seq[int])
+    limits: CallLimits, far, strings: bool, queries: seq[bool]):
+    (seq[byte], seq[int])
     {.raises: [BasicError].} =
   ## Emits the whole program and returns its bytes along with where each
   ## offset's block starts.
@@ -489,7 +502,7 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
     let hostLabel = e.label()
     let failedLabel = e.label()
 
-    let loops = findLoops(code, Hoisting.len)
+    let loops = findLoops(code, Hoisting.len, queries)
     var loopAt = newSeq[int](code.len)
     for index in 0 ..< code.len:
       loopAt[index] = -1
@@ -604,7 +617,10 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
       of SetArgumentImmediateOp:
         e.writeConstant(argument(item.a), 0, item.b)
       of SetArgumentGlobalOp:
-        e.copyValue(argument(item.a), global(item.b))
+        when specialised:
+          e.writeFromHoisted(argument(item.a), held(item.b))
+        else:
+          e.copyValue(argument(item.a), global(item.b))
       of AddGlobalImmediateOp:
         when specialised:
           e.addHoistedConstant(held(item.a), item.b)
@@ -927,9 +943,27 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
         e.jump(dispatchLabel)
         fallsThrough = false
       of HostCallOp:
-        # Host calls have a helper of their own, which goes straight to
-        # the host call's code instead of through the general dispatch.
-        e.callSlow(offset, hostLabel)
+        if item.b >= 0 and int(item.b) < queries.len and
+            queries[int(item.b)]:
+          # A query is asked directly. Should it refuse, or take anything
+          # but whole numbers, the ordinary path does it all again.
+          when specialised:
+            var keep: seq[Register]
+            for position in 0 ..< loop.globals.len:
+              keep.add(Hoisting[position])
+            e.callQuery(offset, keep, slowFor(ToNext))
+          else:
+            let ordinary = e.label()
+            let asked = e.label()
+            e.callQuery(offset, @[], ordinary)
+            e.jump(asked)
+            e.place(ordinary)
+            e.callSlow(offset, hostLabel)
+            e.place(asked)
+        else:
+          # Host calls have a helper of their own, which goes straight to
+          # the host call's code instead of through the general dispatch.
+          e.callSlow(offset, hostLabel)
       of TextCallOp:
         let function = TextFunction(item.b)
         if strings and item.c == 1 and
@@ -1206,6 +1240,25 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
           kindTag(value.kind))
       of SetArgumentImmediateOp:
         e.writeConstant(argument(item.a), 0, item.b)
+      of HostCallOp:
+        if item.b >= 0 and int(item.b) < queries.len and
+            queries[int(item.b)]:
+          # Held values survive a query: the registers holding them are
+          # kept on the stack across it, and memory is not looked at.
+          # The answer lands in its slot in memory, so whatever was held
+          # for that slot is simply dropped.
+          let exit = leaveHere(offset)
+          var keep: seq[Register]
+          for register in 0 ..< Pool.len:
+            if uses[register] > 0:
+              keep.add(pooled(register))
+          e.callQuery(int32(offset), keep, exit)
+          if item.a >= 0:
+            let position = findHeld(slot(item.a))
+            if position >= 0:
+              forget(position)
+        else:
+          done = false
       of AddGlobalImmediateOp, AddGlobalOp, AddGlobalRegisterOp,
           AddGlobalHostDataOp:
         let target = global(item.a)
@@ -1666,7 +1719,8 @@ proc emitProgram(code: seq[Instruction], routines: seq[RoutineExtent],
 
 proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
     extents: seq[ArrayExtent], constants: seq[int32], globals, hostData,
-    arguments: int, limits: CallLimits, strings = false): Machine
+    arguments: int, limits: CallLimits, strings = false,
+    queries: seq[bool] = @[]): Machine
     {.raises: [BasicError].} =
   ## Compiles every offset of a program to machine code, or returns nil
   ## when this target has no backend or the program is outside what the
@@ -1746,6 +1800,11 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
       case item.op
       of MeterOp:
         if item.a < 0 or item.b < 0:
+          return nil
+      of HostCallOp:
+        if item.a >= 0:
+          requireSlot(item.a)
+        if item.b < 0 or (queries.len > 0 and int(item.b) >= queries.len):
           return nil
       of TextCallOp:
         requireSlot(item.a)
@@ -1835,13 +1894,13 @@ proc compileProgram*(code: seq[Instruction], routines: seq[RoutineExtent],
     var emitted: (seq[byte], seq[int])
     try:
       emitted = emitProgram(code, routines, ownerOf, extents, constants,
-        limits, false, strings)
+        limits, false, strings, queries)
     except BasicError:
       # Some branch could not reach; every branch then goes the long way.
       # Should that fail too, the program is left to the interpreter.
       try:
         emitted = emitProgram(code, routines, ownerOf, extents, constants,
-          limits, true, strings)
+          limits, true, strings, queries)
       except BasicError:
         return nil
     let (bytes, starts) = emitted
