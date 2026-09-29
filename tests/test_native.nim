@@ -48,7 +48,9 @@ proc makeHost(): Host =
   discard result.addData("seed", toValue(7'i32))
   discard result.addData("scale", toValue(fixed(3'i32) / fixed(2'i32)))
   discard result.addData("mail$", "hello")
-  discard result.addFunction("twice", 1,
+  # Pure, so they are registered as queries, which compiled code asks
+  # directly, even inside loops that keep their globals in registers.
+  discard result.addQuery("twice", 1,
     proc(arguments: openArray[int32]): int32 =
       if arguments[0] == 13:
         raise newException(ValueError, "host refuses thirteen")
@@ -61,7 +63,7 @@ proc makeHost(): Host =
       else:
         toValue(arguments[0].asInt div 2)
   )
-  discard result.addFunction("pick", 2,
+  discard result.addQuery("pick", 2,
     proc(arguments: openArray[int32]): int32 =
       if arguments[0] > arguments[1]: arguments[0] else: arguments[1]
   , 3)
@@ -400,6 +402,52 @@ many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 many(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110)
 c = a * 2 + b
 """)
+
+agree("queries asked in a loop kept in registers", Preamble & """
+a = 0
+b = 0
+while a < 40
+  b = b + pick(a, 7) + twice(a)
+  c = c + twice(b mod 5)
+  a = a + 1
+wend
+""")
+
+agree("a query given a fixed-point argument", Preamble & """
+x = 2.0
+a = twice(x)
+y = 2.5
+b = twice(y)
+""")
+
+agree("a query that refuses inside a loop", Preamble & """
+a = 0
+while a < 20
+  b = b + twice(a)
+  a = a + 1
+wend
+""")
+
+block:
+  # A binding must agree with the program about which functions are
+  # queries, as it must about everything else in a function's contract.
+  var compiledWith = initHost()
+  discard compiledWith.addQuery("probe", 1,
+    proc(arguments: openArray[int32]): int32 = arguments[0])
+  var boundWith = initHost()
+  discard boundWith.addFunction("probe", 1,
+    proc(arguments: openArray[int32]): int32 = arguments[0])
+  let program = compile("a = probe(3)", compiledWith)
+  var refused = false
+  try:
+    discard initRuntime(program, boundWith)
+  except BasicError as error:
+    refused = "incompatible" in error.msg
+  if refused:
+    echo "  ok  a binding that disagrees about a query is refused"
+  else:
+    inc failures
+    echo "FAIL  a binding that disagrees about a query is refused"
 
 agree("select, for, do, and on-goto", Preamble & """
 for i = 1 to 10 step 3

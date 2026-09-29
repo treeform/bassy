@@ -92,6 +92,7 @@ type
     context: ContextHostProc
     integer: HostProc
     numeric: NumericHostProc
+    query: bool
 
   HostFunction = object
     name: string
@@ -165,6 +166,7 @@ type
   HostFunctionSpec = object
     context: bool
     numeric: bool
+    query: bool
     name: string
     parameters: int32
     workUnits: int32
@@ -206,6 +208,9 @@ type
     buffers: BufferStorage
     stringLiterals: seq[int32]
     stringRoots: seq[Value]
+    stringGlobals: seq[int32]
+    stringCells: seq[int32]
+    stringHostData: seq[int32]
     limits: Limits
     globals: seq[Value]
     memory: seq[Value]
@@ -779,6 +784,26 @@ proc addFunction*(
     name,
     parameters,
     HostCallback(integer: callback),
+    workUnits
+  )
+
+proc addQuery*(
+    host: var Host,
+    name: string,
+    parameters: int,
+    callback: HostProc,
+    workUnits = 16
+): int32 =
+  ## Exposes a read-only integer query, such as one field of a game object.
+  ## Its answer depends only on its arguments and the host's own state, it
+  ## never reads or changes the VM, and asking again gives the same answer.
+  ## The interpreter treats it as any integer function. Compiled code may
+  ## call it directly, keep values in registers across it, and ask it a
+  ## second time on the rare path where it refuses.
+  host.addHostFunction(
+    name,
+    parameters,
+    HostCallback(integer: callback, query: true),
     workUnits
   )
 
@@ -3040,6 +3065,7 @@ proc configureHost(
     program.hostFunctionIds[function.name] = int32(i)
     program.hostFunctions.add HostFunctionSpec(
       context: function.callback.context != nil,
+      query: function.callback.query,
       numeric: function.callback.numeric != nil,
       name: function.name,
       parameters: function.parameters,
@@ -3140,6 +3166,7 @@ proc initRuntimeState(
         binding.workUnits != function.workUnits or
         (binding.callback.numeric != nil) != function.numeric or
         (binding.callback.context != nil) != function.context or
+        binding.callback.query != function.query or
         (binding.callback.integer == nil and binding.callback.numeric == nil and
           binding.callback.context == nil):
       fail("incompatible BASIC host function binding '" & function.name & "'")
@@ -3214,11 +3241,22 @@ proc initRuntimeState(
     result.strings = initTextStorage(
       limits.maxStrings, limits.maxStringBytes, limits.maxStringLength
     )
-    result.stringRoots = newSeq[Value](portableCells(
-      globalCells + arrayCells + hostDataCells +
-        int64(program.literals.len),
-      "too many BASIC string roots for this target"
-    ))
+    # Only homes typed for strings by their names can hold one, so these
+    # are all a restart has to look through to keep strings alive.
+    for i, name in program.globalNames:
+      if name.stringName:
+        result.stringGlobals.add(int32(i))
+    for array in program.arrays:
+      if array.name.stringName:
+        for i in int(array.base) ..< int(array.base + array.length):
+          result.stringCells.add(int32(i))
+    for i, name in program.hostDataNames:
+      if name.stringName:
+        result.stringHostData.add(int32(i))
+    result.stringRoots = newSeq[Value](
+      result.stringGlobals.len + result.stringCells.len +
+        result.stringHostData.len + program.literals.len
+    )
     result.stringLiterals = newSeq[int32](program.literals.len)
     for handle in result.stringLiterals.mitems:
       handle = -1
@@ -3309,31 +3347,39 @@ proc restart*(runtime: var Runtime) =
   ## Restarts execution and reclaims strings, preserving globals and arrays.
   ## Host-held string Values must be fetched again after restarting.
   if runtime.program.usesStrings:
-    let
-      globals = runtime.globals.len
-      cells = runtime.memory.len
-      literals = globals + cells + runtime.hostData.len
-    for i, value in runtime.globals:
-      runtime.stringRoots[i] = value
-    for i, value in runtime.memory:
-      runtime.stringRoots[globals + i] = value
-    for i, value in runtime.hostData:
-      runtime.stringRoots[globals + cells + i] = value
-    for i, handle in runtime.stringLiterals:
-      runtime.stringRoots[literals + i] =
+    # Only the homes typed for strings are gathered, compacted, and put
+    # back; numeric globals and arrays cannot hold one.
+    var root = 0
+    template gather(value: Value) =
+      runtime.stringRoots[root] = value
+      inc root
+    for index in runtime.stringGlobals:
+      gather(runtime.globals[index])
+    for index in runtime.stringCells:
+      gather(runtime.memory[index])
+    for index in runtime.stringHostData:
+      gather(runtime.hostData[index])
+    for handle in runtime.stringLiterals:
+      gather(
         if handle >= 0:
           stringValue(runtime.strings.empty.stringOwner, handle)
         else:
           Value()
+      )
     runtime.strings.reset(runtime.stringRoots)
-    for i in 0 ..< globals:
-      runtime.globals[i] = runtime.stringRoots[i]
-    for i in 0 ..< cells:
-      runtime.memory[i] = runtime.stringRoots[globals + i]
-    for i in 0 ..< runtime.hostData.len:
-      runtime.hostData[i] = runtime.stringRoots[globals + cells + i]
-    for i, handle in runtime.stringLiterals.mpairs:
-      let value = runtime.stringRoots[literals + i]
+    root = 0
+    for index in runtime.stringGlobals:
+      runtime.globals[index] = runtime.stringRoots[root]
+      inc root
+    for index in runtime.stringCells:
+      runtime.memory[index] = runtime.stringRoots[root]
+      inc root
+    for index in runtime.stringHostData:
+      runtime.hostData[index] = runtime.stringRoots[root]
+      inc root
+    for handle in runtime.stringLiterals.mitems:
+      let value = runtime.stringRoots[root]
+      inc root
       handle = if value.kind == StringValue: value.stringHandle else: -1
   runtime.registers.clear
   runtime.arguments.clear
@@ -3429,6 +3475,9 @@ proc compileNative*(runtime: var Runtime): int =
     frames: int32(runtime.frames.len),
     slots: int32(runtime.registers.len)
   )
+  var queries: seq[bool]
+  for function in runtime.program.hostFunctions:
+    queries.add(function.query)
   runtime.machine = compileProgram(
     runtime.program.code,
     runtime.program.routineExtents,
@@ -3438,7 +3487,8 @@ proc compileNative*(runtime: var Runtime): int =
     runtime.hostData.len,
     runtime.arguments.len,
     limits,
-    textLayoutMatches()
+    textLayoutMatches(),
+    queries
   )
   if runtime.machine != nil:
     runtime.machineShape = runtime.storageShape
@@ -4395,6 +4445,42 @@ template handOver(context: ptr NativeContext, pc: int32,
     context.remainingWork = runtime.remainingWork
   status
 
+proc nativeQuery(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
+  ## Answers a query for compiled code without carrying any VM state over,
+  ## since a query neither reads nor changes it. Only whole-number
+  ## arguments are taken here. Anything else, a refusal from the query,
+  ## or storage that is not where compiled code believes, answers one, and
+  ## compiled code then takes the ordinary path, which does it all again.
+  var runtime {.cursor.} = cast[Runtime](context.runtime)
+  template first(values: untyped): pointer =
+    if values.len == 0: nil else: values[0].addr
+  if first(runtime.registers) != context.registerFile or
+      first(runtime.arguments) != context.arguments:
+    return 1
+  try:
+    let
+      item = runtime.program.code[int(pc)]
+      functionId = int(item.b)
+      count = int(runtime.program.hostFunctions[functionId].parameters)
+    for i in 0 ..< count:
+      if runtime.arguments[i].kind != IntegerValue:
+        return 1
+      runtime.integerArguments[i] = runtime.arguments[i].asInt
+    template callbacks(): untyped = runtime.hostCallbacks[functionId]
+    let value =
+      if count == 0: callbacks.integer(EmptyArguments)
+      else:
+        callbacks.integer(runtime.integerArguments.toOpenArray(0, count - 1))
+    if runtime.storageShape != runtime.machineShape or
+        first(runtime.globals) != context.globals or
+        first(runtime.memory) != context.memory:
+      return 1
+    if item.a >= 0:
+      runtime.registers[int(context.base) + int(item.a)] = toValue(value)
+    0
+  except Exception:
+    1
+
 proc nativeStep(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
   ## Runs any one instruction for compiled code, through the very code the
   ## interpreter runs for it.
@@ -4432,6 +4518,7 @@ proc runMachine(runtime: var Runtime, print: PrintProc) =
     runtime: cast[pointer](runtime),
     step: cast[pointer](nativeStep),
     hostStep: cast[pointer](nativeHostCall),
+    queryStep: cast[pointer](nativeQuery),
     stringOwner: runtime.strings.ownerAddress,
     stringSpans: runtime.strings.spansAddress,
     stringArena: runtime.strings.arenaAddress,
