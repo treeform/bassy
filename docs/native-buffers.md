@@ -70,3 +70,44 @@ limit or allocator instrumentation.
 
 The tests cover aliasing, nested calls, reset, foreign and stale handles,
 failed mutations, fixed-point-disabled runtimes, host roots and bounded churn.
+
+## Bound numeric fields
+
+Use `runtime.globalView(name)` or `runtime.arrayView(name, writable = true)`
+to resolve a numeric field once. A `GlobalView` reads and writes through its
+`value` property. An `ArrayView` uses checked indexing. Record field names use
+flattened paths such as `self.position.x` and `objects.hp`. Views preserve
+INTEGER and FIXED declarations, bounds checks, and runtime ownership.
+`program.referencesGlobal(name)` includes scalar reads and writes in every
+compiled routine, including fused instructions. A host can use it to avoid
+preparing fields that its BASIC policy never references.
+
+## Lazy host arrays
+
+`runtime.setArrayLoader(name, callback)` binds a numeric DIM array or record
+column to a host loader. The callback receives a writable `ArrayView` and fills
+it through checked indexing. Its first read or write loads the column once.
+A failed loader propagates its exception and leaves the column eligible for a
+retry. Invalid indices fail before invoking a loader. String and DATA arrays
+cannot use loaders.
+
+Call `runtime.invalidateArrays()` between observation frames, or
+`view.invalidate()` for one column after a relevant command. `restart()` keeps
+cached values. `reset()` clears storage and invalidates bound arrays. Passing
+`nil` to `setArrayLoader` removes the loader and preserves existing values.
+The host must provide a stable observation frame until the next invalidation;
+callbacks must not retain the runtime or view in a reference cycle.
+
+Binding a loader retires previously compiled code. Call `compileNative()`
+after all bindings to use native execution. Bound arrays receive a native
+readiness check and load through the interpreter only when invalidated.
+Ordinary arrays retain their existing native access path. Loading host data
+does not alter script instruction or work budgets.
+
+## Numeric queries
+
+`addQuery` accepts integer callbacks and `NumericHostProc` callbacks. Numeric
+queries accept and return integers or Q16.16 values without leaving native
+execution. Queries must not read or modify VM storage and must have no
+observable side effects. A refused native query may be retried through the
+interpreter, which preserves normal validation and exception behavior.

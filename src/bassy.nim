@@ -235,6 +235,9 @@ type
     limits: Limits
     globals: seq[Value]
     memory: seq[Value]
+    arrayLoaders: seq[ArrayLoader]
+    arrayReady: seq[int32]
+    loadedArrays: seq[int32]
     registers: seq[Value]
     arguments: seq[Value]
     frames: seq[Frame]
@@ -257,11 +260,19 @@ type
     nativeError: ref Exception
     handedBack: int64
 
+  GlobalView* = object
+    runtime: Runtime
+    index: int32
+    fieldKind: FieldKind
+
+  ArrayLoader* = proc(view: ArrayView) {.closure.}
+
   ArrayView* = object
     runtime: Runtime
     base: int32
     length: int32
     writable: bool
+    arrayId: int32
     buffer: Value
     fieldKind: FieldKind
 
@@ -763,7 +774,7 @@ proc fieldName(name: string, kind: FieldKind): string =
   else:
     name
 
-proc fieldValue(value: Value, kind: FieldKind): Value =
+proc fieldValue(value: Value, kind: FieldKind): Value {.inline.} =
   ## Converts a record field value without rounding fractional integers.
   case kind
   of IntegerField:
@@ -860,6 +871,25 @@ proc addQuery*(
     name,
     parameters,
     HostCallback(integer: callback, query: true),
+    workUnits
+  )
+
+proc addQuery*(
+    host: var Host,
+    name: string,
+    parameters: int,
+    callback: NumericHostProc,
+    workUnits = 16
+): int32 =
+  ## Exposes a numeric query that never reads or changes VM storage.
+  ## Like integer queries, it may run directly from compiled code and be
+  ## retried on a refused fast path, so it must have no observable effects.
+  if name.stringName:
+    fail("numeric queries cannot return strings")
+  host.addHostFunction(
+    name,
+    parameters,
+    HostCallback(numeric: callback, query: true),
     workUnits
   )
 
@@ -3520,7 +3550,8 @@ proc initRuntimeState(
       int64(program.hostFunctions.len) * LogicalHostCallbackBytes
   var allocatedBytes =
     int64(limits.maxCallDepth) * LogicalFrameBytes + hostCallbackBytes +
-    argumentCells * 4
+    argumentCells * 4 + int64(program.arrays.len) *
+      (LogicalHostCallbackBytes + 8)
   for array in program.arrays:
     let cells = int64(array.initial.len)
     if cells > (limits.maxMemoryBytes - allocatedBytes) div LogicalValueBytes:
@@ -3559,6 +3590,8 @@ proc initRuntimeState(
       arrayCells,
       "too many BASIC array cells for this target"
     )),
+    arrayLoaders: newSeq[ArrayLoader](program.arrays.len),
+    arrayReady: newSeq[int32](program.arrays.len),
     registers: newSeq[Value](portableCells(
       registerCells,
       "too many BASIC registers for this target"
@@ -3576,6 +3609,8 @@ proc initRuntimeState(
     remainingWork: limits.maxWorkUnits,
     allocatedBytes: allocatedBytes
   )
+  for ready in result.arrayReady.mitems:
+    ready = 1
   if program.usesStrings:
     result.strings = initTextStorage(
       limits.maxStrings, limits.maxStringBytes, limits.maxStringLength
@@ -3657,6 +3692,9 @@ proc reset*(runtime: var Runtime) =
       value = Value()
   runtime.globals.clear
   runtime.memory.clear
+  for id in runtime.loadedArrays:
+    if runtime.arrayLoaders[int(id)] != nil:
+      runtime.arrayReady[int(id)] = 0
   runtime.initializeFields
   for array in runtime.program.arrays:
     for i, value in array.initial:
@@ -3811,7 +3849,12 @@ proc compileNative*(runtime: var Runtime): int =
     return 0
   var extents = newSeq[ArrayExtent](runtime.program.arrays.len)
   for index, item in runtime.program.arrays:
-    extents[index] = ArrayExtent(base: item.base, length: item.length)
+    extents[index] = ArrayExtent(
+      base: item.base,
+      length: item.length,
+      lazy: runtime.arrayLoaders[index] != nil,
+      id: int32(index)
+    )
   let limits = CallLimits(
     frames: int32(runtime.frames.len),
     slots: int32(runtime.registers.len)
@@ -3897,6 +3940,39 @@ proc findHostData(program: Program, name: string): int32 =
   ## Finds bound host data by its case-insensitive source name.
   program.hostDataIds.getOrDefault(normalized(name), -1'i32)
 
+proc referencesGlobal*(program: Program, name: string): bool =
+  ## Reports whether bytecode reads or writes a declared scalar field.
+  let id = program.findGlobal(name)
+  if id < 0:
+    return false
+  for instruction in program.code:
+    case instruction.op
+    of LoadGlobalOp, SetArgumentGlobalOp:
+      if instruction.b == id:
+        return true
+    of StoreGlobalImmediateOp, AddGlobalImmediateOp,
+      JumpUnlessGlobalEqualImmediateOp,
+      JumpUnlessGlobalNotEqualImmediateOp,
+      JumpUnlessGlobalLessImmediateOp,
+      JumpUnlessGlobalLessEqualImmediateOp,
+      JumpUnlessGlobalGreaterImmediateOp,
+      JumpUnlessGlobalGreaterEqualImmediateOp,
+      JumpUnlessGlobalModuloEqualZeroOp,
+      AddGlobalHostDataOp, AddGlobalRegisterOp, StoreGlobalOp:
+        if instruction.a == id:
+          return true
+    of MoveGlobalOp, AddGlobalOp, ModuloGlobalImmediateOp:
+      if instruction.a == id or instruction.b == id:
+        return true
+    of AddGlobalArrayGlobalIndexOp:
+      if instruction.a == id or instruction.c == id:
+        return true
+    of ArrayAddGlobalsOp:
+      if instruction.b == id or instruction.c == id:
+        return true
+    else:
+      discard
+
 proc hostDataIndex*(program: Program, name: string): int32 =
   ## Returns a host data slot, or -1 when the name is unbound.
   program.findHostData(name)
@@ -3912,7 +3988,7 @@ proc getData*(runtime: Runtime, name: string): int32 =
   ## Reads runtime host data as an exact int32.
   runtime.getDataValue(name).asInt
 
-proc requireValue(runtime: Runtime, value: Value) =
+proc requireValue(runtime: Runtime, value: Value) {.inline.} =
   ## Enforces the compiled numeric policy at every host entry point.
   if value.kind == StringValue:
     discard runtime.strings.length(value)
@@ -3968,6 +4044,9 @@ proc arrayLength*(runtime: Runtime, name: string): int32 =
     fail("unknown BASIC array '" & name & "'")
   runtime.program.arrays[int(id)].length
 
+proc prepareArray(runtime: Runtime, id: int32) {.inline.}
+  ## Materializes an invalidated host array before exposing its cells.
+
 proc checkedArrayIndex(
     runtime: Runtime,
     arrayId: int32,
@@ -3984,6 +4063,7 @@ proc checkedArrayIndex(
       "BASIC array '" & name & "' index " & $index &
       " is outside 0 .. " & $(length - 1)
     )
+  runtime.prepareArray(arrayId)
   int(base + index)
 
 proc getArrayValue*(runtime: Runtime, name: string, index: int32): Value =
@@ -4038,6 +4118,7 @@ proc arrayView*(
   ArrayView(
     runtime: runtime,
     base: array.base,
+    arrayId: id,
     length: array.length,
     writable: writable,
     fieldKind: array.fieldKind
@@ -4063,6 +4144,7 @@ proc `[]`*(view: ArrayView, index: int): Value {.inline.} =
     fail("native array index is outside the array")
   if view.buffer.kind == ArrayValue:
     return view.runtime.buffers.get(view.buffer, index)
+  view.runtime.prepareArray(view.arrayId)
   view.runtime.memory[int(view.base) + index]
 
 proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
@@ -4077,8 +4159,89 @@ proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
   if view.buffer.kind == ArrayValue:
     view.runtime.buffers.put(view.buffer, index, value)
   else:
+    view.runtime.prepareArray(view.arrayId)
     let converted = fieldValue(value, view.fieldKind)
     view.runtime.memory[int(view.base) + index] = converted
+
+proc globalView*(runtime: Runtime, name: string): GlobalView =
+  ## Binds a checked numeric scalar for repeated host reads and writes.
+  let id = runtime.program.findGlobal(name)
+  if id < 0:
+    fail("unknown BASIC global '" & name & "'")
+  if runtime.program.globalNames[int(id)].stringName:
+    fail("numeric global views cannot bind strings")
+  GlobalView(
+    runtime: runtime,
+    index: id,
+    fieldKind: runtime.program.globalKinds[int(id)]
+  )
+
+proc value*(view: GlobalView): Value {.inline.} =
+  ## Reads a scalar from its bound runtime without name resolution.
+  if view.runtime == nil:
+    fail("unbound BASIC global view")
+  view.runtime.globals[int(view.index)]
+
+proc `value=`*(view: GlobalView, value: Value) {.inline.} =
+  ## Writes a numeric scalar with the declaration's type coercion.
+  if view.runtime == nil:
+    fail("unbound BASIC global view")
+  if value.kind notin {IntegerValue, FixedValue}:
+    fail("numeric global views require numeric values")
+  view.runtime.requireValue(value)
+  view.runtime.globals[int(view.index)] = fieldValue(value, view.fieldKind)
+
+proc arrayView*(
+    runtime: Runtime,
+    name: string,
+    writable = false
+): ArrayView =
+  ## Binds a named numeric array using the same checked view as native calls.
+  let id = runtime.program.findArray(name)
+  if id < 0:
+    fail("unknown BASIC array '" & name & "'")
+  runtime.arrayView(toValue(id), writable)
+
+proc loadArray(runtime: Runtime, id: int32) =
+  ## Populates a numeric array and keeps failed loads retryable.
+  runtime.arrayReady[int(id)] = 1
+  var completed = false
+  try:
+    runtime.arrayLoaders[int(id)](runtime.arrayView(toValue(id), true))
+    completed = true
+  finally:
+    if not completed:
+      runtime.arrayReady[int(id)] = 0
+
+proc prepareArray(runtime: Runtime, id: int32) =
+  ## Loads a bound numeric array only when its cached values are invalid.
+  if runtime.arrayReady[int(id)] == 0:
+    runtime.loadArray(id)
+
+proc setArrayLoader*(runtime: Runtime, name: string, loader: ArrayLoader) =
+  ## Binds a lazy numeric array and retires code compiled before the binding.
+  let id = runtime.program.findArray(name)
+  if id < 0:
+    fail("unknown BASIC array '" & name & "'")
+  discard runtime.arrayView(toValue(id), writable = true)
+  if loader != nil and id notin runtime.loadedArrays:
+    runtime.loadedArrays.add id
+  runtime.arrayLoaders[int(id)] = loader
+  runtime.arrayReady[int(id)] = int32(loader == nil)
+  runtime.machine = nil
+
+proc invalidate*(view: ArrayView) =
+  ## Invalidates one bound host array without resolving its name again.
+  if view.runtime == nil or view.buffer.kind == ArrayValue:
+    fail("invalidation requires a bound BASIC array view")
+  if view.runtime.arrayLoaders[int(view.arrayId)] != nil:
+    view.runtime.arrayReady[int(view.arrayId)] = 0
+
+proc invalidateArrays*(runtime: Runtime) =
+  ## Makes bound arrays refresh on their next read or write.
+  for id in runtime.loadedArrays:
+    if runtime.arrayLoaders[int(id)] != nil:
+      runtime.arrayReady[int(id)] = 0
 
 proc collectBuffers*(runtime: Runtime) =
   ## Reclaims buffers unreachable from VM values between native calls.
@@ -4744,6 +4907,7 @@ proc publishStorage(runtime: Runtime, context: ptr NativeContext)
     if values.len == 0: nil else: values[0].addr
   context.globals = first(runtime.globals)
   context.memory = first(runtime.memory)
+  context.arrayReady = first(runtime.arrayReady)
   context.hostData = first(runtime.hostData)
   context.frames = first(runtime.frames)
   context.arguments = first(runtime.arguments)
@@ -4776,7 +4940,8 @@ template handOver(context: ptr NativeContext, pc: int32,
   except Exception as error:
     runtime.nativeError = error
     status = 1
-  if status == 0 and runtime.storageShape != runtime.machineShape:
+  if status == 0 and (runtime.machine == nil or
+      runtime.storageShape != runtime.machineShape):
     # Host code resized storage the compiled program indexes by offsets
     # proved at compile time. None of them can be trusted now, so the
     # program is retired and the rest of the run is interpreted, where
@@ -4795,10 +4960,9 @@ template handOver(context: ptr NativeContext, pc: int32,
 
 proc nativeQuery(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
   ## Answers a query for compiled code without carrying any VM state over,
-  ## since a query neither reads nor changes it. Only whole-number
-  ## arguments are taken here. Anything else, a refusal from the query,
-  ## or storage that is not where compiled code believes, answers one, and
-  ## compiled code then takes the ordinary path, which does it all again.
+  ## since a query neither reads nor changes it. Numeric queries preserve
+  ## fixed values; unsupported types, refusals, or moved storage resume
+  ## through the interpreter, which performs the same call and validation.
   var runtime {.cursor.} = cast[Runtime](context.runtime)
   template first(values: untyped): pointer =
     if values.len == 0: nil else: values[0].addr
@@ -4810,21 +4974,34 @@ proc nativeQuery(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
       item = runtime.program.code[int(pc)]
       functionId = int(item.b)
       count = int(runtime.program.hostFunctions[functionId].parameters)
-    for i in 0 ..< count:
-      if runtime.arguments[i].kind != IntegerValue:
-        return 1
-      runtime.integerArguments[i] = runtime.arguments[i].asInt
     template callbacks(): untyped = runtime.hostCallbacks[functionId]
-    let value =
-      if count == 0: callbacks.integer(EmptyArguments)
-      else:
-        callbacks.integer(runtime.integerArguments.toOpenArray(0, count - 1))
+    var value: Value
+    if callbacks.numeric != nil:
+      for i in 0 ..< count:
+        if runtime.arguments[i].kind notin {IntegerValue, FixedValue}:
+          return 1
+      value =
+        if count == 0: callbacks.numeric([])
+        else: callbacks.numeric(runtime.arguments.toOpenArray(0, count - 1))
+      if value.kind notin {IntegerValue, FixedValue}:
+        return 1
+      runtime.requireValue(value)
+    else:
+      for i in 0 ..< count:
+        if runtime.arguments[i].kind != IntegerValue:
+          return 1
+        runtime.integerArguments[i] = runtime.arguments[i].asInt
+      value = toValue(
+        if count == 0: callbacks.integer(EmptyArguments)
+        else:
+          callbacks.integer(runtime.integerArguments.toOpenArray(0, count - 1))
+      )
     if runtime.storageShape != runtime.machineShape or
         first(runtime.globals) != context.globals or
         first(runtime.memory) != context.memory:
       return 1
     if item.a >= 0:
-      runtime.registers[int(context.base) + int(item.a)] = toValue(value)
+      runtime.registers[int(context.base) + int(item.a)] = value
     0
   except Exception:
     1

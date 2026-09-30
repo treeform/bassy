@@ -256,3 +256,68 @@ answer$ = player.tag$
   doAssert runtime.getGlobalValue("player.y").kind == FixedValue
   doAssert runtime.getStringGlobal("player.tag$") == "QBasic"
   doAssert runtime.getStringGlobal("answer$") == "QBasic"
+
+echo "Testing bound numeric views retain typed storage and runtime ownership"
+block:
+  var
+    runtime = initRuntime(compile(Records & "player.hp = player.hp - 1"))
+    other = initRuntime(compile("unrelated = 9"))
+  let
+    hp = runtime.globalView("PLAYER.HP")
+    position = runtime.globalView("player.position.x")
+    health = runtime.arrayView("PLAYERS.HP", writable = true)
+    positions = runtime.arrayView("players.position.x", writable = true)
+    readOnly = runtime.arrayView("players.hp")
+  hp.value = toValue(20)
+  position.value = toValue(3)
+  health[2] = toValue(17)
+  positions[1] = toValue(5)
+  doAssert hp.value.asInt == 20
+  doAssert position.value.kind == FixedValue
+  doAssert position.value.asFixed == 3'fx
+  doAssert readOnly[2].asInt == 17
+  doAssert positions[1].kind == FixedValue
+  doAssert positions[1].asFixed == 5'fx
+  discard runtime.run
+  doAssert hp.value.asInt == 19
+  runtime.restart()
+  discard runtime.run
+  doAssert hp.value.asInt == 18
+  discard other.run
+  doAssert hp.value.asInt == 18
+  doAssert other.getGlobal("unrelated") == 9
+  doAssert errorContains(proc() = hp.value = toValue(1.5'fx), "exact int32")
+  doAssert errorContains(proc() = health[0] = toValue(1.5'fx), "exact int32")
+  doAssert errorContains(proc() = readOnly[0] = toValue(1), "read-only")
+  doAssert errorContains(proc() = health[-1] = toValue(1), "outside")
+  doAssert errorContains(proc() = health[3] = toValue(1), "outside")
+  doAssert errorContains(proc() = discard runtime.globalView("missing"),
+    "unknown BASIC global")
+  doAssert errorContains(proc() = discard runtime.arrayView("missing"),
+    "unknown BASIC array")
+  doAssert errorContains(proc() = discard runtime.globalView("player.name"),
+    "strings")
+  doAssert errorContains(proc() = discard runtime.arrayView("players.name"),
+    "numeric")
+  let text = runtime.putString("no")
+  doAssert errorContains(proc() = hp.value = text, "numeric")
+  var missing: GlobalView
+  doAssert errorContains(proc() = discard missing.value, "unbound")
+  doAssert errorContains(proc() = missing.value = toValue(1), "unbound")
+
+echo "Testing scalar reference discovery includes subroutines and fused ops"
+block:
+  let program = compile(Records & """
+dim samples(1)
+sub inspect()
+  answer = player.position.y
+end sub
+player.hp = player.hp + 1
+player.score = player.score + player.hp
+samples(player.hp) = player.score
+if player.hp < 10 then answer = player.hp
+""")
+  for name in ["player.hp", "PLAYER.SCORE", "player.position.y", "answer"]:
+    doAssert program.referencesGlobal(name), name
+  for name in ["player.position.x", "player.flexible", "missing"]:
+    doAssert not program.referencesGlobal(name), name
