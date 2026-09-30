@@ -2,7 +2,7 @@ import
   std/strutils,
   bassy,
   test_controls, test_fixed, test_booleans, test_strings, test_determinism,
-  test_data, test_buffers
+  test_data, test_buffers, test_records, test_loaders
 
 proc errorContains(
     action: proc() {.closure.},

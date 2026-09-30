@@ -123,6 +123,7 @@ type
     NewlineToken,
     LeftParenToken,
     RightParenToken,
+    DotToken,
     CommaToken,
     SemicolonToken,
     PlusToken,
@@ -145,11 +146,30 @@ type
     line: int32
     column: int32
 
+  FieldKind = enum
+    NumericField,
+    IntegerField,
+    FixedField,
+    StringField
+
+  RecordField = object
+    name: string
+    kind: FieldKind
+
+  RecordType = object
+    fields: seq[RecordField]
+    depth: int
+
+  RecordVariable = object
+    typeId: int
+    indexed: bool
+
   BasicArray = object
     name: string
     base: int32
     length: int32
     initial: seq[Value]
+    fieldKind: FieldKind
 
   Routine = object
     name: string
@@ -181,6 +201,7 @@ type
     routines: seq[Routine]
     literals: seq[string]
     globalNames: seq[string]
+    globalKinds: seq[FieldKind]
     globalIds: OrderedTable[string, int32]
     arrayIds: OrderedTable[string, int32]
     routineIds: OrderedTable[string, int32]
@@ -214,6 +235,9 @@ type
     limits: Limits
     globals: seq[Value]
     memory: seq[Value]
+    arrayLoaders: seq[ArrayLoader]
+    arrayReady: seq[int32]
+    loadedArrays: seq[int32]
     registers: seq[Value]
     arguments: seq[Value]
     frames: seq[Frame]
@@ -236,12 +260,21 @@ type
     nativeError: ref Exception
     handedBack: int64
 
+  GlobalView* = object
+    runtime: Runtime
+    index: int32
+    fieldKind: FieldKind
+
+  ArrayLoader* = proc(view: ArrayView) {.closure.}
+
   ArrayView* = object
     runtime: Runtime
     base: int32
     length: int32
     writable: bool
+    arrayId: int32
     buffer: Value
+    fieldKind: FieldKind
 
   Expr = object
     text: bool
@@ -249,6 +282,12 @@ type
     value: Value
     reg: int32
     temporary: bool
+
+  FieldAccess = object
+    name: Token
+    kind: FieldKind
+    indexed: bool
+    index: Expr
 
   CallArgument = object
     value: Expr
@@ -261,6 +300,11 @@ type
     program: Program
     literalIds: OrderedTable[string, int32]
     subEnds: OrderedTable[int, int]
+    typeEnds: OrderedTable[int, int]
+    types: seq[RecordType]
+    typeIds: OrderedTable[string, int]
+    records: OrderedTable[string, RecordVariable]
+    recordBytes: int64
 
   LabelJump = object
     token: Token
@@ -533,6 +577,12 @@ proc lex(source: string, limits: Limits): seq[Token] =
         value
       )
     of '0' .. '9', '.':
+      if c == '.' and
+        (pos + 1 >= source.len or source[pos + 1] notin {'0' .. '9'}):
+          result.add sourceToken(DotToken, line, column)
+          inc pos
+          inc column
+          continue
       let
         start = pos
         startColumn = column
@@ -643,7 +693,7 @@ proc isReserved(name: string, functions = true): bool =
       "exit", "false", "for", "gosub", "goto", "if", "imp", "is", "let",
       "loop", "mod", "next", "not", "on", "or", "print", "rem",
       "return", "select", "step", "stop", "sub", "then", "to", "true",
-      "until", "wend", "while", "xor":
+      "until", "wend", "while", "xor", "type", "as":
     true
   else:
     false
@@ -716,6 +766,23 @@ proc requireHostName(host: Host, name: string): string =
 proc stringName(name: string): bool {.inline.} =
   ## Returns whether a BASIC name declares a string value.
   name.endsWith("$")
+
+proc fieldName(name: string, kind: FieldKind): string =
+  ## Adds the storage suffix used by native string fields.
+  if kind == StringField and not name.stringName:
+    name & "$"
+  else:
+    name
+
+proc fieldValue(value: Value, kind: FieldKind): Value {.inline.} =
+  ## Converts a record field value without rounding fractional integers.
+  case kind
+  of IntegerField:
+    toValue(value.asInt)
+  of FixedField:
+    toValue(value.asFixed)
+  of NumericField, StringField:
+    value
 
 proc requireType(name: string, value: Value) =
   ## Enforces the string suffix at a host boundary.
@@ -804,6 +871,25 @@ proc addQuery*(
     name,
     parameters,
     HostCallback(integer: callback, query: true),
+    workUnits
+  )
+
+proc addQuery*(
+    host: var Host,
+    name: string,
+    parameters: int,
+    callback: NumericHostProc,
+    workUnits = 16
+): int32 =
+  ## Exposes a numeric query that never reads or changes VM storage.
+  ## Like integer queries, it may run directly from compiled code and be
+  ## retried on a refused fast path, so it must have no observable effects.
+  if name.stringName:
+    fail("numeric queries cannot return strings")
+  host.addHostFunction(
+    name,
+    parameters,
+    HostCallback(numeric: callback, query: true),
     workUnits
   )
 
@@ -906,6 +992,7 @@ proc addRoutine(
   if isReserved(name):
     fail(token, "reserved keyword cannot name a subroutine")
   if compiler.program.routineIds.getOrDefault(name, -1'i32) >= 0 or
+      compiler.records.hasKey(name) or
       compiler.program.arrayIds.getOrDefault(name, -1'i32) >= 0 or
       compiler.program.hostDataIds.getOrDefault(name, -1'i32) >= 0 or
       compiler.program.hostFunctionIds.getOrDefault(name, -1'i32) >= 0:
@@ -938,6 +1025,7 @@ proc addArray(
   if isReserved(name):
     fail(token, "reserved keyword cannot name an array")
   if compiler.program.arrayIds.getOrDefault(name, -1'i32) >= 0 or
+      compiler.records.hasKey(name) or
       compiler.program.routineIds.getOrDefault(name, -1'i32) >= 0 or
       compiler.program.hostDataIds.getOrDefault(name, -1'i32) >= 0 or
       compiler.program.hostFunctionIds.getOrDefault(name, -1'i32) >= 0:
@@ -1059,6 +1147,154 @@ proc collectData(compiler: var Compiler, pos: var int) =
   compiler.addArray(name.text, int64(values.len - 1), name)
   compiler.program.arrays[^1].initial = move(values)
 
+proc globalId(compiler: var Compiler, name: string, token: Token): int32
+  ## Resolves or creates a global scalar storage slot.
+
+proc reserveField(compiler: var Compiler, length: int, token: Token) =
+  ## Bounds expanded field paths before allocating nested layout metadata.
+  if int64(length) >
+    int64(compiler.limits.maxSourceBytes) - compiler.recordBytes:
+      fail(token, "record layouts exceed the configured source byte limit")
+  compiler.recordBytes += int64(length)
+
+proc collectType(compiler: var Compiler, pos: var int) =
+  ## Collects a bounded record layout, flattening previously defined types.
+  let start = pos
+  inc pos
+  let name = compiler.tokens[pos]
+  if name.kind != IdentifierToken or name.text.stringName or
+    isReserved(name.text) or name.text in [
+      "integer", "long", "int32", "fixed", "fixed32", "single", "double",
+      "number", "string"
+    ]:
+      fail(name, "expected a record type name")
+  if compiler.typeIds.hasKey(name.text):
+    fail(name, "duplicate record type '" & name.text & "'")
+  if compiler.types.len >= compiler.limits.maxGlobals:
+    fail(name, "record type count exceeds the configured global limit")
+  inc pos
+  if not compiler.tokens.declarationLineEnd(pos):
+    fail(compiler.tokens[pos], "expected a new line after TYPE name")
+  var
+    record = RecordType(depth: 1)
+    names = initOrderedTable[string, bool]()
+  while true:
+    while compiler.tokens[pos].kind == NewlineToken:
+      inc pos
+    if compiler.tokens[pos].isKeyword("rem"):
+      inc pos
+      continue
+    if compiler.tokens[pos].isKeyword("end") and
+      compiler.tokens[pos + 1].isKeyword("type"):
+        pos += 2
+        break
+    let field = compiler.tokens[pos]
+    if field.kind == EndToken:
+      fail(name, "record type is missing 'end type'")
+    if field.kind != IdentifierToken or isReserved(field.text):
+      fail(field, "expected a record field name")
+    if names.hasKey(field.text):
+      fail(field, "duplicate record field '" & field.text & "'")
+    names[field.text] = true
+    inc pos
+    if not compiler.tokens[pos].isKeyword("as"):
+      fail(compiler.tokens[pos], "expected AS after record field")
+    inc pos
+    let representation = compiler.tokens[pos]
+    if representation.kind != IdentifierToken:
+      fail(representation, "expected a record field type")
+    var kind: FieldKind
+    case representation.text
+    of "integer", "long", "int32":
+      kind = IntegerField
+    of "fixed", "fixed32", "single", "double":
+      kind = FixedField
+      if compiler.limits.disableFixed:
+        fail(representation, "BASIC fixed-point record fields are disabled")
+    of "number":
+      kind = NumericField
+    of "string":
+      kind = StringField
+    else:
+      let nested = compiler.typeIds.getOrDefault(representation.text, -1)
+      if nested < 0 or field.text.stringName:
+        fail(representation, "unknown record field type")
+      record.depth = max(record.depth, compiler.types[nested].depth + 1)
+      if record.depth > compiler.limits.maxSyntaxDepth:
+        fail(field, "record nesting exceeds the configured syntax limit")
+      for child in compiler.types[nested].fields:
+        if record.fields.len >= compiler.limits.maxGlobals:
+          fail(field, "record fields exceed the configured global limit")
+        compiler.reserveField(field.text.len + 1 + child.name.len, field)
+        record.fields.add RecordField(
+          name: field.text & "." & child.name,
+          kind: child.kind
+        )
+      inc pos
+      if not compiler.tokens.declarationLineEnd(pos):
+        fail(compiler.tokens[pos], "expected a new line after record field")
+      continue
+    if field.text.stringName and kind != StringField:
+      fail(field, "string field suffix requires AS STRING")
+    if record.fields.len >= compiler.limits.maxGlobals:
+      fail(field, "record fields exceed the configured global limit")
+    compiler.reserveField(field.text.len, field)
+    record.fields.add RecordField(name: field.text, kind: kind)
+    inc pos
+    if not compiler.tokens.declarationLineEnd(pos):
+      fail(compiler.tokens[pos], "expected a new line after record field")
+  if record.fields.len == 0:
+    fail(name, "record type must contain at least one field")
+  var storageNames = initOrderedTable[string, bool]()
+  for field in record.fields:
+    let storage = fieldName(field.name, field.kind)
+    if storageNames.hasKey(storage):
+      fail(name, "duplicate record field storage '" & storage & "'")
+    storageNames[storage] = true
+  if not compiler.tokens.declarationLineEnd(pos):
+    fail(compiler.tokens[pos], "expected a new line after END TYPE")
+  compiler.typeIds[name.text] = compiler.types.len
+  compiler.types.add move(record)
+  compiler.typeEnds[start] = pos
+
+proc addRecord(
+    compiler: var Compiler,
+    name, representation: Token,
+    indexed: bool,
+    bound: Token
+) =
+  ## Allocates each record leaf in existing scalar or array storage.
+  let typeId = compiler.typeIds.getOrDefault(representation.text, -1)
+  if representation.kind != IdentifierToken or typeId < 0:
+    fail(representation, "unknown record type '" & representation.text & "'")
+  if name.text.stringName or isReserved(name.text):
+    fail(name, "expected a record variable name")
+  if compiler.records.hasKey(name.text) or
+    compiler.program.globalIds.hasKey(name.text) or
+    compiler.program.arrayIds.hasKey(name.text) or
+    compiler.program.routineIds.hasKey(name.text) or
+    compiler.program.hostDataIds.hasKey(name.text) or
+    compiler.program.hostFunctionIds.hasKey(name.text):
+      fail(name, "duplicate BASIC name '" & name.text & "'")
+  for field in compiler.types[typeId].fields:
+    compiler.reserveField(name.text.len + 1 + field.name.len + 1, name)
+    let
+      path = name.text & "." & field.name
+      storage = fieldName(path, field.kind)
+    if indexed:
+      compiler.addArray(storage, bound.value, name)
+      let id = compiler.program.arrayIds[storage]
+      compiler.program.arrayIds[path] = id
+      compiler.program.arrays[int(id)].fieldKind = field.kind
+    else:
+      let id = compiler.globalId(storage, name)
+      compiler.program.globalIds[path] = id
+      compiler.program.globalKinds[int(id)] = field.kind
+  compiler.records[name.text] = RecordVariable(
+    typeId: typeId,
+    indexed: indexed
+  )
+
 proc collectDeclarations(compiler: var Compiler) =
   ## Collects global arrays and subroutine ranges before code generation.
   compiler.program.routines.add Routine(name: "main")
@@ -1129,6 +1365,8 @@ proc collectDeclarations(compiler: var Compiler) =
         pos,
         nameToken
       )
+    elif compiler.tokens[pos].isKeyword("type"):
+      compiler.collectType(pos)
     elif compiler.tokens[pos].isKeyword("data") and
       compiler.tokens[pos + 1].kind == IdentifierToken:
       compiler.collectData(pos)
@@ -1136,22 +1374,30 @@ proc collectDeclarations(compiler: var Compiler) =
       inc pos
       let nameToken = compiler.tokens[pos]
       if nameToken.kind != IdentifierToken:
-        fail(nameToken, "expected an array name after 'dim'")
+        fail(nameToken, "expected a variable name after 'dim'")
       let name = nameToken.text
       inc pos
-      if compiler.tokens[pos].kind != LeftParenToken:
-        fail(compiler.tokens[pos], "expected '(' after array name")
-      inc pos
-      let bound = compiler.tokens[pos]
-      if bound.kind != IntegerToken:
-        fail(bound, "array upper bound must be a non-negative constant")
-      inc pos
-      if compiler.tokens[pos].kind != RightParenToken:
-        fail(compiler.tokens[pos], "expected ')' after array upper bound")
-      inc pos
+      let indexed = compiler.tokens[pos].kind == LeftParenToken
+      var bound = nameToken
+      if indexed:
+        inc pos
+        bound = compiler.tokens[pos]
+        if bound.kind != IntegerToken:
+          fail(bound, "array upper bound must be a non-negative constant")
+        inc pos
+        if compiler.tokens[pos].kind != RightParenToken:
+          fail(compiler.tokens[pos], "expected ')' after array upper bound")
+        inc pos
+      if compiler.tokens[pos].isKeyword("as"):
+        inc pos
+        compiler.addRecord(nameToken, compiler.tokens[pos], indexed, bound)
+        inc pos
+      elif indexed:
+        compiler.addArray(name, bound.value, nameToken)
+      else:
+        fail(compiler.tokens[pos], "expected AS and a record type")
       if not compiler.tokens.declarationLineEnd(pos):
         fail(compiler.tokens[pos], "expected a new line after 'dim'")
-      compiler.addArray(name, bound.value, nameToken)
       if compiler.tokens[pos].kind == NewlineToken:
         inc pos
     else:
@@ -1160,6 +1406,7 @@ proc collectDeclarations(compiler: var Compiler) =
   for routine in compiler.program.routines:
     for parameter in routine.parameters:
       if compiler.program.arrayIds.getOrDefault(parameter, -1'i32) >= 0 or
+          compiler.records.hasKey(parameter) or
           compiler.program.routineIds.getOrDefault(parameter, -1'i32) >= 0 or
           compiler.program.hostDataIds.getOrDefault(parameter, -1'i32) >= 0 or
           compiler.program.hostFunctionIds.getOrDefault(
@@ -1292,6 +1539,8 @@ proc globalId(
       compiler.program.hostFunctionIds.getOrDefault(name, -1'i32) >= 0 or
       isReserved(name, functions = false):
     fail(token, "name '" & name & "' is not a scalar variable")
+  if compiler.records.hasKey(name):
+    fail(token, "record access requires a field")
   if compiler.program.globalNames.len >= compiler.limits.maxGlobals:
     fail(token, "global count exceeds the configured limit")
   if name.stringName:
@@ -1299,6 +1548,7 @@ proc globalId(
   result = int32(compiler.program.globalNames.len)
   compiler.program.globalIds[name] = result
   compiler.program.globalNames.add name
+  compiler.program.globalKinds.add NumericField
 
 proc literalId(compiler: var Compiler, value: string): int32 =
   ## Interns a print-only string literal.
@@ -1399,6 +1649,53 @@ proc precedence(token: Token, op: var Op): int =
 proc parseExpression(parser: var Parser, minimum = 1): Expr
   ## Parses an expression starting at the requested precedence level.
 
+proc parseField(parser: var Parser, name: Token): FieldAccess =
+  ## Resolves a record leaf and evaluates its optional array index once.
+  let record = parser.compiler[].records[name.text]
+  result.indexed = record.indexed
+  if record.indexed:
+    discard parser.expectKind(LeftParenToken, "record array requires an index")
+    parser.enterSyntax
+    result.index = parser.parseExpression
+    parser.leaveSyntax
+    if result.index.text:
+      fail(name, "BASIC record array index must be numeric")
+    discard parser.expectKind(RightParenToken, "expected ')' after index")
+  if parser.current.kind != DotToken:
+    fail(name, "record access requires a field")
+  var path = ""
+  while parser.current.kind == DotToken:
+    inc parser.pos
+    let field = parser.expectKind(IdentifierToken, "expected a record field")
+    if path.len > 0:
+      path.add '.'
+    path.add field.text
+  for field in parser.compiler[].types[record.typeId].fields:
+    if field.name == path:
+      result.name = name
+      result.name.text = fieldName(name.text & "." & path, field.kind)
+      result.kind = field.kind
+      return
+  fail(name, "unknown record field '" & name.text & "." & path & "'")
+
+proc readField(parser: var Parser, name: Token): Expr =
+  ## Loads a resolved record leaf using ordinary checked VM operations.
+  var access = parser.parseField(name)
+  let destination = parser.allocateTemp
+  if access.indexed:
+    parser.materialize(access.index)
+    let id = parser.compiler[].program.arrayIds[access.name.text]
+    discard parser.emit(ArrayGetOp, destination, id, access.index.reg)
+    parser.release(access.index)
+  else:
+    let id = parser.compiler[].program.globalIds[access.name.text]
+    discard parser.emit(LoadGlobalOp, destination, id)
+  Expr(
+    reg: destination,
+    temporary: true,
+    text: access.kind == StringField
+  )
+
 proc parseHostCall(
     parser: var Parser,
     name: Token,
@@ -1431,6 +1728,10 @@ proc parsePrimary(parser: var Parser): Expr =
     discard parser.expectKind(RightParenToken, "expected ')'")
     parser.leaveSyntax
   of IdentifierToken:
+    if parser.compiler[].records.hasKey(token.text):
+      return parser.readField(token)
+    if parser.current.kind == DotToken:
+      fail(token, "unknown record variable '" & token.text & "'")
     if token.text == "true":
       return constant(-1)
     if token.text == "false":
@@ -1579,14 +1880,18 @@ proc parseExpression(parser: var Parser, minimum = 1): Expr =
     result = parser.binaryResult(op, result, right)
 
 proc parseDim(parser: var Parser) =
-  ## Validates and consumes a top-level global array declaration.
+  ## Consumes a checked top-level array or record declaration.
   let keyword = parser.advance
   if parser.routineId != 0 or parser.syntaxDepth != 0:
-    fail(keyword, "arrays can only be declared at top level")
-  let name = parser.expectKind(IdentifierToken, "expected an array name")
-  discard parser.expectKind(LeftParenToken, "expected '(' after array name")
-  discard parser.expectKind(IntegerToken, "expected an array upper bound")
-  discard parser.expectKind(RightParenToken, "expected ')' after array bound")
+    fail(keyword, "arrays and records can only be declared at top level")
+  discard parser.expectKind(IdentifierToken, "expected a variable name")
+  if parser.current.kind == LeftParenToken:
+    inc parser.pos
+    discard parser.expectKind(IntegerToken, "expected an array upper bound")
+    discard parser.expectKind(RightParenToken, "expected ')' after array bound")
+  if parser.atKeyword("as"):
+    inc parser.pos
+    discard parser.expectKind(IdentifierToken, "expected a record type")
   parser.lineEnd
 
 proc parseData(parser: var Parser) =
@@ -1852,8 +2157,49 @@ proc patchFalseJump(parser: var Parser, location, target: int) =
   else:
     fail("compiler attempted to patch a non-conditional branch")
 
+proc coerceField(
+    parser: var Parser,
+    value: Expr,
+    kind: FieldKind
+): Expr =
+  ## Emits exact integer or fixed-point coercion through numeric primitives.
+  if value.constant:
+    return constant(fieldValue(value.value, kind))
+  case kind
+  of IntegerField:
+    parser.binaryResult(IntegerDivideOp, value, constant(1))
+  of FixedField:
+    parser.binaryResult(AddOp, value, constant(toValue(fixed(0))))
+  of NumericField, StringField:
+    value
+
+proc assignField(parser: var Parser, name: Token) =
+  ## Stores one typed leaf after evaluating its index and value once.
+  var access = parser.parseField(name)
+  discard parser.expectKind(EqualToken, "expected '=' in field assignment")
+  var value = parser.parseExpression
+  if value.text != (access.kind == StringField):
+    fail(name, "BASIC record field assignment type mismatch")
+  value = parser.coerceField(value, access.kind)
+  parser.materialize(value)
+  if access.indexed:
+    parser.materialize(access.index)
+    let id = parser.compiler[].program.arrayIds[access.name.text]
+    discard parser.emit(ArraySetOp, id, access.index.reg, value.reg)
+    parser.release(access.index)
+  else:
+    let id = parser.compiler[].program.globalIds[access.name.text]
+    discard parser.emit(StoreGlobalOp, id, value.reg)
+  parser.release(value)
+  parser.lineEnd
+
 proc parseAssignment(parser: var Parser, name: Token) =
   ## Compiles scalar or array assignment.
+  if parser.compiler[].records.hasKey(name.text):
+    parser.assignField(name)
+    return
+  if parser.current.kind == DotToken:
+    fail(name, "unknown record variable '" & name.text & "'")
   if parser.compiler[].program.hostDataIds.getOrDefault(
       name.text,
       -1'i32
@@ -2635,6 +2981,14 @@ proc parseStatement(parser: var Parser) =
       return
   if parser.atKeyword("dim"):
     parser.parseDim
+  elif parser.atKeyword("type"):
+    if parser.routineId != 0 or parser.syntaxDepth != 0:
+      fail(parser.current, "record types can only be declared at top level")
+    let ending = parser.compiler[].typeEnds.getOrDefault(parser.pos, -1)
+    if ending < 0:
+      fail(parser.current, "invalid record type declaration")
+    parser.pos = ending
+    parser.lineEnd
   elif parser.atKeyword("data") and
     parser.peek(1).kind == IdentifierToken:
     parser.parseData
@@ -2697,6 +3051,8 @@ proc parseStatement(parser: var Parser) =
   elif parser.current.kind == IdentifierToken:
     let name = parser.advance
     if parser.current.kind == EqualToken or
+      parser.current.kind == DotToken or
+      parser.compiler[].records.hasKey(name.text) or
       parser.compiler[].program.arrayIds.getOrDefault(name.text, -1'i32) >= 0:
         parser.parseAssignment(name)
     elif parser.current.kind == LeftParenToken:
@@ -3088,7 +3444,10 @@ proc compileProgram(
     tokens: prepareTokens(lex(source, limits)),
     program: Program(disableFixed: limits.disableFixed),
     literalIds: initOrderedTable[string, int32](),
-    subEnds: initOrderedTable[int, int]()
+    subEnds: initOrderedTable[int, int](),
+    typeEnds: initOrderedTable[int, int](),
+    typeIds: initOrderedTable[string, int](),
+    records: initOrderedTable[string, RecordVariable]()
   )
   compiler.program.globalIds = initOrderedTable[string, int32]()
   compiler.program.arrayIds = initOrderedTable[string, int32]()
@@ -3128,6 +3487,16 @@ proc clear(values: var seq[Value]) =
 
 proc compileNative*(runtime: var Runtime): int
   ## Compiles this program to machine code; the body sits further down.
+
+proc initializeFields(runtime: Runtime) =
+  ## Restores fixed-point record fields to their typed zero values.
+  for i, kind in runtime.program.globalKinds:
+    if kind == FixedField:
+      runtime.globals[i] = toValue(fixed(0))
+  for array in runtime.program.arrays:
+    if array.fieldKind == FixedField:
+      for i in int(array.base) ..< int(array.base + array.length):
+        runtime.memory[i] = toValue(fixed(0))
 
 proc initRuntimeState(
     program: Program,
@@ -3181,7 +3550,8 @@ proc initRuntimeState(
       int64(program.hostFunctions.len) * LogicalHostCallbackBytes
   var allocatedBytes =
     int64(limits.maxCallDepth) * LogicalFrameBytes + hostCallbackBytes +
-    argumentCells * 4
+    argumentCells * 4 + int64(program.arrays.len) *
+      (LogicalHostCallbackBytes + 8)
   for array in program.arrays:
     let cells = int64(array.initial.len)
     if cells > (limits.maxMemoryBytes - allocatedBytes) div LogicalValueBytes:
@@ -3220,6 +3590,8 @@ proc initRuntimeState(
       arrayCells,
       "too many BASIC array cells for this target"
     )),
+    arrayLoaders: newSeq[ArrayLoader](program.arrays.len),
+    arrayReady: newSeq[int32](program.arrays.len),
     registers: newSeq[Value](portableCells(
       registerCells,
       "too many BASIC registers for this target"
@@ -3237,6 +3609,8 @@ proc initRuntimeState(
     remainingWork: limits.maxWorkUnits,
     allocatedBytes: allocatedBytes
   )
+  for ready in result.arrayReady.mitems:
+    ready = 1
   if program.usesStrings:
     result.strings = initTextStorage(
       limits.maxStrings, limits.maxStringBytes, limits.maxStringLength
@@ -3270,6 +3644,7 @@ proc initRuntimeState(
   for array in program.arrays:
     for i, value in array.initial:
       result.memory[int(array.base) + i] = value
+  result.initializeFields
   for i, name in program.hostDataNames:
     let id = host.dataIds.getOrDefault(name, -1'i32)
     result.hostData[i] =
@@ -3317,6 +3692,10 @@ proc reset*(runtime: var Runtime) =
       value = Value()
   runtime.globals.clear
   runtime.memory.clear
+  for id in runtime.loadedArrays:
+    if runtime.arrayLoaders[int(id)] != nil:
+      runtime.arrayReady[int(id)] = 0
+  runtime.initializeFields
   for array in runtime.program.arrays:
     for i, value in array.initial:
       runtime.memory[int(array.base) + i] = value
@@ -3470,7 +3849,12 @@ proc compileNative*(runtime: var Runtime): int =
     return 0
   var extents = newSeq[ArrayExtent](runtime.program.arrays.len)
   for index, item in runtime.program.arrays:
-    extents[index] = ArrayExtent(base: item.base, length: item.length)
+    extents[index] = ArrayExtent(
+      base: item.base,
+      length: item.length,
+      lazy: runtime.arrayLoaders[index] != nil,
+      id: int32(index)
+    )
   let limits = CallLimits(
     frames: int32(runtime.frames.len),
     slots: int32(runtime.registers.len)
@@ -3556,6 +3940,39 @@ proc findHostData(program: Program, name: string): int32 =
   ## Finds bound host data by its case-insensitive source name.
   program.hostDataIds.getOrDefault(normalized(name), -1'i32)
 
+proc referencesGlobal*(program: Program, name: string): bool =
+  ## Reports whether bytecode reads or writes a declared scalar field.
+  let id = program.findGlobal(name)
+  if id < 0:
+    return false
+  for instruction in program.code:
+    case instruction.op
+    of LoadGlobalOp, SetArgumentGlobalOp:
+      if instruction.b == id:
+        return true
+    of StoreGlobalImmediateOp, AddGlobalImmediateOp,
+      JumpUnlessGlobalEqualImmediateOp,
+      JumpUnlessGlobalNotEqualImmediateOp,
+      JumpUnlessGlobalLessImmediateOp,
+      JumpUnlessGlobalLessEqualImmediateOp,
+      JumpUnlessGlobalGreaterImmediateOp,
+      JumpUnlessGlobalGreaterEqualImmediateOp,
+      JumpUnlessGlobalModuloEqualZeroOp,
+      AddGlobalHostDataOp, AddGlobalRegisterOp, StoreGlobalOp:
+        if instruction.a == id:
+          return true
+    of MoveGlobalOp, AddGlobalOp, ModuloGlobalImmediateOp:
+      if instruction.a == id or instruction.b == id:
+        return true
+    of AddGlobalArrayGlobalIndexOp:
+      if instruction.a == id or instruction.c == id:
+        return true
+    of ArrayAddGlobalsOp:
+      if instruction.b == id or instruction.c == id:
+        return true
+    else:
+      discard
+
 proc hostDataIndex*(program: Program, name: string): int32 =
   ## Returns a host data slot, or -1 when the name is unbound.
   program.findHostData(name)
@@ -3571,7 +3988,7 @@ proc getData*(runtime: Runtime, name: string): int32 =
   ## Reads runtime host data as an exact int32.
   runtime.getDataValue(name).asInt
 
-proc requireValue(runtime: Runtime, value: Value) =
+proc requireValue(runtime: Runtime, value: Value) {.inline.} =
   ## Enforces the compiled numeric policy at every host entry point.
   if value.kind == StringValue:
     discard runtime.strings.length(value)
@@ -3614,8 +4031,11 @@ proc setGlobal*(runtime: var Runtime, name: string, value: Value) =
   if id < 0:
     fail("unknown BASIC global '" & name & "'")
   runtime.requireValue(value)
-  requireType(name, value)
-  runtime.globals[int(id)] = value
+  requireType(runtime.program.globalNames[int(id)], value)
+  runtime.globals[int(id)] = fieldValue(
+    value,
+    runtime.program.globalKinds[int(id)]
+  )
 
 proc arrayLength*(runtime: Runtime, name: string): int32 =
   ## Returns an array's element count, including its zero index.
@@ -3623,6 +4043,9 @@ proc arrayLength*(runtime: Runtime, name: string): int32 =
   if id < 0:
     fail("unknown BASIC array '" & name & "'")
   runtime.program.arrays[int(id)].length
+
+proc prepareArray(runtime: Runtime, id: int32) {.inline.}
+  ## Materializes an invalidated host array before exposing its cells.
 
 proc checkedArrayIndex(
     runtime: Runtime,
@@ -3640,6 +4063,7 @@ proc checkedArrayIndex(
       "BASIC array '" & name & "' index " & $index &
       " is outside 0 .. " & $(length - 1)
     )
+  runtime.prepareArray(arrayId)
   int(base + index)
 
 proc getArrayValue*(runtime: Runtime, name: string, index: int32): Value =
@@ -3666,8 +4090,9 @@ proc setArray*(
   if runtime.program.arrays[int(id)].initial.len > 0:
     fail("DATA arrays are read-only")
   runtime.requireValue(value)
-  requireType(name, value)
-  runtime.memory[runtime.checkedArrayIndex(id, index)] = value
+  requireType(runtime.program.arrays[int(id)].name, value)
+  let converted = fieldValue(value, runtime.program.arrays[int(id)].fieldKind)
+  runtime.memory[runtime.checkedArrayIndex(id, index)] = converted
 
 proc arrayView*(
     runtime: Runtime,
@@ -3693,8 +4118,10 @@ proc arrayView*(
   ArrayView(
     runtime: runtime,
     base: array.base,
+    arrayId: id,
     length: array.length,
-    writable: writable
+    writable: writable,
+    fieldKind: array.fieldKind
   )
 
 proc len*(view: ArrayView): int {.inline.} =
@@ -3717,6 +4144,7 @@ proc `[]`*(view: ArrayView, index: int): Value {.inline.} =
     fail("native array index is outside the array")
   if view.buffer.kind == ArrayValue:
     return view.runtime.buffers.get(view.buffer, index)
+  view.runtime.prepareArray(view.arrayId)
   view.runtime.memory[int(view.base) + index]
 
 proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
@@ -3731,7 +4159,89 @@ proc `[]=`*(view: ArrayView, index: int, value: Value) {.inline.} =
   if view.buffer.kind == ArrayValue:
     view.runtime.buffers.put(view.buffer, index, value)
   else:
-    view.runtime.memory[int(view.base) + index] = value
+    view.runtime.prepareArray(view.arrayId)
+    let converted = fieldValue(value, view.fieldKind)
+    view.runtime.memory[int(view.base) + index] = converted
+
+proc globalView*(runtime: Runtime, name: string): GlobalView =
+  ## Binds a checked numeric scalar for repeated host reads and writes.
+  let id = runtime.program.findGlobal(name)
+  if id < 0:
+    fail("unknown BASIC global '" & name & "'")
+  if runtime.program.globalNames[int(id)].stringName:
+    fail("numeric global views cannot bind strings")
+  GlobalView(
+    runtime: runtime,
+    index: id,
+    fieldKind: runtime.program.globalKinds[int(id)]
+  )
+
+proc value*(view: GlobalView): Value {.inline.} =
+  ## Reads a scalar from its bound runtime without name resolution.
+  if view.runtime == nil:
+    fail("unbound BASIC global view")
+  view.runtime.globals[int(view.index)]
+
+proc `value=`*(view: GlobalView, value: Value) {.inline.} =
+  ## Writes a numeric scalar with the declaration's type coercion.
+  if view.runtime == nil:
+    fail("unbound BASIC global view")
+  if value.kind notin {IntegerValue, FixedValue}:
+    fail("numeric global views require numeric values")
+  view.runtime.requireValue(value)
+  view.runtime.globals[int(view.index)] = fieldValue(value, view.fieldKind)
+
+proc arrayView*(
+    runtime: Runtime,
+    name: string,
+    writable = false
+): ArrayView =
+  ## Binds a named numeric array using the same checked view as native calls.
+  let id = runtime.program.findArray(name)
+  if id < 0:
+    fail("unknown BASIC array '" & name & "'")
+  runtime.arrayView(toValue(id), writable)
+
+proc loadArray(runtime: Runtime, id: int32) =
+  ## Populates a numeric array and keeps failed loads retryable.
+  runtime.arrayReady[int(id)] = 1
+  var completed = false
+  try:
+    runtime.arrayLoaders[int(id)](runtime.arrayView(toValue(id), true))
+    completed = true
+  finally:
+    if not completed:
+      runtime.arrayReady[int(id)] = 0
+
+proc prepareArray(runtime: Runtime, id: int32) =
+  ## Loads a bound numeric array only when its cached values are invalid.
+  if runtime.arrayReady[int(id)] == 0:
+    runtime.loadArray(id)
+
+proc setArrayLoader*(runtime: Runtime, name: string, loader: ArrayLoader) =
+  ## Binds a lazy numeric array and retires code compiled before the binding.
+  let id = runtime.program.findArray(name)
+  if id < 0:
+    fail("unknown BASIC array '" & name & "'")
+  discard runtime.arrayView(toValue(id), writable = true)
+  if loader != nil and id notin runtime.loadedArrays:
+    runtime.loadedArrays.add id
+  runtime.arrayLoaders[int(id)] = loader
+  runtime.arrayReady[int(id)] = int32(loader == nil)
+  runtime.machine = nil
+
+proc invalidate*(view: ArrayView) =
+  ## Invalidates one bound host array without resolving its name again.
+  if view.runtime == nil or view.buffer.kind == ArrayValue:
+    fail("invalidation requires a bound BASIC array view")
+  if view.runtime.arrayLoaders[int(view.arrayId)] != nil:
+    view.runtime.arrayReady[int(view.arrayId)] = 0
+
+proc invalidateArrays*(runtime: Runtime) =
+  ## Makes bound arrays refresh on their next read or write.
+  for id in runtime.loadedArrays:
+    if runtime.arrayLoaders[int(id)] != nil:
+      runtime.arrayReady[int(id)] = 0
 
 proc collectBuffers*(runtime: Runtime) =
   ## Reclaims buffers unreachable from VM values between native calls.
@@ -3826,7 +4336,8 @@ proc getStringArray*(runtime: Runtime, name: string, index: int32): string =
 
 proc setGlobal*(runtime: var Runtime, name: string, value: string) =
   ## Copies text into a declared string global.
-  if not name.stringName or runtime.program.findGlobal(name) < 0:
+  let id = runtime.program.findGlobal(name)
+  if id < 0 or not runtime.program.globalNames[int(id)].stringName:
     fail("unknown BASIC string global '" & name & "'")
   runtime.setGlobal(name, runtime.putString(value))
 
@@ -3849,7 +4360,7 @@ proc setArray*(
 ) =
   ## Copies text into one string array element after validating its index.
   let id = runtime.program.findArray(name)
-  if id < 0 or not name.stringName:
+  if id < 0 or not runtime.program.arrays[int(id)].name.stringName:
     fail("unknown BASIC string array '" & name & "'")
   discard runtime.checkedArrayIndex(id, index)
   runtime.setArray(name, index, runtime.putString(value))
@@ -4396,6 +4907,7 @@ proc publishStorage(runtime: Runtime, context: ptr NativeContext)
     if values.len == 0: nil else: values[0].addr
   context.globals = first(runtime.globals)
   context.memory = first(runtime.memory)
+  context.arrayReady = first(runtime.arrayReady)
   context.hostData = first(runtime.hostData)
   context.frames = first(runtime.frames)
   context.arguments = first(runtime.arguments)
@@ -4428,7 +4940,8 @@ template handOver(context: ptr NativeContext, pc: int32,
   except Exception as error:
     runtime.nativeError = error
     status = 1
-  if status == 0 and runtime.storageShape != runtime.machineShape:
+  if status == 0 and (runtime.machine == nil or
+      runtime.storageShape != runtime.machineShape):
     # Host code resized storage the compiled program indexes by offsets
     # proved at compile time. None of them can be trusted now, so the
     # program is retired and the rest of the run is interpreted, where
@@ -4447,10 +4960,9 @@ template handOver(context: ptr NativeContext, pc: int32,
 
 proc nativeQuery(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
   ## Answers a query for compiled code without carrying any VM state over,
-  ## since a query neither reads nor changes it. Only whole-number
-  ## arguments are taken here. Anything else, a refusal from the query,
-  ## or storage that is not where compiled code believes, answers one, and
-  ## compiled code then takes the ordinary path, which does it all again.
+  ## since a query neither reads nor changes it. Numeric queries preserve
+  ## fixed values; unsupported types, refusals, or moved storage resume
+  ## through the interpreter, which performs the same call and validation.
   var runtime {.cursor.} = cast[Runtime](context.runtime)
   template first(values: untyped): pointer =
     if values.len == 0: nil else: values[0].addr
@@ -4462,21 +4974,34 @@ proc nativeQuery(context: ptr NativeContext, pc: int32): int32 {.cdecl.} =
       item = runtime.program.code[int(pc)]
       functionId = int(item.b)
       count = int(runtime.program.hostFunctions[functionId].parameters)
-    for i in 0 ..< count:
-      if runtime.arguments[i].kind != IntegerValue:
-        return 1
-      runtime.integerArguments[i] = runtime.arguments[i].asInt
     template callbacks(): untyped = runtime.hostCallbacks[functionId]
-    let value =
-      if count == 0: callbacks.integer(EmptyArguments)
-      else:
-        callbacks.integer(runtime.integerArguments.toOpenArray(0, count - 1))
+    var value: Value
+    if callbacks.numeric != nil:
+      for i in 0 ..< count:
+        if runtime.arguments[i].kind notin {IntegerValue, FixedValue}:
+          return 1
+      value =
+        if count == 0: callbacks.numeric([])
+        else: callbacks.numeric(runtime.arguments.toOpenArray(0, count - 1))
+      if value.kind notin {IntegerValue, FixedValue}:
+        return 1
+      runtime.requireValue(value)
+    else:
+      for i in 0 ..< count:
+        if runtime.arguments[i].kind != IntegerValue:
+          return 1
+        runtime.integerArguments[i] = runtime.arguments[i].asInt
+      value = toValue(
+        if count == 0: callbacks.integer(EmptyArguments)
+        else:
+          callbacks.integer(runtime.integerArguments.toOpenArray(0, count - 1))
+      )
     if runtime.storageShape != runtime.machineShape or
         first(runtime.globals) != context.globals or
         first(runtime.memory) != context.memory:
       return 1
     if item.a >= 0:
-      runtime.registers[int(context.base) + int(item.a)] = toValue(value)
+      runtime.registers[int(context.base) + int(item.a)] = value
     0
   except Exception:
     1

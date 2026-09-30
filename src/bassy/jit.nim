@@ -63,6 +63,7 @@ type
     stringSpans*: pointer
     stringArena*: pointer
     queryStep*: pointer
+    arrayReady*: pointer
 
   NativeCall* = proc(context: ptr NativeContext): int32
     {.cdecl, gcsafe, raises: [].}
@@ -84,6 +85,8 @@ type
     ## Where one array sits in the shared cell storage, and how long it is.
     base*: int32
     length*: int32
+    lazy*: bool
+    id*: int32
 
 const
   ValueStride = 16
@@ -107,6 +110,7 @@ const
   ContextStringSpans = 128
   ContextStringArena = 136
   ContextQueryStep = 144
+  ContextArrayReady = 152
 
   ## One frame as the interpreter lays it out: where the caller's slots
   ## start, which routine it was in, where to carry on, and whether it
@@ -190,7 +194,8 @@ proc layoutMatches*(): bool {.raises: [].} =
     at(stringOwner) == ContextStringOwner and
     at(stringSpans) == ContextStringSpans and
     at(stringArena) == ContextStringArena and
-    at(queryStep) == ContextQueryStep
+    at(queryStep) == ContextQueryStep and
+    at(arrayReady) == ContextArrayReady
 
 type
   Machine* = ref object

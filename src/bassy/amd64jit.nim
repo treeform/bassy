@@ -409,6 +409,11 @@ proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
   ## index register is left scaled.
   e.code.compareImmediate(Word32, temp(index), extent.length)
   e.jumpWhen(AboveEqualCondition, slow)
+  if extent.lazy:
+    e.contextField(Cell, ContextArrayReady)
+    e.code.loadWord(Spare, Cell, extent.id * 4)
+    e.code.testRegister(Word32, Spare, Spare)
+    e.jumpWhen(EqualCondition, slow)
   e.code.addImmediate(Word32, temp(index), extent.base)
   e.code.shiftLeftImmediate(Word64, temp(index), 4)
   e.contextField(Cell, ContextMemory)
@@ -892,6 +897,11 @@ proc fastCellAddress(e: var Emitter, index: int, extent: ArrayExtent,
   let position = pooled(index)
   e.code.compareImmediate(Word32, position, extent.length)
   e.jumpWhen(AboveEqualCondition, deopt)
+  if extent.lazy:
+    e.contextField(Cell, ContextArrayReady)
+    e.code.loadWord(FastScratch, Cell, extent.id * 4)
+    e.code.testRegister(Word32, FastScratch, FastScratch)
+    e.jumpWhen(EqualCondition, deopt)
   e.code.moveRegister(Word32, FastScratch, position)
   e.code.addImmediate(Word32, FastScratch, extent.base)
   e.code.shiftLeftImmediate(Word64, FastScratch, 4)

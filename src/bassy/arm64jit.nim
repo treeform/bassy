@@ -406,13 +406,19 @@ proc jumpIfLowBits(e: var Emitter, value, bits: int, target: Label)
   e.jumpWhen(NotEqualCondition, target)
 
 proc cellAddress(e: var Emitter, index: int, extent: ArrayExtent,
-    slow: Label) {.raises: [].} =
+    slow: Label) {.raises: [BasicError].} =
   ## Bounds checks an index and leaves the cell's address in Cell. One
   ## unsigned comparison covers both ends, as the interpreter's does.
   let position = temp(index)
   e.code.loadImmediate(Word32, temp(6), int64(extent.length))
   e.code.compareRegister(Word32, position, temp(6))
   e.jumpWhen(CarrySetCondition, slow)
+  if extent.lazy:
+    e.code.loadDouble(Cell, Context, ContextArrayReady)
+    e.code.loadImmediate(Word32, temp(6), int64(extent.id))
+    e.code.addRegister(Word64, Cell, Cell, temp(6), 2)
+    e.code.loadWord(temp(6), Cell, 0)
+    e.jumpIfZero(temp(6), slow)
   e.code.loadImmediate(Word32, temp(6), int64(extent.base))
   e.code.addRegister(Word32, temp(6), temp(6), position)
   e.code.addRegister(Word64, Cell, MemoryBase, temp(6), 4)
@@ -927,6 +933,12 @@ proc fastCellAddress(e: var Emitter, index: int, extent: ArrayExtent,
   e.code.loadImmediate(Word32, FastScratch, int64(extent.length))
   e.code.compareRegister(Word32, position, FastScratch)
   e.jumpWhen(CarrySetCondition, deopt)
+  if extent.lazy:
+    e.code.loadDouble(Cell, Context, ContextArrayReady)
+    e.code.loadImmediate(Word32, FastScratch, int64(extent.id))
+    e.code.addRegister(Word64, Cell, Cell, FastScratch, 2)
+    e.code.loadWord(FastScratch, Cell, 0)
+    e.jumpIfZero(FastScratch, deopt)
   e.code.loadImmediate(Word32, FastScratch, int64(extent.base))
   e.code.addRegister(Word32, FastScratch, FastScratch, position)
   e.code.addRegister(Word64, Cell, MemoryBase, FastScratch, 4)

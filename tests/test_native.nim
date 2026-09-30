@@ -56,7 +56,7 @@ proc makeHost(): Host =
         raise newException(ValueError, "host refuses thirteen")
       arguments[0] *% 2
   )
-  discard result.addFunction("halve", 1,
+  discard result.addQuery("halve", 1,
     proc(arguments: openArray[Value]): Value =
       if arguments[0].kind == FixedValue:
         toValue(arguments[0].asFixed / fixed(2'i32))
@@ -427,6 +427,49 @@ while a < 20
   a = a + 1
 wend
 """)
+
+agree("numeric queries keep fractional results and live loop values",
+  Preamble & """
+x = 1.5
+y = 0
+for i = 1 to 40
+  y = y + halve(x)
+  x = halve(x + 3.25)
+  a = a + halve(i * 2)
+next i
+b = a + 7
+""")
+
+block:
+  var host = initHost()
+  let half: NumericHostProc = proc(arguments: openArray[Value]): Value =
+    ## Returns a fractional answer without inspecting VM storage.
+    toValue(arguments[0].asFixed / 2'fx)
+  discard host.addQuery("half", 1, half)
+  let program = compile("answer = half(3.5)", host)
+  var runtime = initRuntime(program, host)
+  if jitSupported():
+    doAssert runtime.compileNative() == program.instructions
+  discard runtime.run
+  doAssert runtime.getGlobalValue("answer").asFixed == 1.75'fx
+  doAssert runtime.handedBack == 0
+
+  var limits = defaultLimits()
+  limits.disableFixed = true
+  let restricted = compile("answer = half(3)", host, limits)
+  var interpreted = initRuntime(restricted, host, limits)
+  var native = initRuntime(restricted, host, limits)
+  discard native.compileNative()
+  var errors: seq[string]
+  for runtime in [interpreted, native]:
+    var current = runtime
+    try:
+      discard current.run
+    except BasicError as error:
+      errors.add(error.msg)
+  doAssert errors.len == 2
+  doAssert errors[0] == errors[1]
+  doAssert "disabled" in errors[0]
 
 block:
   # A binding must agree with the program about which functions are
