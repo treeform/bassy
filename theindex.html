@@ -170,6 +170,10 @@
           data-doc-search-tag="bassy: proc addQuery(host: var Host; name: string; parameters: int; callback: HostProc;
          workUnits = 16): int32" href="bassy.html#addQuery%2CHost%2Cstring%2Cint%2CHostProc%2Cint">bassy: proc addQuery(host: var Host; name: string; parameters: int; callback: HostProc;
          workUnits = 16): int32</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="bassy: proc addQuery(host: var Host; name: string; parameters: int;
+         callback: NumericHostProc; workUnits = 16): int32" href="bassy.html#addQuery%2CHost%2Cstring%2Cint%2CNumericHostProc%2Cint">bassy: proc addQuery(host: var Host; name: string; parameters: int;
+         callback: NumericHostProc; workUnits = 16): int32</a></li>
           </ul></dd>
 <dt><a name="addRegister" href="#addRegister"><span>addRegister:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -219,6 +223,10 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc arrayLength(runtime: Runtime; name: string): int32" href="bassy.html#arrayLength%2CRuntime%2Cstring">bassy: proc arrayLength(runtime: Runtime; name: string): int32</a></li>
           </ul></dd>
+<dt><a name="ArrayLoader" href="#ArrayLoader"><span>ArrayLoader:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: type ArrayLoader" href="bassy.html#ArrayLoader">bassy: type ArrayLoader</a></li>
+          </ul></dd>
 <dt><a name="arrays" href="#arrays"><span>arrays:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc arrays(program: Program): int" href="bassy.html#arrays%2CProgram">bassy: proc arrays(program: Program): int</a></li>
@@ -237,6 +245,8 @@
           </ul></dd>
 <dt><a name="arrayView" href="#arrayView"><span>arrayView:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="bassy: proc arrayView(runtime: Runtime; name: string; writable = false): ArrayView" href="bassy.html#arrayView%2CRuntime%2Cstring">bassy: proc arrayView(runtime: Runtime; name: string; writable = false): ArrayView</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="bassy: proc arrayView(runtime: Runtime; handle: Value; writable = false): ArrayView" href="bassy.html#arrayView%2CRuntime%2CValue">bassy: proc arrayView(runtime: Runtime; handle: Value; writable = false): ArrayView</a></li>
           </ul></dd>
 <dt><a name="asBool" href="#asBool"><span>asBool:</span></a></dt><dd><ul class="simple">
@@ -683,6 +693,14 @@
 <li><a class="reference external"
           data-doc-search-tag="bassy: proc globalValue(runtime: Runtime; index: int32): Value" href="bassy.html#globalValue%2CRuntime%2Cint32">bassy: proc globalValue(runtime: Runtime; index: int32): Value</a></li>
           </ul></dd>
+<dt><a name="GlobalView" href="#GlobalView"><span>GlobalView:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: object GlobalView" href="bassy.html#GlobalView">bassy: object GlobalView</a></li>
+          </ul></dd>
+<dt><a name="globalView" href="#globalView"><span>globalView:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc globalView(runtime: Runtime; name: string): GlobalView" href="bassy.html#globalView%2CRuntime%2Cstring">bassy: proc globalView(runtime: Runtime; name: string): GlobalView</a></li>
+          </ul></dd>
 <dt><a name="GosubOp" href="#GosubOp"><span>GosubOp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="bytecode: Op.GosubOp" href="bassy/bytecode.html#GosubOp">bytecode: Op.GosubOp</a></li>
@@ -784,6 +802,14 @@
 <dt><a name="IntegerValue" href="#IntegerValue"><span>IntegerValue:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: ValueKind.IntegerValue" href="bassy/numbers.html#IntegerValue">numbers: ValueKind.IntegerValue</a></li>
+          </ul></dd>
+<dt><a name="invalidate" href="#invalidate"><span>invalidate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc invalidate(view: ArrayView)" href="bassy.html#invalidate%2CArrayView">bassy: proc invalidate(view: ArrayView)</a></li>
+          </ul></dd>
+<dt><a name="invalidateArrays" href="#invalidateArrays"><span>invalidateArrays:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc invalidateArrays(runtime: Runtime)" href="bassy.html#invalidateArrays%2CRuntime">bassy: proc invalidateArrays(runtime: Runtime)</a></li>
           </ul></dd>
 <dt><a name="invoke" href="#invoke"><span>invoke:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1281,6 +1307,10 @@
 <li><a class="reference external"
           data-doc-search-tag="amd64: const rdx" href="bassy/amd64.html#rdx">amd64: const rdx</a></li>
           </ul></dd>
+<dt><a name="referencesGlobal" href="#referencesGlobal"><span>referencesGlobal:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc referencesGlobal(program: Program; name: string): bool" href="bassy.html#referencesGlobal%2CProgram%2Cstring">bassy: proc referencesGlobal(program: Program; name: string): bool</a></li>
+          </ul></dd>
 <dt><a name="Register" href="#Register"><span>Register:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="amd64: type Register" href="bassy/amd64.html#Register">amd64: type Register</a></li>
@@ -1408,6 +1438,10 @@
           data-doc-search-tag="bassy: proc setArray(runtime: var Runtime; name: string; index: int32; value: string)" href="bassy.html#setArray%2CRuntime%2Cstring%2Cint32%2Cstring">bassy: proc setArray(runtime: var Runtime; name: string; index: int32; value: string)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="bassy: proc setArray(runtime: var Runtime; name: string; index: int32; value: Value)" href="bassy.html#setArray%2CRuntime%2Cstring%2Cint32%2CValue">bassy: proc setArray(runtime: var Runtime; name: string; index: int32; value: Value)</a></li>
+          </ul></dd>
+<dt><a name="setArrayLoader" href="#setArrayLoader"><span>setArrayLoader:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc setArrayLoader(runtime: Runtime; name: string; loader: ArrayLoader)" href="bassy.html#setArrayLoader%2CRuntime%2Cstring%2CArrayLoader">bassy: proc setArrayLoader(runtime: Runtime; name: string; loader: ArrayLoader)</a></li>
           </ul></dd>
 <dt><a name="setData" href="#setData"><span>setData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1629,9 +1663,17 @@
 <li><a class="reference external"
           data-doc-search-tag="buffers: proc validate(storage: BufferStorage; value: Value)" href="bassy/buffers.html#validate%2CBufferStorage%2CValue">buffers: proc validate(storage: BufferStorage; value: Value)</a></li>
           </ul></dd>
+<dt><a name="value" href="#value"><span>value:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc value(view: GlobalView): Value" href="bassy.html#value%2CGlobalView">bassy: proc value(view: GlobalView): Value</a></li>
+          </ul></dd>
 <dt><a name="Value" href="#Value"><span>Value:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="numbers: object Value" href="bassy/numbers.html#Value">numbers: object Value</a></li>
+          </ul></dd>
+<dt><a name="value%3D" href="#value%3D"><span>value=:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="bassy: proc value=(view: GlobalView; value: Value)" href="bassy.html#value%3D%2CGlobalView%2CValue">bassy: proc value=(view: GlobalView; value: Value)</a></li>
           </ul></dd>
 <dt><a name="ValueKind" href="#ValueKind"><span>ValueKind:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1687,7 +1729,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-29 23:28:04 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-30 18:31:54 UTC</small>
       </div>
     </div>
   </div>
