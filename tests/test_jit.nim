@@ -79,6 +79,47 @@ proc check(name, source: string) =
 
 echo "native compilation available: ", jitSupported()
 
+check "nested records and record arrays", """
+TYPE Position
+  x AS FIXED
+END TYPE
+TYPE PlayerState
+  hp AS INTEGER
+  position AS Position
+  name AS STRING
+END TYPE
+DIM player AS PlayerState
+DIM players(3) AS PlayerState
+player.hp = 100
+player.name = "Ada"
+FOR i = 0 TO 3
+  players(i).hp = player.hp - i
+  players(i).position.x = i + .25
+  players(i).name = player.name + "!"
+NEXT i
+player.position.x = players(3).position.x
+player.hp = players(2).hp
+player.name = players(1).name
+"""
+
+check "record assignment type failure", """
+TYPE Stats
+  hp AS INTEGER
+END TYPE
+DIM player AS Stats
+value = .5
+player.hp = value
+"""
+
+check "record array bounds failure", """
+TYPE Stats
+  hp AS INTEGER
+END TYPE
+DIM players(3) AS Stats
+index = 4
+players(index).hp = 100
+"""
+
 check "counting loop", """
 i = 0
 total = 0

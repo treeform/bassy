@@ -199,6 +199,82 @@ global namespace.
 
 `end` and `stop` finish the whole program.
 
+## Records
+
+`type ... end type` defines a record layout. Declare a scalar record with
+`dim name as TypeName` or an array of records with `dim name(n) as TypeName`.
+Read and write fields with a dot:
+
+```basic
+type Position
+  x as fixed
+  y as fixed
+end type
+
+type PlayerState
+  hp as integer
+  position as Position
+  name as string
+end type
+
+dim player as PlayerState
+dim players(9) as PlayerState
+
+player.hp = 100
+player.position.x = 12.5
+player.name = "Ada"
+players(3).hp = player.hp - 10
+players(3).position.x = player.position.x
+print player.name, players(3).hp
+```
+
+Field types select storage and assignment rules:
+
+| Type | Behavior |
+| --- | --- |
+| `integer`, `long`, `int32` | Signed int32. Assignments accept exact integers, including `3.0`, and reject fractions and out-of-range values. |
+| `fixed`, `fixed32` | Q16.16 fixed point. Integer assignments convert within the fixed-point range. |
+| `single`, `double` | Compatibility aliases for `fixed`, using Q16.16 rather than floating point. |
+| `number` | The same flexible int32 or fixed-point values as ordinary numeric variables. |
+| `string` | Variable-length text in the existing bounded string pool. The field name does not need `$`. |
+| Previously defined record type | An embedded record, accessed as `player.position.x`. |
+
+Record type names, variable names, and field names are case-insensitive.
+Definitions and declarations must be at top level. Define types before using
+them in another type or a `dim` declaration. Scalar record fields are global,
+so subroutines can access them directly. Array indices use the existing
+zero-based, inclusive bounds and exact integer checks. An index expression
+is evaluated once per field access, before the assigned value expression.
+
+Fields begin as zero or empty text. Fixed fields begin as fixed-point zero.
+`restart` preserves their values and `reset` restores their defaults.
+Integer-only programs reject fixed fields, including `single` and `double`.
+`number` fields follow the program's integer-only policy.
+
+Nested layouts are flattened into scalar slots or one array per leaf field.
+Scalar leaves count against `maxGlobals`. Array leaves count against
+`maxArrays`, and all their cells count against `maxArrayElements` and the
+runtime memory budget. Type count and leaf count per type are bounded by
+`maxGlobals`, and record nesting is bounded by `maxSyntaxDepth`.
+Expanded field path bytes across layouts and declarations are bounded by
+`maxSourceBytes`, so nested types cannot expand compile-time names without
+a limit.
+
+The existing Nim API accepts dotted field paths:
+
+```nim
+runtime.setGlobal("player.hp", 100)
+runtime.setGlobal("player.name", "Ada")
+runtime.setArray("players.hp", 3, 90)
+echo runtime.getGlobal("player.hp")
+echo runtime.getStringGlobal("player.name")
+echo runtime.getArray("players.hp", 3)
+```
+
+Host setters enforce the same field types. Whole-record assignment,
+record-valued parameters, arrays inside a type, and fixed-length string
+fields are not supported. Pass individual fields to subroutines instead.
+
 ## Conditions
 
 Block `if ... then` ends with `end if`. It accepts any number of `elseif`
