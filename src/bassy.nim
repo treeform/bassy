@@ -89,6 +89,7 @@ type
   ): Value {.closure.}
 
   HostCallback = object
+    bindAtCompile: bool
     context: ContextHostProc
     integer: HostProc
     numeric: NumericHostProc
@@ -184,6 +185,7 @@ type
     parameterCount: int32
 
   HostFunctionSpec = object
+    binding: HostCallback
     context: bool
     numeric: bool
     query: bool
@@ -913,13 +915,16 @@ proc addFunction*(
     name: string,
     parameters: int,
     callback: ContextHostProc,
-    workUnits = 16
+    workUnits = 16,
+    bindAtCompile = false
 ): int32 =
   ## Exposes a trusted callback with array access and dynamic work charging.
+  ## bindAtCompile retains this closure in the program; runtimes inherit it
+  ## without a host binding. Compile separate programs for distinct closures.
   host.addHostFunction(
     name,
     parameters,
-    HostCallback(context: callback),
+    HostCallback(context: callback, bindAtCompile: bindAtCompile),
     workUnits
   )
 
@@ -3420,6 +3425,7 @@ proc configureHost(
       fail("BASIC host function parameter count exceeds the configured limit")
     program.hostFunctionIds[function.name] = int32(i)
     program.hostFunctions.add HostFunctionSpec(
+      binding: (if function.callback.bindAtCompile: function.callback else: HostCallback()),
       context: function.callback.context != nil,
       query: function.callback.query,
       numeric: function.callback.numeric != nil,
@@ -3527,6 +3533,8 @@ proc initRuntimeState(
     if id < 0:
       fail("missing BASIC host data binding '" & name & "'")
   for function in program.hostFunctions:
+    if function.binding.bindAtCompile:
+      continue
     let id = host.functionIds.getOrDefault(function.name, -1'i32)
     if id < 0:
       fail("missing BASIC host function binding '" & function.name & "'")
@@ -3653,8 +3661,11 @@ proc initRuntimeState(
       else:
         host.dataValues[int(id)]
   for i, function in program.hostFunctions:
-    let id = host.functionIds.getOrDefault(function.name, -1'i32)
-    result.hostCallbacks[i] = host.functions[int(id)].callback
+    if function.binding.bindAtCompile:
+      result.hostCallbacks[i] = function.binding
+    else:
+      let id = host.functionIds.getOrDefault(function.name, -1'i32)
+      result.hostCallbacks[i] = host.functions[int(id)].callback
   when defined(bassyNative) or defined(bassyNativeStrict):
     # Every runtime runs as machine code wherever the compiler accepts it,
     # and anything it refuses stays on the interpreter, as usual.

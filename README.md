@@ -116,6 +116,8 @@ block:
   doAssert runtime.getGlobal("total") == 16
 ```
 
+`ContextHostProc` callbacks can set `bindAtCompile = true` when registered. The compiled program then retains that closure, and runtimes inherit it without registering it again. This binding takes precedence over a same-named runtime host function. Compile separate programs when closures capture separate destinations or state.
+
 `restart` replenishes execution budgets and preserves globals and arrays. `reset` also clears globals and arrays. Both retain the runtime's current host data and callback bindings. Changes to a `Host` affect future runtimes. Use `runtime.setData` to update an existing runtime.
 
 Each runtime has its own numeric state and can share the compiled `Program`. Callbacks can still share captured Nim state. Create separate callback state and string pools when runtimes need to be isolated.
