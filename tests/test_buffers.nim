@@ -190,3 +190,20 @@ block:
   doAssert fails(proc() = discard runtime.putArray([toValue(1.5'fx)]))
   let array = runtime.putArray([toValue(1)])
   doAssert fails(proc() = discard runtime.arrayView(array)[1])
+
+block:
+  let host = makeHost()
+  var limits = defaultLimits()
+  limits.maxArrays = 0
+  limits.maxNativeBuffers = 2
+  var runtime = initRuntime(compile("a = blobCreate()\nb = blobCreate()", host,
+    limits), host, limits)
+  discard runtime.run()
+  let a = runtime.getGlobalValue("a")
+  runtime.putBlob(a, "packed")
+  let view = runtime.borrowBlob(a)
+  doAssert view.len == 6 and view.data[0] == byte('p')
+  doAssert fails(proc() = discard runtime.createBlob())
+  doAssert fails(proc() = discard runtime.borrowBlob(toValue(0)))
+  runtime.reset()
+  doAssert fails(proc() = discard runtime.borrowBlob(a))

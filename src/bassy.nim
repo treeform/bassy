@@ -7,7 +7,7 @@ import
   std/[strutils, tables],
   bassy/[buffers, bytecode, jit, numbers, texts]
 
-export bytecode, jit, numbers
+export bytecode, jit, numbers, BlobView
 
 const
   DefaultMaxStrings* = 256
@@ -16,6 +16,7 @@ const
   DefaultMaxSourceBytes* = 1 * 1024 * 1024
   DefaultMaxCodeInstructions* = 1_000_000
   DefaultMaxArrays* = 256
+  DefaultMaxNativeBuffers* = 256
   DefaultMaxArrayElements* = 4 * 1024 * 1024
   DefaultMaxGlobals* = 4096
   DefaultMaxHostData* = 1024
@@ -48,6 +49,7 @@ type
     maxSourceBytes*: int
     maxCodeInstructions*: int
     maxArrays*: int
+    maxNativeBuffers*: int
     maxArrayElements*: int
     maxGlobals*: int
     maxHostData*: int
@@ -345,6 +347,7 @@ proc defaultLimits*(): Limits =
     maxSourceBytes: DefaultMaxSourceBytes,
     maxCodeInstructions: DefaultMaxCodeInstructions,
     maxArrays: DefaultMaxArrays,
+    maxNativeBuffers: DefaultMaxNativeBuffers,
     maxArrayElements: DefaultMaxArrayElements,
     maxGlobals: DefaultMaxGlobals,
     maxHostData: DefaultMaxHostData,
@@ -385,6 +388,7 @@ proc validate(limits: Limits) =
   if limits.maxSourceBytes <= 0 or
       limits.maxCodeInstructions <= 0 or
       limits.maxArrays < 0 or
+      limits.maxNativeBuffers < 0 or
       limits.maxArrayElements < 0 or
       limits.maxGlobals < 0 or
       limits.maxHostData < 0 or
@@ -403,6 +407,7 @@ proc validate(limits: Limits) =
     fail("BASIC limits must be non-negative and retain execution capacity.")
   if limits.maxCodeInstructions > high(int32) or
       limits.maxArrays > high(int32) or
+      limits.maxNativeBuffers > high(int32) or
       limits.maxArrayElements > high(int32) or
       limits.maxGlobals > high(int32) or
       limits.maxHostData > high(int32) or
@@ -3579,7 +3584,7 @@ proc initRuntimeState(
     limits: limits,
     buffers: BufferStorage(
       maximum: limits.maxNativeMemoryBytes,
-      maxCount: limits.maxArrays,
+      maxCount: limits.maxNativeBuffers,
       maxElements: limits.maxArrayElements
     ),
     globals: newSeq[Value](portableCells(
@@ -4284,6 +4289,10 @@ proc createBlob*(runtime: Runtime): Value =
 proc getBlob*(runtime: Runtime, value: Value): string =
   ## Reads opaque bytes for a transactional host computation.
   runtime.buffers.blob(value)
+
+proc borrowBlob*(runtime: Runtime, value: Value): BlobView =
+  ## Borrows validated bytes until the host next mutates buffers or resets.
+  runtime.buffers.borrowBlob(value)
 
 proc blobBinding*(runtime: Runtime, value: Value): string =
   ## Reads the host-defined model identity attached to state.
