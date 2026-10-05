@@ -61,7 +61,10 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#BufferStorage" title="BufferStorage = object
+      <li><a class="reference" href="#BlobView" title="BlobView = object
+  data*: ptr UncheckedArray[byte]
+  len*: int">BlobView</a></li>
+<li><a class="reference" href="#BufferStorage" title="BufferStorage = object
   external*, maximum*: int64
   maxCount*, maxElements*: int">BufferStorage</a></li>
 
@@ -78,6 +81,10 @@
 </ul>
 <ul class="simple nested-toc-section">blob
   <li><a class="reference" href="#blob%2CBufferStorage%2CValue" title="blob(storage: BufferStorage; value: Value): string">blob(storage: BufferStorage; value: Value): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">borrowBlob
+  <li><a class="reference" href="#borrowBlob%2CBufferStorage%2CValue" title="borrowBlob(storage: BufferStorage; value: Value): BlobView">borrowBlob(storage: BufferStorage; value: Value): BlobView</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">createBlob
@@ -156,15 +163,27 @@
 <div class="section" id="7">
   <h1><a class="toc-backref" href="#7">Types</a></h1>
   <dl class="item">
-    <div id="BufferStorage">
+    <div id="BlobView">
+  <dt><pre><a href="#BlobView"><span class="Identifier">BlobView</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
+  <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">UncheckedArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span>
+  <span class="Identifier">len</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span></pre></dt>
+  <dd>
+    
+    
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L14" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L14" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+<div id="BufferStorage">
   <dt><pre><a href="#BufferStorage"><span class="Identifier">BufferStorage</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
   <span class="Identifier">external</span><span class="Operator">*</span><span class="Other">,</span> <span class="Identifier">maximum</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
   <span class="Identifier">maxCount</span><span class="Operator">*</span><span class="Other">,</span> <span class="Identifier">maxElements</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span></pre></dt>
   <dd>
     
     
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L14" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L14" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L17" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L17" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -181,8 +200,8 @@
   <dd>
     
     Reads the trusted host's architecture and model identity.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L124" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L124" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L138" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L138" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -195,8 +214,22 @@
   <dd>
     
     Copies opaque state for a trusted host without exposing VM internals.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L118" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L118" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L121" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L121" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+
+  </dd>
+</div>
+
+</div>
+<div id="borrowBlob-procs-all">
+  <div id="borrowBlob,BufferStorage,Value">
+  <dt><pre><span class="Keyword">proc</span> <a href="#borrowBlob%2CBufferStorage%2CValue"><span class="Identifier">borrowBlob</span></a><span class="Other">(</span><span class="Identifier">storage</span><span class="Other">:</span> <a href="#BufferStorage"><span class="Identifier">BufferStorage</span></a><span class="Other">;</span> <span class="Identifier">value</span><span class="Other">:</span> <a href="numbers.html#Value"><span class="Identifier">Value</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#BlobView"><span class="Identifier">BlobView</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">BasicError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Borrows opaque bytes without copying their payload for trusted hosts.
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L127" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L127" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -209,8 +242,8 @@
   <dd>
     
     Creates an empty mutable binary buffer.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L92" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L92" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L95" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L95" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -223,8 +256,8 @@
   <dd>
     
     Reads a returned array with release-build bounds checks.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L102" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L102" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L105" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L105" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -237,8 +270,8 @@
   <dd>
     
     Rejects wrong types, stale generations, and another VM's references.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L50" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L50" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L53" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L53" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -251,8 +284,8 @@
   <dd>
     
     Returns the size of a validated numeric array.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L96" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L96" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L99" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L99" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -265,8 +298,8 @@
   <dd>
     
     Marks roots without following opaque bytes or numeric array elements.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L144" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L144" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L158" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L158" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -279,8 +312,8 @@
   <dd>
     
     Returns native buffer and trusted host memory usage.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L46" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L46" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L49" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L49" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -293,8 +326,8 @@
   <dd>
     
     Writes a numeric returned-array element after validation.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L111" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L111" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L114" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L114" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -307,8 +340,8 @@
   <dd>
     
     Copies a numeric result into bounded runtime-owned storage.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L82" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L82" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L85" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L85" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -321,8 +354,8 @@
   <dd>
     
     Commits a complete replacement after checking its final storage size.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L130" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L130" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L144" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L144" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -335,8 +368,8 @@
   <dd>
     
     Checks capacity before allocating or changing any owned buffer.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L40" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L40" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L43" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L43" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -348,8 +381,8 @@
   <dd>
     
     Invalidates every VM buffer while retaining trusted host reservations.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L159" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L159" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L173" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L173" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -361,8 +394,8 @@
   <dd>
     
     Reclaims unreferenced buffers while preserving stable slots and aliases.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L151" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L151" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L165" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L165" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -375,8 +408,8 @@
   <dd>
     
     Validates a buffer at a public VM boundary.
-    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L58" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
-<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L58" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
+    <a href="https://github.com/treeform/bassy/tree/master/src/bassy/buffers.nim#L61" class="link-seesrc" target="_blank">Source</a>&nbsp;&nbsp;
+<a href="https://github.com/treeform/bassy/edit/devel/src/bassy/buffers.nim#L61" class="link-seesrc" target="_blank" >Edit</a>&nbsp;&nbsp;
 
   </dd>
 </div>
@@ -392,7 +425,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-30 18:31:54 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-05 19:07:11 UTC</small>
       </div>
     </div>
   </div>

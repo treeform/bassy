@@ -1,17 +1,19 @@
 nimTitle	buffers	bassy/buffers.html	module bassy/buffers		0
-nim	BufferStorage	bassy/buffers.html#BufferStorage	object BufferStorage		14
-nim	reserve	bassy/buffers.html#reserve,BufferStorage,int64	proc reserve(storage: BufferStorage; bytes: int64)		40
-nim	memoryBytes	bassy/buffers.html#memoryBytes,BufferStorage	proc memoryBytes(storage: BufferStorage): int64		46
-nim	index	bassy/buffers.html#index,BufferStorage,Value	proc index(storage: BufferStorage; value: Value): int		50
-nim	validate	bassy/buffers.html#validate,BufferStorage,Value	proc validate(storage: BufferStorage; value: Value)		58
-nim	putArray	bassy/buffers.html#putArray,BufferStorage,openArray[Value]	proc putArray(storage: var BufferStorage; values: openArray[Value]): Value		82
-nim	createBlob	bassy/buffers.html#createBlob,BufferStorage	proc createBlob(storage: var BufferStorage): Value		92
-nim	length	bassy/buffers.html#length,BufferStorage,Value	proc length(storage: BufferStorage; value: Value): int		96
-nim	get	bassy/buffers.html#get,BufferStorage,Value,int	proc get(storage: BufferStorage; value: Value; index: int): Value		102
-nim	put	bassy/buffers.html#put,BufferStorage,Value,int,Value	proc put(storage: var BufferStorage; value: Value; index: int; item: Value)		111
-nim	blob	bassy/buffers.html#blob,BufferStorage,Value	proc blob(storage: BufferStorage; value: Value): string		118
-nim	binding	bassy/buffers.html#binding,BufferStorage,Value	proc binding(storage: BufferStorage; value: Value): string		124
-nim	putBlob	bassy/buffers.html#putBlob,BufferStorage,Value,string,string	proc putBlob(storage: var BufferStorage; value: Value; bytes, binding: string)		130
-nim	mark	bassy/buffers.html#mark,BufferStorage,openArray[Value]	proc mark(storage: var BufferStorage; values: openArray[Value])		144
-nim	sweep	bassy/buffers.html#sweep,BufferStorage	proc sweep(storage: var BufferStorage)		151
-nim	reset	bassy/buffers.html#reset,BufferStorage	proc reset(storage: var BufferStorage)		159
+nim	BlobView	bassy/buffers.html#BlobView	object BlobView		14
+nim	BufferStorage	bassy/buffers.html#BufferStorage	object BufferStorage		17
+nim	reserve	bassy/buffers.html#reserve,BufferStorage,int64	proc reserve(storage: BufferStorage; bytes: int64)		43
+nim	memoryBytes	bassy/buffers.html#memoryBytes,BufferStorage	proc memoryBytes(storage: BufferStorage): int64		49
+nim	index	bassy/buffers.html#index,BufferStorage,Value	proc index(storage: BufferStorage; value: Value): int		53
+nim	validate	bassy/buffers.html#validate,BufferStorage,Value	proc validate(storage: BufferStorage; value: Value)		61
+nim	putArray	bassy/buffers.html#putArray,BufferStorage,openArray[Value]	proc putArray(storage: var BufferStorage; values: openArray[Value]): Value		85
+nim	createBlob	bassy/buffers.html#createBlob,BufferStorage	proc createBlob(storage: var BufferStorage): Value		95
+nim	length	bassy/buffers.html#length,BufferStorage,Value	proc length(storage: BufferStorage; value: Value): int		99
+nim	get	bassy/buffers.html#get,BufferStorage,Value,int	proc get(storage: BufferStorage; value: Value; index: int): Value		105
+nim	put	bassy/buffers.html#put,BufferStorage,Value,int,Value	proc put(storage: var BufferStorage; value: Value; index: int; item: Value)		114
+nim	blob	bassy/buffers.html#blob,BufferStorage,Value	proc blob(storage: BufferStorage; value: Value): string		121
+nim	borrowBlob	bassy/buffers.html#borrowBlob,BufferStorage,Value	proc borrowBlob(storage: BufferStorage; value: Value): BlobView		127
+nim	binding	bassy/buffers.html#binding,BufferStorage,Value	proc binding(storage: BufferStorage; value: Value): string		138
+nim	putBlob	bassy/buffers.html#putBlob,BufferStorage,Value,string,string	proc putBlob(storage: var BufferStorage; value: Value; bytes, binding: string)		144
+nim	mark	bassy/buffers.html#mark,BufferStorage,openArray[Value]	proc mark(storage: var BufferStorage; values: openArray[Value])		158
+nim	sweep	bassy/buffers.html#sweep,BufferStorage	proc sweep(storage: var BufferStorage)		165
+nim	reset	bassy/buffers.html#reset,BufferStorage	proc reset(storage: var BufferStorage)		173
