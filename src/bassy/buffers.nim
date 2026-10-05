@@ -11,6 +11,9 @@ type
     marked: bool
     values: seq[Value]
     bytes, binding: string
+  BlobView* = object
+    data*: ptr UncheckedArray[byte]
+    len*: int
   BufferStorage* = object
     slots: seq[Buffer]
     used: int64
@@ -120,6 +123,17 @@ proc blob*(storage: BufferStorage, value: Value): string =
   if value.kind != BlobValue:
     fail("value must be a blob")
   storage.slots[storage.index(value)].bytes
+
+proc borrowBlob*(storage: BufferStorage, value: Value): BlobView =
+  ## Borrows opaque bytes without copying their payload for trusted hosts.
+  if value.kind != BlobValue:
+    fail("value must be a blob")
+  let slot = storage.index(value)
+  result.len = storage.slots[slot].bytes.len
+  if result.len > 0:
+    result.data = cast[ptr UncheckedArray[byte]](
+      unsafeAddr storage.slots[slot].bytes[0]
+    )
 
 proc binding*(storage: BufferStorage, value: Value): string =
   ## Reads the trusted host's architecture and model identity.

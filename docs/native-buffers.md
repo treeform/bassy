@@ -32,6 +32,10 @@ as numbers or forged by passing an integer. Numeric host array arguments retain
 the existing compatibility with DIM handles.
 
 Use `getBlob`, `blobBinding`, and `putBlob` to read and replace opaque state.
+`borrowBlob` returns a checked `BlobView` with a byte pointer and length,
+without copying its payload. Trusted hosts may read this view only until
+the next buffer mutation, collection, or runtime reset. Do not retain its
+pointer across calls or expose it to BASIC.
 The optional binding string belongs to the host, for example an architecture and
 model identity. BASIC can create, pass, alias, and clear blobs, but cannot inspect
 their bytes. Clearing also removes the binding while preserving the handle.
@@ -59,8 +63,9 @@ results. Borrowed views require their owning value to remain reachable.
 
 `Limits.maxNativeMemoryBytes` defaults to 64 MiB and is separate from ordinary
 `maxMemoryBytes`. Applications may set a smaller allowance. Numeric payloads,
-blob bytes, bindings and conservative slot metadata are counted. The existing
-array-count and array-element limits also bound native buffers. Inspect usage
+blob bytes, bindings and conservative slot metadata are counted.
+`maxNativeBuffers` limits owned buffer slots independently of BASIC DIM
+arrays. `maxArrayElements` still bounds returned numeric arrays. Inspect usage
 with `nativeMemoryBytes()`. Hosts reserve models and scratch space with
 `reserveNativeMemory(bytes)` before allocation and release it with
 `releaseNativeMemory(bytes)`. Reservations persist across full resets because
